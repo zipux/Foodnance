@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Staff — InvoiceDB</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260328-3" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand"><i class="fas fa-receipt"></i> InvoiceDB</div>
+    <div class="nav-links">
+      <a href="/upload-invoice.html"><i class="fas fa-file-invoice"></i> Upload Invoice</a>
+      <a href="/invoices.html"><i class="fas fa-list-alt"></i> Invoices</a>
+      <a href="/index.html"><i class="fas fa-boxes"></i> Products</a>
+      <a href="/recipes.html"><i class="fas fa-utensils"></i> Recipes</a>
+      <a href="/finished-products.html"><i class="fas fa-tag"></i> Finished Products</a>
+      <a href="/inventory.html"><i class="fas fa-warehouse"></i> Inventory</a>
+      <a href="/suppliers.html"><i class="fas fa-truck"></i> Suppliers</a>
+      <a href="/staff.html" class="active"><i class="fas fa-users"></i> Staff</a>
+      <a href="/certifications.html"><i class="fas fa-certificate"></i> Certifications</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="page-header">
+      <h1><i class="fas fa-users"></i> Staff Directory</h1>
+      <p>Manage your team members. Assign certifications and track compliance status.</p>
+    </div>
+
+    <!-- Stats Row -->
+    <div id="staffStats" class="stats-row" style="margin-bottom:1.5rem"></div>
+
+    <section class="card">
+      <div class="card-header">
+        <h2><i class="fas fa-id-card"></i> Staff Members</h2>
+        <div class="header-actions">
+          <input type="text" id="staffSearch" class="search-input" placeholder="Search staff…" />
+          <select id="deptFilter" class="search-input" style="max-width:160px">
+            <option value="">All Departments</option>
+          </select>
+          <select id="statusFilter" class="search-input" style="max-width:140px">
+            <option value="">All Statuses</option>
+            <option value="Active">Active</option>
+            <option value="Inactive">Inactive</option>
+            <option value="On Leave">On Leave</option>
+          </select>
+          <button class="btn btn-primary" id="openAddStaffBtn"><i class="fas fa-plus"></i> Add Staff</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Role</th>
+                <th>Department</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Hire Date</th>
+                <th>Status</th>
+                <th>Certifications</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="staffBody">
+              <tr><td colspan="9" class="empty-row"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination" id="staffPagination"></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ADD / EDIT STAFF MODAL -->
+  <div class="modal-overlay hidden" id="staffModal">
+    <div class="modal" style="max-width:580px">
+      <div class="modal-header">
+        <h3 id="staffModalTitle"><i class="fas fa-user-plus"></i> Add Staff Member</h3>
+        <button class="modal-close" id="closeStaffModal"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editStaffId" />
+        <div class="form-grid">
+          <div class="form-group" style="grid-column:1/-1">
+            <label>Full Name *</label>
+            <input type="text" id="sfName" placeholder="e.g. Jane Smith" />
+          </div>
+          <div class="form-group">
+            <label>Role / Job Title</label>
+            <input type="text" id="sfRole" placeholder="e.g. Production Manager" />
+          </div>
+          <div class="form-group">
+            <label>Department</label>
+            <input type="text" id="sfDept" placeholder="e.g. Kitchen, Logistics" list="deptList" />
+            <datalist id="deptList"></datalist>
+          </div>
+          <div class="form-group">
+            <label>Email</label>
+            <input type="email" id="sfEmail" placeholder="jane@company.com" />
+          </div>
+          <div class="form-group">
+            <label>Phone</label>
+            <input type="text" id="sfPhone" placeholder="04xx xxx xxx" />
+          </div>
+          <div class="form-group">
+            <label>Hire Date</label>
+            <input type="date" id="sfHireDate" />
+          </div>
+          <div class="form-group">
+            <label>Status</label>
+            <select id="sfStatus">
+              <option value="Active">Active</option>
+              <option value="Inactive">Inactive</option>
+              <option value="On Leave">On Leave</option>
+            </select>
+          </div>
+          <div class="form-group" style="grid-column:1/-1">
+            <label>Notes</label>
+            <textarea id="sfNotes" rows="2" placeholder="Any notes about this staff member…"></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-danger btn-sm hidden" id="deleteStaffBtn"><i class="fas fa-trash"></i> Delete</button>
+        <button class="btn btn-secondary" id="cancelStaffModal">Cancel</button>
+        <button class="btn btn-success" id="saveStaffBtn"><i class="fas fa-save"></i> Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STAFF CERTIFICATIONS DETAIL MODAL -->
+  <div class="modal-overlay hidden" id="staffCertModal">
+    <div class="modal" style="max-width:700px">
+      <div class="modal-header">
+        <h3 id="staffCertModalTitle"><i class="fas fa-certificate"></i> Certifications</h3>
+        <button class="modal-close" id="closeStaffCertModal"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <div id="staffCertList"></div>
+        <div style="margin-top:1rem;text-align:center">
+          <a id="goToCertBtn" href="/certifications.html" class="btn btn-primary btn-sm">
+            <i class="fas fa-plus"></i> Manage Certifications
+          </a>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="closeStaffCertBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/static/utils.js?v=20260328-3"></script>
+  <script src="/static/staff.js?v=20260328-3"></script>
+</body>
+</html>

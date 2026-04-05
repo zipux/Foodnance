@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Products — InvoiceDB</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260328-3" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand"><i class="fas fa-receipt"></i> InvoiceDB</div>
+    <div class="nav-links">
+      <a href="/upload-invoice.html"><i class="fas fa-file-invoice"></i> Upload Invoice</a>
+      <a href="/invoices.html"><i class="fas fa-list-alt"></i> Invoices</a>
+      <a href="/index.html" class="active"><i class="fas fa-boxes"></i> Products</a>
+      <a href="/recipes.html"><i class="fas fa-utensils"></i> Recipes</a>
+      <a href="/finished-products.html"><i class="fas fa-tag"></i> Finished Products</a>
+      <a href="/inventory.html"><i class="fas fa-warehouse"></i> Inventory</a>
+      <a href="/suppliers.html"><i class="fas fa-truck"></i> Suppliers</a>
+      <a href="/staff.html"><i class="fas fa-users"></i> Staff</a>
+      <a href="/certifications.html"><i class="fas fa-certificate"></i> Certifications</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="page-header">
+      <h1><i class="fas fa-boxes"></i> Product Database</h1>
+      <p>Manage generic products and their supplier entries. Click any product to view or add supplier pricing.</p>
+    </div>
+
+    <section class="card" id="productSection">
+      <div class="card-header">
+        <h2><i class="fas fa-database"></i> Products</h2>
+        <div class="header-actions">
+          <input type="text" id="searchInput" class="search-input" placeholder="Search products…" />
+          <button class="btn btn-secondary btn-sm" id="migrateOldBtn" title="One-time: import products from old table" style="font-size:.8rem"><i class="fas fa-database"></i> Import Old Products</button>
+          <button class="btn btn-primary" id="openAddProductModal"><i class="fas fa-plus"></i> Add Product</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div id="productStats" class="stats-row"></div>
+        <div class="table-scroll">
+          <table class="data-table" id="productTable">
+            <thead>
+              <tr>
+                <th>Product Name</th>
+                <th>Category</th>
+                <th>Suppliers</th>
+                <th>Best Price / Unit</th>
+                <th>Last Purchased</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="productBody">
+              <tr><td colspan="6" class="empty-row"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination" id="pagination"></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- PRODUCT MODAL -->
+  <div class="modal-overlay hidden" id="productModal">
+    <div class="modal" style="max-width:780px">
+      <div class="modal-header">
+        <h3 id="modalTitle">Add Product</h3>
+        <button class="modal-close" id="closeModal"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editProductId" />
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Generic Product Name *</label>
+            <input type="text" id="pName" placeholder="e.g. Cream, Yeast, Grana Padano" />
+          </div>
+          <div class="form-group">
+            <label>Category *</label>
+            <select id="pCategory">
+              <option value="">— Select category —</option>
+              <option value="Ingredients">Ingredients</option>
+              <option value="Primary Packaging">Primary Packaging</option>
+              <option value="Labels & Branding">Labels &amp; Branding</option>
+              <option value="Shipping Supplies">Shipping Supplies</option>
+            </select>
+          </div>
+        </div>
+        <div class="sub-unit-section">
+          <div class="sub-unit-header">
+            <i class="fas fa-cubes"></i> Sub-unit Breakdown
+            <span class="sub-unit-hint">Optional — e.g. 1 Dozen = 12 Eggs</span>
+          </div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Sub-unit Name</label>
+              <input type="text" id="pSubUnitName" placeholder="e.g. Egg, Bottle, Can" />
+            </div>
+            <div class="form-group">
+              <label>Units per Pack</label>
+              <input type="number" id="pSubUnitQty" placeholder="e.g. 12" min="1" step="1" />
+            </div>
+          </div>
+        </div>
+        <div class="sub-unit-section" style="margin-top:1.25rem;border-color:#c7d2fe">
+          <div class="sub-unit-header" style="justify-content:space-between">
+            <span><i class="fas fa-truck"></i> Supplier Entries</span>
+            <button class="btn btn-primary btn-sm" id="openAddEntryBtn" style="display:none">
+              <i class="fas fa-plus"></i> Add Supplier Entry
+            </button>
+          </div>
+          <div id="entryForm" class="entry-form hidden">
+            <input type="hidden" id="editEntryId" />
+            <div class="form-grid" style="grid-template-columns:1fr 1fr">
+              <div class="form-group">
+                <label>Vendor *</label>
+                <select id="eSupplier"><option value="">— Select vendor —</option></select>
+              </div>
+              <div class="form-group">
+                <label>Vendor Item Name</label>
+                <input type="text" id="eVendorName" placeholder="e.g. Rossi Parmesan Grated" />
+              </div>
+              <div class="form-group">
+                <label>SKU</label>
+                <input type="text" id="eSku" placeholder="e.g. GP-1KG" />
+              </div>
+              <div class="form-group">
+                <label>Pack Size *</label>
+                <div class="pack-size-row">
+                  <input type="number" id="ePackQty" placeholder="e.g. 1" min="0" step="any" />
+                  <select id="ePackUnit">
+                    <option value="kg">kg</option><option value="g">g</option><option value="lb">lb</option>
+                    <option value="ml">ml</option><option value="L">L</option><option value="Can">Can</option>
+                    <option value="Each">Each</option><option value="Pack">Pack</option>
+                    <option value="Case">Case</option><option value="Dozen">Dozen</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Cost ($) *</label>
+                <input type="number" id="eCost" step="0.01" placeholder="0.00" />
+              </div>
+              <div class="form-group">
+                <label>Cost per Unit</label>
+                <div class="cost-per-unit-box" id="eCostPerUnitBox">
+                  <i class="fas fa-calculator"></i>
+                  <span id="eCostPerUnitDisplay">Enter cost &amp; pack size</span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Purchase Date</label>
+                <input type="date" id="ePurchaseDate" />
+              </div>
+              <div class="form-group">
+                <label>Expiry / Best Before</label>
+                <input type="date" id="eExpiry" />
+              </div>
+              <div class="form-group" style="grid-column:1/-1">
+                <label>Invoice Ref</label>
+                <div style="display:flex;gap:.5rem;align-items:center">
+                  <input type="text" id="eInvoiceRef" placeholder="e.g. INV-2025-001" style="flex:1" />
+                  <!-- hidden file input -->
+                  <input type="file" id="eInvoiceFile" accept=".pdf,.png,.jpg,.jpeg,.webp"
+                         style="display:none" onchange="handleEntryInvoiceFile(this)" />
+                  <!-- attach button -->
+                  <button type="button" id="eInvoiceAttachBtn" class="btn btn-secondary btn-sm"
+                          onclick="document.getElementById('eInvoiceFile').click()"
+                          title="Attach invoice file (PDF or image)">
+                    <i class="fas fa-paperclip"></i> Attach
+                  </button>
+                  <!-- view button — shown only once a file is attached -->
+                  <button type="button" id="eInvoiceViewBtn" class="btn btn-primary btn-sm hidden"
+                          onclick="openEntryInvoiceFile()" title="View attached invoice">
+                    <i class="fas fa-eye"></i> View
+                  </button>
+                </div>
+                <!-- upload progress / filename badge -->
+                <div id="eInvoiceFileBadge" style="margin-top:.35rem;font-size:.8rem;color:var(--text-muted);display:none">
+                  <i class="fas fa-spinner fa-spin" id="eInvoiceFileSpinner" style="display:none"></i>
+                  <i class="fas fa-file-alt" id="eInvoiceFileIcon"></i>
+                  <span id="eInvoiceFileName"></span>
+                  <button type="button" onclick="clearEntryInvoiceFile()"
+                          style="background:none;border:none;cursor:pointer;color:#ef4444;margin-left:.4rem;font-size:.85rem"
+                          title="Remove attachment"><i class="fas fa-times"></i></button>
+                </div>
+                <!-- hidden state fields -->
+                <input type="hidden" id="eInvoiceFileKey" />
+              </div>
+            </div>
+          </div>
+          <div id="entriesTableWrap" style="margin-top:.75rem">
+            <div id="entriesPlaceholder" style="color:var(--text-muted);font-size:.85rem;padding:.5rem 0">
+              Save the product first to add supplier entries.
+            </div>
+            <div class="table-scroll hidden" id="entriesTableScroll">
+              <table class="data-table" id="entriesTable">
+                <thead>
+                  <tr>
+                    <th>Vendor</th><th>Vendor Item</th><th>Pack Size</th><th>Cost</th>
+                    <th>Cost/Unit</th><th>Purchase Date</th><th>Expiry</th><th>Invoice</th><th>Variance</th><th></th>
+                  </tr>
+                </thead>
+                <tbody id="entriesBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelModal">Cancel</button>
+        <button class="btn btn-success" id="saveProductBtn"><i class="fas fa-save"></i> Save Product</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- ADD-TO-INVENTORY PROMPT -->
+  <div class="modal-overlay hidden" id="entryInvModal">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-header">
+        <h3><i class="fas fa-warehouse"></i> Add to Inventory?</h3>
+        <button class="modal-close" id="closeEntryInvModal"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <p style="margin-bottom:1rem;color:var(--text-muted);font-size:.9rem">
+          Supplier entry saved. Would you like to add this stock to Raw Materials inventory?
+        </p>
+        <div id="entryInvDetails" style="background:#f8faff;border:1px solid #c7d2fe;border-radius:8px;padding:.75rem 1rem;margin-bottom:1rem;font-size:.88rem"></div>
+        <div class="form-grid" style="grid-template-columns:1fr 1fr">
+          <div class="form-group">
+            <label>Quantity to Add</label>
+            <input type="number" id="entryInvQty" min="0.001" step="0.001" placeholder="0.00" />
+          </div>
+          <div class="form-group">
+            <label>Unit</label>
+            <input type="text" id="entryInvUnit" readonly style="background:#f1f5f9;cursor:default" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Note (optional)</label>
+          <input type="text" id="entryInvNote" placeholder="e.g. Invoice INV-2025-001" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="skipEntryInvBtn">Skip</button>
+        <button class="btn btn-success" id="confirmEntryInvBtn"><i class="fas fa-warehouse"></i> Add to Inventory</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/utils.js?v=20260328-3"></script>
+  <script src="/static/inventory.js?v=20260328-3"></script>
+  <script src="/static/suppliers.js?v=20260328-3"></script>
+  <script src="/static/products.js?v=20260328-3"></script>
+
+  <!-- ── Inline invoice-file viewer modal (shared, lightweight) ── -->
+  <div class="modal-overlay hidden" id="entryFileViewModal">
+    <div class="modal" style="max-width:860px">
+      <div class="modal-header">
+        <h3><i class="fas fa-file-invoice"></i> <span id="entryFileViewTitle">Invoice</span></h3>
+        <button class="modal-close" onclick="closeModal('entryFileViewModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body" style="padding:.75rem">
+        <div id="entryFileViewContent" style="min-height:200px"></div>
+      </div>
+      <div class="modal-footer">
+        <a id="entryFileViewOpen" href="#" target="_blank" class="btn btn-primary btn-sm">
+          <i class="fas fa-external-link-alt"></i> Open in New Tab
+        </a>
+        <a id="entryFileViewDownload" href="#" download class="btn btn-secondary btn-sm">
+          <i class="fas fa-download"></i> Download
+        </a>
+        <button class="btn btn-secondary" onclick="closeModal('entryFileViewModal')">Close</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

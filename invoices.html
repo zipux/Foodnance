@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Invoices — InvoiceDB</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260328-3" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Invoices page extras ── */
+    .invoices-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: .75rem;
+      margin-bottom: 1.25rem;
+    }
+    .filter-pill {
+      display: flex;
+      align-items: center;
+      gap: .4rem;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: .35rem .75rem;
+      font-size: .82rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+    .filter-pill select,
+    .filter-pill input[type="date"] {
+      border: none;
+      background: transparent;
+      font-size: .82rem;
+      color: var(--text-primary);
+      outline: none;
+      cursor: pointer;
+    }
+    .filter-pill label {
+      font-weight: 600;
+      color: var(--text-muted);
+      font-size: .78rem;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+    .status-tabs {
+      display: flex;
+      gap: .4rem;
+      flex-wrap: wrap;
+    }
+    .status-tab {
+      padding: .3rem .8rem;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--bg-secondary);
+      font-size: .82rem;
+      cursor: pointer;
+      color: var(--text-muted);
+      transition: all .15s;
+    }
+    .status-tab:hover  { border-color: var(--primary); color: var(--primary); }
+    .status-tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .toolbar-right {
+      margin-left: auto;
+      display: flex;
+      gap: .5rem;
+      align-items: center;
+    }
+    .inv-search {
+      padding: .38rem .75rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: .85rem;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      width: 200px;
+    }
+    .inv-search:focus { outline: none; border-color: var(--primary); }
+
+    /* Table badge */
+    .badge-processing  { background:#dbeafe; color:#1d4ed8; }
+    .badge-action      { background:#fef3c7; color:#b45309; }
+    .badge-closed      { background:#d1fae5; color:#065f46; }
+    .status-badge {
+      padding: .2rem .6rem;
+      border-radius: 12px;
+      font-size: .75rem;
+      font-weight: 600;
+      display: inline-block;
+    }
+
+    /* Detail modal extras */
+    .inv-detail-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: .75rem 1.5rem;
+      margin-bottom: 1rem;
+    }
+    .inv-detail-label { font-size: .75rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; margin-bottom: .15rem; }
+    .inv-detail-value { font-size: .92rem; color: var(--text-primary); }
+    .inv-status-select { width: 100%; padding: .4rem; border-radius: 8px; border: 1px solid var(--border); font-size: .9rem; }
+
+    .page-header-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .page-header-row h1 { margin: 0; }
+    .header-btn-group { display: flex; gap: .5rem; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand"><i class="fas fa-receipt"></i> InvoiceDB</div>
+    <div class="nav-links">
+      <a href="/upload-invoice.html"><i class="fas fa-file-invoice"></i> Upload Invoice</a>
+      <a href="/invoices.html" class="active"><i class="fas fa-list-alt"></i> Invoices</a>
+      <a href="/index.html"><i class="fas fa-boxes"></i> Products</a>
+      <a href="/recipes.html"><i class="fas fa-utensils"></i> Recipes</a>
+      <a href="/finished-products.html"><i class="fas fa-tag"></i> Finished Products</a>
+      <a href="/inventory.html"><i class="fas fa-warehouse"></i> Inventory</a>
+      <a href="/suppliers.html"><i class="fas fa-truck"></i> Suppliers</a>
+      <a href="/staff.html"><i class="fas fa-users"></i> Staff</a>
+      <a href="/certifications.html"><i class="fas fa-certificate"></i> Certifications</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="page-header-row">
+      <h1><i class="fas fa-list-alt"></i> Invoices</h1>
+      <div class="header-btn-group">
+        <a href="/upload-invoice.html" class="btn btn-primary"><i class="fas fa-plus"></i> Add Invoice</a>
+      </div>
+    </div>
+
+    <section class="card">
+      <div class="card-body">
+
+        <!-- Toolbar: filters + search -->
+        <div class="invoices-toolbar">
+          <!-- Date filter -->
+          <div class="filter-pill">
+            <i class="fas fa-calendar-alt"></i>
+            <label>Invoice Date</label>
+            <select id="dateFilter">
+              <option value="all">All Time</option>
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="90">Last 90 days</option>
+            </select>
+          </div>
+
+          <!-- Vendor filter -->
+          <div class="filter-pill">
+            <i class="fas fa-truck"></i>
+            <label>Vendor</label>
+            <select id="vendorFilter">
+              <option value="">All Vendors</option>
+            </select>
+          </div>
+
+          <!-- Status tabs -->
+          <div class="status-tabs">
+            <button class="status-tab active" data-status="all">All</button>
+            <button class="status-tab" data-status="In Processing">Processing</button>
+            <button class="status-tab" data-status="Action Required">Action Required</button>
+            <button class="status-tab" data-status="Closed">Closed</button>
+          </div>
+
+          <!-- Search -->
+          <div class="toolbar-right">
+            <input type="text" id="invSearch" class="inv-search" placeholder="Search invoices…" />
+          </div>
+        </div>
+
+        <!-- Summary stats -->
+        <div id="invStats" class="stats-row" style="margin-bottom:1rem"></div>
+
+        <!-- Table -->
+        <div class="table-scroll">
+          <table class="data-table" id="invTable">
+            <thead>
+              <tr>
+                <th style="cursor:pointer" data-sort="upload_date">Upload Date <i class="fas fa-sort"></i></th>
+                <th style="cursor:pointer" data-sort="vendor">Vendor <i class="fas fa-sort"></i></th>
+                <th style="cursor:pointer" data-sort="invoice_number">Invoice Number <i class="fas fa-sort"></i></th>
+                <th style="cursor:pointer" data-sort="invoice_date">Invoice Date <i class="fas fa-sort"></i></th>
+                <th style="cursor:pointer" data-sort="status">Invoice Status <i class="fas fa-sort"></i></th>
+                <th style="cursor:pointer;text-align:right" data-sort="total">Total <i class="fas fa-sort"></i></th>
+                <th>Payment Account</th>
+                <th style="text-align:center" title="File attached"><i class="fas fa-paperclip"></i></th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="invBody">
+              <tr><td colspan="9" class="empty-row"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination" id="invPagination"></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ── INVOICE DETAIL MODAL ── -->
+  <div class="modal-overlay hidden" id="invDetailModal">
+    <div class="modal" style="max-width:860px">
+      <div class="modal-header">
+        <h3><i class="fas fa-file-invoice-dollar"></i> Invoice Detail</h3>
+        <button class="modal-close" id="closeInvDetailModal"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="detailInvId" />
+        <div class="inv-detail-grid">
+          <div>
+            <div class="inv-detail-label">Vendor</div>
+            <div class="inv-detail-value" id="detailVendor">—</div>
+          </div>
+          <div>
+            <div class="inv-detail-label">Invoice Number</div>
+            <div class="inv-detail-value" id="detailNumber">—</div>
+          </div>
+          <div>
+            <div class="inv-detail-label">Invoice Date</div>
+            <div class="inv-detail-value" id="detailDate">—</div>
+          </div>
+          <div>
+            <div class="inv-detail-label">Upload Date</div>
+            <div class="inv-detail-value" id="detailUpload">—</div>
+          </div>
+          <div>
+            <div class="inv-detail-label">Total</div>
+            <div class="inv-detail-value" id="detailTotal">—</div>
+          </div>
+          <div>
+            <div class="inv-detail-label">Payment Account</div>
+            <div class="inv-detail-value" id="detailPayment">—</div>
+          </div>
+        </div>
+
+        <!-- ── Line items table ── -->
+        <div style="margin-bottom:1rem">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+            <span style="font-weight:600;font-size:.88rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">
+              <i class="fas fa-list-ul"></i> Line Items
+            </span>
+            <button class="btn btn-secondary btn-sm" id="addLineBtn"><i class="fas fa-plus"></i> Add Row</button>
+          </div>
+          <div class="table-scroll" style="max-height:280px;overflow-y:auto">
+            <table class="data-table" style="font-size:.82rem" id="linesTable">
+                           <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>Vendor Item</th>
+                  <th>Item Code</th>
+                  <th>Packaging</th>
+                  <th style="text-align:right">Qty</th>
+                  <th style="text-align:right">Unit Price</th>
+                  <th style="text-align:right">Line Total</th>
+                  <th></th>
+                </tr>
+              </thead>
+
+              <tbody id="linesBody">
+                <tr><td colspan="9" class="empty-row" style="font-size:.82rem"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div id="linesSubtotal" style="text-align:right;font-size:.85rem;color:var(--text-muted);margin-top:.35rem"></div>
+        </div>
+
+        <!-- ── Additional costs breakdown ── -->
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:.85rem 1rem;margin-bottom:1rem">
+          <div style="font-weight:600;font-size:.82rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:.65rem">
+            <i class="fas fa-receipt"></i> Additional Costs
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:.6rem .85rem">
+            <div>
+              <label style="font-size:.75rem;color:var(--text-muted);font-weight:600;display:block;margin-bottom:.2rem">Taxes / PST ($)</label>
+              <input type="number" id="detailTaxPst" step="0.01" min="0" placeholder="0.00"
+                style="width:100%;padding:.35rem .6rem;border:1px solid var(--border);border-radius:6px;font-size:.85rem;background:var(--bg-primary)" />
+            </div>
+            <div>
+              <label style="font-size:.75rem;color:var(--text-muted);font-weight:600;display:block;margin-bottom:.2rem">Input Tax Credits / GST·HST ($)</label>
+              <input type="number" id="detailTaxGst" step="0.01" min="0" placeholder="0.00"
+                style="width:100%;padding:.35rem .6rem;border:1px solid var(--border);border-radius:6px;font-size:.85rem;background:var(--bg-primary)" />
+            </div>
+            <div>
+              <label style="font-size:.75rem;color:var(--text-muted);font-weight:600;display:block;margin-bottom:.2rem">Delivery / Freight ($)</label>
+              <input type="number" id="detailDelivery" step="0.01" min="0" placeholder="0.00"
+                style="width:100%;padding:.35rem .6rem;border:1px solid var(--border);border-radius:6px;font-size:.85rem;background:var(--bg-primary)" />
+            </div>
+            <div>
+              <label style="font-size:.75rem;color:var(--text-muted);font-weight:600;display:block;margin-bottom:.2rem">Fuel Surcharge ($)</label>
+              <input type="number" id="detailFuelSurcharge" step="0.01" min="0" placeholder="0.00"
+                style="width:100%;padding:.35rem .6rem;border:1px solid var(--border);border-radius:6px;font-size:.85rem;background:var(--bg-primary)" />
+            </div>
+            <div>
+              <label style="font-size:.75rem;color:var(--text-muted);font-weight:600;display:block;margin-bottom:.2rem">Credit ($)</label>
+              <input type="number" id="detailCredit" step="0.01" min="0" placeholder="0.00"
+                style="width:100%;padding:.35rem .6rem;border:1px solid var(--border);border-radius:6px;font-size:.85rem;background:var(--bg-primary)" />
+            </div>
+            <div>
+              <label style="font-size:.75rem;color:var(--text-muted);font-weight:600;display:block;margin-bottom:.2rem">Other ($)</label>
+              <input type="number" id="detailOtherCost" step="0.01" min="0" placeholder="0.00"
+                style="width:100%;padding:.35rem .6rem;border:1px solid var(--border);border-radius:6px;font-size:.85rem;background:var(--bg-primary)" />
+            </div>
+            <div>
+              <label style="font-size:.75rem;color:var(--text-muted);font-weight:600;display:block;margin-bottom:.2rem">Other Description</label>
+              <input type="text" id="detailOtherDesc" placeholder="e.g. Fuel surcharge"
+                style="width:100%;padding:.35rem .6rem;border:1px solid var(--border);border-radius:6px;font-size:.85rem;background:var(--bg-primary)" />
+            </div>
+          </div>
+          <!-- Running total -->
+          <div id="detailCostSummary" style="margin-top:.75rem;padding-top:.65rem;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:.5rem 2rem;font-size:.83rem"></div>
+        </div>
+
+        <!-- File viewer — spans full width -->
+        <div id="detailFileBox" style="margin-bottom:.85rem;padding:.65rem .85rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px">
+          <span style="color:var(--text-muted);font-size:.85rem"><i class="fas fa-paperclip"></i> No file attached</span>
+        </div>
+
+        <div class="inv-detail-grid">
+          <div>
+            <div class="inv-detail-label">Status</div>
+            <select class="inv-status-select" id="detailStatus">
+              <option value="In Processing">In Processing</option>
+              <option value="Action Required">Action Required</option>
+              <option value="Closed">Closed</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Notes</label>
+          <textarea id="detailNotes" rows="3" style="width:100%;padding:.5rem;border:1px solid var(--border);border-radius:8px;resize:vertical;font-family:inherit;font-size:.9rem"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-danger btn-sm" id="deleteInvBtn"><i class="fas fa-trash"></i> Delete</button>
+        <button class="btn btn-secondary" id="closeInvDetailBtn">Cancel</button>
+        <button class="btn btn-primary" id="saveInvDetailBtn"><i class="fas fa-save"></i> Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/static/utils.js?v=20260328-3"></script>
+  <script src="/static/invoices.js?v=20260328-3"></script>
+</body>
+</html>

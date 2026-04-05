@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Certifications — InvoiceDB</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260328-3" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    .cert-badge-valid   { background:#d1fae5; color:#065f46; }
+    .cert-badge-expiring{ background:#fef3c7; color:#b45309; }
+    .cert-badge-expired { background:#fee2e2; color:#991b1b; }
+    .cert-status-badge {
+      padding:.2rem .65rem; border-radius:12px; font-size:.75rem; font-weight:600; display:inline-block;
+    }
+    .file-link { color:var(--primary); text-decoration:none; font-size:.82rem; }
+    .file-link:hover { text-decoration:underline; }
+    .upload-area {
+      border: 2px dashed var(--border); border-radius:8px; padding:1.5rem; text-align:center;
+      cursor:pointer; transition:border-color .2s; background:#fafbff;
+    }
+    .upload-area:hover { border-color:var(--primary); }
+    .upload-area.dragover { border-color:var(--primary); background:#eef2ff; }
+    .cert-type-chip {
+      display:inline-block; padding:.2rem .6rem; background:#e0e7ff; color:#3730a3;
+      border-radius:20px; font-size:.75rem; font-weight:600; margin:.1rem;
+    }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand"><i class="fas fa-receipt"></i> InvoiceDB</div>
+    <div class="nav-links">
+      <a href="/upload-invoice.html"><i class="fas fa-file-invoice"></i> Upload Invoice</a>
+      <a href="/invoices.html"><i class="fas fa-list-alt"></i> Invoices</a>
+      <a href="/index.html"><i class="fas fa-boxes"></i> Products</a>
+      <a href="/recipes.html"><i class="fas fa-utensils"></i> Recipes</a>
+      <a href="/finished-products.html"><i class="fas fa-tag"></i> Finished Products</a>
+      <a href="/inventory.html"><i class="fas fa-warehouse"></i> Inventory</a>
+      <a href="/suppliers.html"><i class="fas fa-truck"></i> Suppliers</a>
+      <a href="/staff.html"><i class="fas fa-users"></i> Staff</a>
+      <a href="/certifications.html" class="active"><i class="fas fa-certificate"></i> Certifications</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="page-header">
+      <h1><i class="fas fa-certificate"></i> Staff Certifications</h1>
+      <p>Track, upload, and manage staff compliance certifications. Get alerts for expiring documents.</p>
+    </div>
+
+    <!-- Summary Stats -->
+    <div id="certStats" class="stats-row" style="margin-bottom:1.5rem"></div>
+
+    <!-- Tabs -->
+    <div style="display:flex;gap:.5rem;margin-bottom:1.25rem;flex-wrap:wrap">
+      <button class="status-tab active" data-view="certifications" onclick="switchView('certifications',this)">
+        <i class="fas fa-certificate"></i> All Certifications
+      </button>
+      <button class="status-tab" data-view="expiring" onclick="switchView('expiring',this)">
+        <i class="fas fa-clock"></i> Expiring Soon
+      </button>
+      <button class="status-tab" data-view="expired" onclick="switchView('expired',this)">
+        <i class="fas fa-exclamation-circle"></i> Expired
+      </button>
+      <button class="status-tab" data-view="types" onclick="switchView('types',this)">
+        <i class="fas fa-tags"></i> Cert Types
+      </button>
+    </div>
+
+    <!-- CERTIFICATIONS TABLE VIEW -->
+    <section class="card" id="certView">
+      <div class="card-header">
+        <h2><i class="fas fa-list"></i> Certifications</h2>
+        <div class="header-actions">
+          <input type="text" id="certSearch" class="search-input" placeholder="Search…" />
+          <select id="certStaffFilter" class="search-input" style="max-width:160px">
+            <option value="">All Staff</option>
+          </select>
+          <select id="certTypeFilter" class="search-input" style="max-width:160px">
+            <option value="">All Types</option>
+          </select>
+          <button class="btn btn-primary" id="openAddCertBtn"><i class="fas fa-plus"></i> Add Certification</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Staff Member</th>
+                <th>Certification Type</th>
+                <th>Cert Number</th>
+                <th>Issue Date</th>
+                <th>Expiry Date</th>
+                <th>Status</th>
+                <th>Issuer</th>
+                <th>Document</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="certBody">
+              <tr><td colspan="9" class="empty-row"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination" id="certPagination"></div>
+      </div>
+    </section>
+
+    <!-- CERT TYPES VIEW -->
+    <section class="card hidden" id="typesView">
+      <div class="card-header">
+        <h2><i class="fas fa-tags"></i> Certification Types</h2>
+        <div class="header-actions">
+          <button class="btn btn-primary" id="openAddTypeBtn"><i class="fas fa-plus"></i> Add Type</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Description</th>
+                <th>Validity (months)</th>
+                <th>Mandatory</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="typeBody">
+              <tr><td colspan="5" class="empty-row"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ADD / EDIT CERTIFICATION MODAL -->
+  <div class="modal-overlay hidden" id="certModal">
+    <div class="modal" style="max-width:620px">
+      <div class="modal-header">
+        <h3 id="certModalTitle"><i class="fas fa-plus"></i> Add Certification</h3>
+        <button class="modal-close" id="closeCertModal"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editCertId" />
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Staff Member *</label>
+            <select id="certStaff">
+              <option value="">— Select staff —</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Certification Type *</label>
+            <select id="certType">
+              <option value="">— Select type —</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Certificate Number</label>
+            <input type="text" id="certNumber" placeholder="e.g. CERT-2024-001" />
+          </div>
+          <div class="form-group">
+            <label>Issuer / Training Provider</label>
+            <input type="text" id="certIssuer" placeholder="e.g. SafeFood Training Co." />
+          </div>
+          <div class="form-group">
+            <label>Issue Date *</label>
+            <input type="date" id="certIssueDate" />
+          </div>
+          <div class="form-group">
+            <label>Expiry Date *</label>
+            <input type="date" id="certExpiryDate" />
+          </div>
+        </div>
+
+        <!-- File Upload -->
+        <div class="form-group" style="margin-top:1rem">
+          <label><i class="fas fa-paperclip"></i> Upload Certificate Document</label>
+          <div class="upload-area" id="certUploadArea" onclick="document.getElementById('certFileInput').click()">
+            <i class="fas fa-cloud-upload-alt" style="font-size:1.8rem;color:var(--primary);margin-bottom:.5rem;display:block"></i>
+            <div style="font-weight:600;color:var(--text);margin-bottom:.25rem">Click or drag to upload</div>
+            <div style="font-size:.82rem;color:var(--text-muted)">PDF, PNG, JPG up to 10MB</div>
+          </div>
+          <input type="file" id="certFileInput" accept=".pdf,.png,.jpg,.jpeg" style="display:none" />
+          <div id="certFilePreview" style="margin-top:.5rem;font-size:.85rem;color:var(--text-muted)"></div>
+          <input type="hidden" id="certFileKey" />
+          <input type="hidden" id="certFileName" />
+        </div>
+
+        <div class="form-group">
+          <label>Notes</label>
+          <textarea id="certNotes" rows="2" placeholder="Any additional notes…"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-danger btn-sm hidden" id="deleteCertBtn"><i class="fas fa-trash"></i> Delete</button>
+        <button class="btn btn-secondary" id="cancelCertModal">Cancel</button>
+        <button class="btn btn-success" id="saveCertBtn"><i class="fas fa-save"></i> Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ADD / EDIT CERT TYPE MODAL -->
+  <div class="modal-overlay hidden" id="typeModal">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header">
+        <h3 id="typeModalTitle"><i class="fas fa-tag"></i> Add Certification Type</h3>
+        <button class="modal-close" id="closeTypeModal"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editTypeId" />
+        <div class="form-group">
+          <label>Name *</label>
+          <input type="text" id="typeName" placeholder="e.g. Food Handler Certificate, First Aid" />
+        </div>
+        <div class="form-group">
+          <label>Description</label>
+          <textarea id="typeDesc" rows="2" placeholder="Brief description of this certification…"></textarea>
+        </div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Validity (months)</label>
+            <input type="number" id="typeValidity" value="12" min="1" />
+          </div>
+          <div class="form-group">
+            <label>Mandatory?</label>
+            <select id="typeMandatory">
+              <option value="0">No</option>
+              <option value="1">Yes</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-danger btn-sm hidden" id="deleteTypeBtn"><i class="fas fa-trash"></i> Delete</button>
+        <button class="btn btn-secondary" id="cancelTypeModal">Cancel</button>
+        <button class="btn btn-success" id="saveTypeBtn"><i class="fas fa-save"></i> Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/static/utils.js?v=20260328-3"></script>
+  <script src="/static/certifications.js?v=20260328-3"></script>
+</body>
+</html>

@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Upload Invoice — InvoiceDB</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260328-3" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <!-- PDF.js -->
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+  <!-- xlsx for Excel support -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <style>
+    /* ── Multi-file staging area ─────────────────────────── */
+    .file-stage {
+      margin-top: 1.25rem;
+    }
+    .file-stage-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: .75rem;
+      flex-wrap: wrap;
+      gap: .5rem;
+    }
+    .file-stage-title {
+      font-weight: 600;
+      font-size: .95rem;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: .45rem;
+    }
+    .file-type-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: .3rem;
+      padding: .2rem .6rem;
+      border-radius: 99px;
+      font-size: .75rem;
+      font-weight: 600;
+      background: #ede9fe;
+      color: #5b21b6;
+    }
+    .file-type-badge.pdf  { background: #fee2e2; color: #991b1b; }
+    .file-type-badge.img  { background: #d1fae5; color: #065f46; }
+
+    /* ── Staged file list ───────────────────────────────── */
+    #stagedList {
+      display: flex;
+      flex-direction: column;
+      gap: .55rem;
+    }
+    .staged-item {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+      padding: .6rem .85rem;
+      background: #f8faff;
+      border: 1px solid #c7d2fe;
+      border-radius: 10px;
+      cursor: grab;
+      transition: background var(--transition), box-shadow var(--transition);
+      user-select: none;
+    }
+    .staged-item:active  { cursor: grabbing; }
+    .staged-item.dragging-over { background: #ede9fe; border-color: var(--primary); box-shadow: 0 0 0 2px #a5b4fc; }
+    .staged-item.being-dragged { opacity: .45; }
+    .staged-item .drag-handle {
+      color: #94a3b8;
+      font-size: 1rem;
+      flex-shrink: 0;
+      cursor: grab;
+    }
+    .staged-item .file-thumb {
+      width: 44px;
+      height: 44px;
+      object-fit: cover;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      flex-shrink: 0;
+      background: #f1f5f9;
+    }
+    .staged-item .file-thumb.pdf-thumb {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.4rem;
+      color: #dc2626;
+    }
+    .staged-item .file-info { flex: 1; min-width: 0; }
+    .staged-item .file-name {
+      font-weight: 600;
+      font-size: .85rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .staged-item .file-meta {
+      font-size: .75rem;
+      color: var(--text-muted);
+      margin-top: .1rem;
+    }
+    .staged-item .page-label {
+      font-size: .78rem;
+      font-weight: 600;
+      color: #6366f1;
+      flex-shrink: 0;
+      min-width: 52px;
+      text-align: center;
+    }
+    .staged-item .remove-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #ef4444;
+      padding: .25rem .4rem;
+      border-radius: 6px;
+      font-size: .85rem;
+      transition: background var(--transition);
+      flex-shrink: 0;
+    }
+    .staged-item .remove-btn:hover { background: #fee2e2; }
+
+    /* ── Drop-zone when files are already staged ─────────── */
+    .drop-zone.has-files {
+      padding: 1rem 1.5rem;
+      border-style: solid;
+    }
+    .drop-zone.has-files .drop-icon,
+    .drop-zone.has-files .drop-title,
+    .drop-zone.has-files .drop-sub { display: none; }
+
+    /* ── Type-mismatch warning ───────────────────────────── */
+    #typeMismatchWarn {
+      display: none;
+      margin-top: .6rem;
+      padding: .55rem .9rem;
+      background: #fff7ed;
+      border: 1px solid #fed7aa;
+      border-radius: 8px;
+      font-size: .83rem;
+      color: #c2410c;
+    }
+    #typeMismatchWarn i { margin-right: .4rem; }
+
+    /* ── Submit bar ──────────────────────────────────────── */
+    #submitBar {
+      display: none;
+      margin-top: 1rem;
+      padding: .85rem 1rem;
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      border-radius: 10px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    #submitBar .submit-info {
+      font-size: .88rem;
+      color: #166534;
+      font-weight: 500;
+    }
+    #submitBar .submit-actions { display: flex; gap: .6rem; flex-wrap: wrap; }
+
+    /* ── Cross-page warning modal ────────────────────────── */
+    #invNumWarnModal .warn-pages {
+      margin-top: .5rem;
+      font-size: .82rem;
+      background: #fff7ed;
+      border: 1px solid #fed7aa;
+      border-radius: 8px;
+      padding: .65rem .9rem;
+      line-height: 1.7;
+    }
+
+    /* ── Validation flag banner ──────────────────────────── */
+    .validation-banner {
+      margin-bottom: 1.25rem;
+      border: 2px solid #f59e0b;
+      border-radius: 12px;
+      background: #fffbeb;
+      overflow: hidden;
+    }
+    .vbanner-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: .75rem;
+      padding: .85rem 1.25rem;
+      background: #fef3c7;
+      border-bottom: 1px solid #fde68a;
+      flex-wrap: wrap;
+    }
+    .vbanner-title {
+      display: flex;
+      align-items: center;
+      gap: .55rem;
+      font-weight: 700;
+      font-size: .95rem;
+      color: #92400e;
+    }
+    .vbanner-title i { font-size: 1.05rem; color: #d97706; }
+    .vbanner-approve-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: .4rem;
+      padding: .45rem 1rem;
+      background: #d97706;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: .85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s;
+      flex-shrink: 0;
+    }
+    .vbanner-approve-btn:hover { background: #b45309; }
+    .vflag-list {
+      padding: .85rem 1.25rem .5rem;
+      display: flex;
+      flex-direction: column;
+      gap: .5rem;
+    }
+    .vflag-item {
+      display: flex;
+      align-items: flex-start;
+      gap: .6rem;
+      font-size: .875rem;
+      color: #78350f;
+      line-height: 1.55;
+    }
+    .vflag-icon {
+      color: #f59e0b;
+      margin-top: .15rem;
+      flex-shrink: 0;
+      font-size: .95rem;
+    }
+    .vbanner-note {
+      padding: .5rem 1.25rem .85rem;
+      font-size: .8rem;
+      color: #92400e;
+      margin: 0;
+    }
+
+    /* ── Raw OCR Output panel ────────────────────────────── */
+    #rawOcrSection {
+      margin-top: 1.75rem;
+    }
+    .ocr-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: .75rem;
+      flex-wrap: wrap;
+      margin-bottom: .85rem;
+    }
+    .ocr-panel-title {
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+      font-size: 1rem;
+      font-weight: 700;
+      color: #1e293b;
+    }
+    .ocr-panel-title .ocr-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: .3rem;
+      padding: .18rem .55rem;
+      border-radius: 99px;
+      font-size: .72rem;
+      font-weight: 700;
+      background: #e0f2fe;
+      color: #0369a1;
+      letter-spacing: .02em;
+    }
+    .ocr-pages {
+      display: flex;
+      flex-direction: column;
+      gap: .9rem;
+    }
+    .ocr-page-block {
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      overflow: hidden;
+      background: #fff;
+    }
+    .ocr-page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: .55rem .9rem;
+      background: #f8fafc;
+      border-bottom: 1px solid #e2e8f0;
+      cursor: pointer;
+      user-select: none;
+    }
+    .ocr-page-header:hover { background: #f1f5f9; }
+    .ocr-page-label {
+      font-size: .82rem;
+      font-weight: 600;
+      color: #334155;
+      display: flex;
+      align-items: center;
+      gap: .45rem;
+    }
+    .ocr-page-label .page-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #6366f1;
+      color: #fff;
+      font-size: .7rem;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .ocr-char-count {
+      font-size: .72rem;
+      color: #94a3b8;
+    }
+    .ocr-toggle-icon {
+      font-size: .78rem;
+      color: #94a3b8;
+      transition: transform .2s;
+    }
+    .ocr-page-block.collapsed .ocr-toggle-icon { transform: rotate(-90deg); }
+    .ocr-page-body {
+      padding: .75rem .9rem;
+    }
+    .ocr-page-block.collapsed .ocr-page-body { display: none; }
+    .ocr-text {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: .76rem;
+      line-height: 1.65;
+      color: #1e293b;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: .75rem 1rem;
+      max-height: 320px;
+      overflow-y: auto;
+    }
+    .ocr-copy-btn {
+      margin-top: .5rem;
+      font-size: .75rem;
+      padding: .25rem .6rem;
+    }
+  </style>
+</head>
+<body>
+  <!-- NAV -->
+  <nav class="navbar">
+    <div class="nav-brand">
+      <i class="fas fa-receipt"></i> InvoiceDB
+    </div>
+    <div class="nav-links">
+      <a href="/upload-invoice.html" class="active"><i class="fas fa-file-invoice"></i> Upload Invoice</a>
+      <a href="/invoices.html"><i class="fas fa-list-alt"></i> Invoices</a>
+      <a href="/index.html"><i class="fas fa-boxes"></i> Products</a>
+      <a href="/recipes.html"><i class="fas fa-utensils"></i> Recipes</a>
+      <a href="/finished-products.html"><i class="fas fa-tag"></i> Finished Products</a>
+      <a href="/inventory.html"><i class="fas fa-warehouse"></i> Inventory</a>
+      <a href="/suppliers.html"><i class="fas fa-truck"></i> Suppliers</a>
+      <a href="/staff.html"><i class="fas fa-users"></i> Staff</a>
+      <a href="/certifications.html"><i class="fas fa-certificate"></i> Certifications</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <!-- HERO HEADER -->
+    <div class="page-header">
+      <h1><i class="fas fa-file-invoice"></i> Upload Invoice</h1>
+      <p>Upload invoices (PDF or images) and automatically extract products into your database. Multi-page invoices are supported — add all pages, reorder if needed, then submit.</p>
+    </div>
+
+    <!-- AI STATUS SECTION -->
+    <section class="card" style="margin-bottom:1.25rem">
+      <div class="card-body" style="padding:1rem 1.25rem">
+        <div style="display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:.5rem">
+            <i class="fas fa-robot" style="color:var(--primary);font-size:1.1rem"></i>
+            <span style="font-weight:600">GPT-4o Vision</span>
+          </div>
+          <div id="apiKeyStatus" style="font-size:.85rem;color:var(--text-muted)">
+            <i class="fas fa-spinner fa-spin"></i> Checking…
+          </div>
+          <div style="display:flex;align-items:center;gap:.5rem;margin-left:.5rem">
+            <i class="fas fa-file-search" style="color:#0369a1;font-size:1.05rem"></i>
+            <span style="font-weight:600">Azure OCR</span>
+          </div>
+          <div id="azureKeyStatus" style="font-size:.85rem;color:var(--text-muted)">
+            <i class="fas fa-spinner fa-spin"></i> Checking…
+          </div>
+        </div>
+        <p style="margin:.5rem 0 0;font-size:.78rem;color:var(--text-muted)">
+          <i class="fas fa-shield-alt"></i> API keys are stored securely on the server — never exposed to the browser.
+          When Azure OCR is configured, it runs first and its raw text is shown below extracted results for every upload.
+        </p>
+      </div>
+    </section>
+
+    <!-- UPLOAD SECTION -->
+    <section class="card upload-card">
+      <div class="card-header">
+        <h2><i class="fas fa-upload"></i> Upload Invoice</h2>
+      </div>
+      <div class="card-body">
+
+        <!-- ── Drop zone ──────────────────────────────────── -->
+        <div class="drop-zone" id="dropZone">
+          <i class="fas fa-cloud-upload-alt drop-icon"></i>
+          <p class="drop-title">Drag &amp; drop invoice pages here</p>
+          <p class="drop-sub">Supports PDF or JPG/PNG. All pages must be the same type.</p>
+          <label class="btn btn-primary" for="fileInput">
+            <i class="fas fa-folder-open"></i> Browse Files
+          </label>
+          <!-- multiple — allows picking several files at once -->
+          <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg" multiple hidden />
+        </div>
+
+        <!-- ── Type mismatch warning ──────────────────────── -->
+        <div id="typeMismatchWarn">
+          <i class="fas fa-exclamation-triangle"></i>
+          <strong>Mixed file types are not allowed.</strong>
+          Your batch already contains <span id="existingTypeLabel"></span> files.
+          Please add only <span id="allowedTypeLabel"></span> files, or
+          <a href="#" id="clearBatchLink" style="color:#c2410c;font-weight:600">clear the batch</a> and start fresh.
+        </div>
+
+        <!-- ── Staged file list ───────────────────────────── -->
+        <div class="file-stage hidden" id="fileStage">
+          <div class="file-stage-header">
+            <div class="file-stage-title">
+              <i class="fas fa-layer-group"></i>
+              Pages in this batch
+              <span id="fileTypeBadge" class="file-type-badge"></span>
+            </div>
+            <div style="display:flex;gap:.5rem;align-items:center">
+              <label class="btn btn-secondary btn-sm" for="fileInput" style="cursor:pointer">
+                <i class="fas fa-plus"></i> Add More
+              </label>
+              <button class="btn btn-danger btn-sm" id="clearBatchBtn">
+                <i class="fas fa-trash"></i> Clear All
+              </button>
+            </div>
+          </div>
+
+          <div id="stagedList"></div>
+
+          <!-- ── Submit bar ───────────────────────────────── -->
+          <div id="submitBar">
+            <div class="submit-info">
+              <i class="fas fa-check-circle"></i>
+              <span id="submitInfoText">Ready to process</span>
+            </div>
+            <div class="submit-actions">
+              <button class="btn btn-success" id="submitBatchBtn">
+                <i class="fas fa-magic"></i> Submit &amp; Process
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Invoice metadata fields (shown after processing) -->
+        <div id="invoiceMeta" class="hidden" style="margin-top:1.25rem">
+          <h3 class="section-title"><i class="fas fa-info-circle"></i> Invoice Details</h3>
+          <div class="form-grid" style="grid-template-columns:1fr 1fr 1fr 1fr">
+            <div class="form-group">
+              <label>Vendor</label>
+              <input type="text" id="metaVendor" placeholder="e.g. Bosa Foods" />
+            </div>
+            <div class="form-group">
+              <label>Invoice Number</label>
+              <input type="text" id="metaInvoiceNum" placeholder="e.g. 1043936" />
+            </div>
+            <div class="form-group">
+              <label>Invoice Date</label>
+              <input type="date" id="metaInvoiceDate" />
+            </div>
+            <div class="form-group">
+              <label>Total ($)</label>
+              <input type="number" id="metaTotal" step="0.01" placeholder="0.00" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Additional Costs (shown after processing, before saving) -->
+        <div id="invoiceCosts" class="hidden" style="margin-top:1rem">
+          <h3 class="section-title"><i class="fas fa-dollar-sign"></i> Additional Costs — Review &amp; Edit</h3>
+          <p class="hint">These values were extracted by GPT-4o. Verify and correct before saving.</p>
+          <div class="form-grid" style="grid-template-columns:1fr 1fr 1fr 1fr">
+            <div class="form-group">
+              <label>GST/HST ($)</label>
+              <input type="number" id="metaTaxGst" step="0.01" placeholder="0.00" />
+            </div>
+            <div class="form-group">
+              <label>PST ($)</label>
+              <input type="number" id="metaTaxPst" step="0.01" placeholder="0.00" />
+            </div>
+            <div class="form-group">
+              <label>Delivery / Freight ($)</label>
+              <input type="number" id="metaDelivery" step="0.01" placeholder="0.00" />
+            </div>
+            <div class="form-group">
+              <label>Fuel Surcharge ($)</label>
+              <input type="number" id="metaFuelSurcharge" step="0.01" placeholder="0.00" />
+            </div>
+          </div>
+          <div class="form-grid" style="grid-template-columns:1fr 1fr 1fr 1fr; margin-top:0.5rem">
+            <div class="form-group">
+              <label>Credit / Discount ($)</label>
+              <input type="number" id="metaCredit" step="0.01" placeholder="0.00" />
+            </div>
+            <div class="form-group">
+              <label>Other Cost ($)</label>
+              <input type="number" id="metaOtherCost" step="0.01" placeholder="0.00" />
+            </div>
+            <div class="form-group" style="grid-column: span 2">
+              <label>Other Cost Description</label>
+              <input type="text" id="metaOtherDesc" placeholder="e.g. Environmental fee" />
+            </div>
+          </div>
+        </div>
+
+        <!-- parsing progress -->
+        <div id="parseProgress" class="parse-progress hidden">
+          <div class="progress-bar-wrap">
+            <div class="progress-bar" id="progressBar"></div>
+          </div>
+          <p id="parseStatus">Reading file…</p>
+        </div>
+
+        <!-- Uploaded invoice image preview -->
+        <div id="invoiceImagePreview" class="hidden" style="margin-top:1.25rem">
+          <h3 class="section-title"><i class="fas fa-image"></i> Uploaded Invoice</h3>
+          <div id="invoiceImageContainer" style="max-height:500px; overflow-y:auto; border:1px solid var(--border); border-radius:10px; background:#f8fafc; padding:0.5rem; text-align:center;">
+          </div>
+        </div>
+
+        <!-- extracted preview table -->
+        <div id="extractedSection" class="hidden">
+          <h3 class="section-title"><i class="fas fa-table"></i> Extracted Items — Review &amp; Edit</h3>
+          <p class="hint">Review the extracted data below. Edit any field before saving to the database.</p>
+          <div class="table-scroll">
+            <table class="data-table" id="extractedTable">
+                            <thead>
+                <tr>
+                  <th>Product Name</th>
+                  <th>Brand</th>
+                  <th>SKU</th>
+                  <th>Pack Size</th>
+                  <th>Qty</th>
+                  <th>Unit Price ($)</th>
+                  <th>Line Total</th>
+                  <th>Invoice Ref</th>
+                  <th></th>
+                </tr>
+              </thead>
+
+              <tbody id="extractedBody"></tbody>
+            </table>
+          </div>
+          <div class="action-row">
+            <button class="btn btn-secondary" id="addRowBtn"><i class="fas fa-plus"></i> Add Row</button>
+            <button class="btn btn-success" id="saveAllBtn"><i class="fas fa-save"></i> Save All to Database</button>
+          </div>
+        </div>
+
+        <!-- ── Raw OCR Output (shown after Azure processes files) ── -->
+        <div id="rawOcrSection" class="hidden">
+          <div class="ocr-panel-header">
+            <div class="ocr-panel-title">
+              <i class="fas fa-text-height" style="color:#0369a1"></i>
+              Raw OCR Output
+              <span class="ocr-badge"><i class="fas fa-cloud"></i> Azure Document Intelligence</span>
+            </div>
+            <div style="display:flex;gap:.5rem;align-items:center">
+              <button class="btn btn-secondary btn-sm" id="ocrCopyAllBtn" title="Copy all pages text">
+                <i class="fas fa-copy"></i> Copy All
+              </button>
+              <button class="btn btn-secondary btn-sm" id="ocrCollapseAllBtn">
+                <i class="fas fa-compress-alt"></i> Collapse All
+              </button>
+              <button class="btn btn-secondary btn-sm" id="ocrExpandAllBtn">
+                <i class="fas fa-expand-alt"></i> Expand All
+              </button>
+            </div>
+          </div>
+          <div class="ocr-pages" id="ocrPages"></div>
+        </div>
+
+        <!-- ── GPT-4o Raw Response (shown after AI parsing) ── -->
+        <div id="rawGptSection" class="hidden" style="margin-top:1.5rem">
+          <div class="ocr-panel-header">
+            <div class="ocr-panel-title">
+              <i class="fas fa-robot" style="color:#7c3aed"></i>
+              GPT-4o Raw Response
+              <span class="ocr-badge" style="background:#ede9fe;color:#5b21b6"><i class="fas fa-brain"></i> OpenAI GPT-4o</span>
+            </div>
+            <div style="display:flex;gap:.5rem;align-items:center">
+              <button class="btn btn-secondary btn-sm" id="gptCopyAllBtn" title="Copy all GPT-4o responses">
+                <i class="fas fa-copy"></i> Copy All
+              </button>
+              <button class="btn btn-secondary btn-sm" id="gptCollapseAllBtn">
+                <i class="fas fa-compress-alt"></i> Collapse All
+              </button>
+              <button class="btn btn-secondary btn-sm" id="gptExpandAllBtn">
+                <i class="fas fa-expand-alt"></i> Expand All
+              </button>
+            </div>
+          </div>
+          <p style="font-size:.82rem;color:#6b7280;margin:.25rem 0 .75rem">
+            Exact JSON returned by GPT-4o before any transformation. Compare with Azure OCR above and the saved database values to locate where data changes.
+          </p>
+          <div class="ocr-pages" id="gptPages"></div>
+        </div>
+
+        <!-- manual entry fallback -->
+        <div id="manualSection" class="hidden">
+          <h3 class="section-title"><i class="fas fa-keyboard"></i> Manual Entry</h3>
+          <p class="hint">Could not auto-extract items. Fill in the product details manually and add them to the database.</p>
+          <div id="manualRows"></div>
+          <div class="action-row">
+            <button class="btn btn-secondary" id="addManualRowBtn"><i class="fas fa-plus"></i> Add Row</button>
+            <button class="btn btn-success" id="saveManualBtn"><i class="fas fa-save"></i> Save All to Database</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- INVENTORY PROMPT MODAL -->
+  <div class="modal-overlay hidden" id="invPromptModal">
+    <div class="modal" style="max-width:500px">
+      <div class="modal-header">
+        <h3><i class="fas fa-warehouse"></i> Add to Inventory?</h3>
+        <button class="modal-close" id="closeInvPromptModal"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <p style="margin-bottom:1rem;color:var(--text-muted);font-size:.9rem">
+          Products saved to the database. Would you also like to add them to your Raw Materials inventory?
+        </p>
+        <div id="invPromptList" style="max-height:280px;overflow-y:auto"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="skipInvPromptBtn">Skip</button>
+        <button class="btn btn-success" id="confirmInvPromptBtn"><i class="fas fa-warehouse"></i> Add to Inventory</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- INVOICE-NUMBER MISMATCH WARNING MODAL -->
+  <div class="modal-overlay hidden" id="invNumWarnModal">
+    <div class="modal" style="max-width:500px">
+      <div class="modal-header">
+        <h3 style="color:#c2410c"><i class="fas fa-exclamation-triangle"></i> Different Invoices Detected</h3>
+        <button class="modal-close" onclick="closeModal('invNumWarnModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <p style="color:var(--text-muted);font-size:.9rem;margin-bottom:.75rem">
+          These pages appear to be from <strong>different invoices</strong>. Please check and try again.
+        </p>
+        <div id="invNumWarnDetails" class="warn-pages"></div>
+      </div>
+      <div class="modal-footer" style="gap:.6rem">
+        <button class="btn btn-secondary" onclick="closeModal('invNumWarnModal')">Go Back &amp; Fix</button>
+        <button class="btn btn-warning" id="ignoreInvNumWarnBtn">
+          <i class="fas fa-exclamation"></i> Proceed Anyway
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/static/utils.js?v=20260328-3"></script>
+  <script src="/static/products.js?v=20260328-3"></script>
+  <script src="/static/inventory.js?v=20260328-3"></script>
+  <script src="/static/invoices.js?v=20260328-3"></script>
+  <script src="/static/invoice.js?v=20260328-3"></script>
+</body>
+</html>

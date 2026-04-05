@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Finished Products</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260328-3" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <!-- NAV -->
+  <nav class="navbar">
+    <div class="nav-brand">
+      <i class="fas fa-receipt"></i> InvoiceDB
+    </div>
+    <div class="nav-links">
+      <a href="/upload-invoice.html"><i class="fas fa-file-invoice"></i> Upload Invoice</a>
+      <a href="/invoices.html"><i class="fas fa-list-alt"></i> Invoices</a>
+      <a href="/index.html"><i class="fas fa-boxes"></i> Products</a>
+      <a href="/recipes.html"><i class="fas fa-utensils"></i> Recipes</a>
+      <a href="/finished-products.html" class="active"><i class="fas fa-tag"></i> Finished Products</a>
+      <a href="/inventory.html"><i class="fas fa-warehouse"></i> Inventory</a>
+      <a href="/suppliers.html"><i class="fas fa-truck"></i> Suppliers</a>
+      <a href="/staff.html"><i class="fas fa-users"></i> Staff</a>
+      <a href="/certifications.html"><i class="fas fa-certificate"></i> Certifications</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <!-- HERO HEADER -->
+    <div class="page-header">
+      <h1><i class="fas fa-tag"></i> Finished Products</h1>
+      <p>Assemble sellable products from recipes and packaging. See total cost, selling price, and profit at a glance.</p>
+    </div>
+
+    <div class="recipe-layout">
+      <!-- LEFT: Finished Product Form -->
+      <section class="card recipe-form-card">
+        <div class="card-header">
+          <h2 id="fpFormTitle"><i class="fas fa-plus-circle"></i> New Finished Product</h2>
+        </div>
+        <div class="card-body">
+          <input type="hidden" id="editFpId" />
+
+          <div class="form-group">
+            <label>Product Name *</label>
+            <input type="text" id="fpName" placeholder="e.g. Pesto Jar 200g" />
+          </div>
+          <div class="form-group" style="margin-top:.75rem">
+            <label>Description</label>
+            <textarea id="fpDesc" rows="2" placeholder="Short description…"></textarea>
+          </div>
+
+          <!-- Recipe lines -->
+          <h3 class="section-title"><i class="fas fa-utensils"></i> Recipes</h3>
+          <div id="fpRecipeLines"></div>
+          <button class="btn btn-secondary btn-sm" id="addFpRecipeBtn">
+            <i class="fas fa-plus"></i> Add Recipe
+          </button>
+
+          <!-- Product / packaging lines -->
+          <h3 class="section-title" style="margin-top:1.25rem"><i class="fas fa-box"></i> Products / Packaging</h3>
+          <div id="fpProductLines"></div>
+          <button class="btn btn-secondary btn-sm" id="addFpProductBtn">
+            <i class="fas fa-plus"></i> Add Product
+          </button>
+
+          <!-- Cost + Selling Price summary -->
+          <div class="fp-cost-summary" id="fpCostSummary">
+            <div class="fp-cost-row">
+              <span><i class="fas fa-calculator"></i> Total Cost</span>
+              <span class="fp-cost-value" id="fpTotalCostDisplay">$0.00</span>
+            </div>
+            <div class="fp-cost-row">
+              <span><i class="fas fa-tag"></i> Selling Price</span>
+              <div class="pack-size-row" style="width:160px">
+                <span class="fp-currency">$</span>
+                <input type="number" id="fpSellingPrice" placeholder="0.00" min="0" step="0.01"
+                       oninput="recalcFpCosts()" style="text-align:right" />
+              </div>
+            </div>
+            <div class="fp-divider"></div>
+            <div class="fp-cost-row fp-profit-row" id="fpProfitRow">
+              <span id="fpProfitLabel"><i class="fas fa-chart-line"></i> Profit / Loss</span>
+              <span class="fp-profit-value" id="fpProfitDisplay">—</span>
+            </div>
+            <div class="fp-cost-row" style="opacity:.8;font-size:.82rem">
+              <span>Margin</span>
+              <span id="fpMarginDisplay" style="font-weight:600">—</span>
+            </div>
+          </div>
+
+          <div class="action-row">
+            <button class="btn btn-secondary" id="clearFpBtn"><i class="fas fa-times"></i> Clear</button>
+            <button class="btn btn-success" id="saveFpBtn"><i class="fas fa-save"></i> Save</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT: Saved Finished Products List -->
+      <section class="card recipe-list-card">
+        <div class="card-header">
+          <h2><i class="fas fa-store"></i> Saved Products</h2>
+          <input type="text" id="fpSearch" class="search-input" placeholder="Search…" />
+        </div>
+        <div class="card-body">
+          <div id="fpListContainer">
+            <div class="empty-row"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- DETAIL MODAL -->
+    <div class="modal-overlay hidden" id="fpDetailModal">
+      <div class="modal modal-wide">
+        <div class="modal-header">
+          <h3 id="fpDetailName">Product Detail</h3>
+          <button class="modal-close" id="closeFpDetailModal"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body" id="fpDetailBody"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="closeFpDetailBtn">Close</button>
+          <button class="btn btn-primary" id="editFromFpDetailBtn"><i class="fas fa-edit"></i> Edit</button>
+          <button class="btn btn-success" id="packRunBtn"><i class="fas fa-box-open"></i> Pack Run</button>
+          <button class="btn btn-danger" id="deleteFromFpDetailBtn"><i class="fas fa-trash"></i> Delete</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PACK RUN MODAL -->
+  <div class="modal-overlay hidden" id="packRunModal">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header">
+        <h3><i class="fas fa-box-open"></i> Pack Run</h3>
+        <button class="modal-close" id="closePackRunModal"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <p style="margin-bottom:1rem;color:var(--text-muted);font-size:.9rem">
+          Enter how many units you are packing. Batch stock and packaging will be automatically deducted from inventory.
+        </p>
+        <div style="font-weight:600;font-size:1rem;margin-bottom:1rem" id="prFpName"></div>
+        <div class="form-group">
+          <label>Number of Units to Pack *</label>
+          <input type="number" id="prUnits" min="1" step="1" placeholder="e.g. 20" />
+        </div>
+        <div class="form-group">
+          <label>Note (optional)</label>
+          <input type="text" id="prNote" placeholder="e.g. Afternoon packing run" />
+        </div>
+        <div id="prDeductionPreview" style="margin-top:1rem"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelPackRunModal">Cancel</button>
+        <button class="btn btn-success" id="confirmPackRunBtn"><i class="fas fa-box-open"></i> Confirm Pack Run</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/static/utils.js?v=20260328-3"></script>
+  <script src="/static/inventory.js?v=20260328-3"></script>
+  <script src="/static/finished-products.js?v=20260328-3"></script>
+</body>
+</html>

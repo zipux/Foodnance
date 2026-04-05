@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Recipe Builder</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260328-3" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <!-- NAV -->
+  <nav class="navbar">
+    <div class="nav-brand">
+      <i class="fas fa-receipt"></i> InvoiceDB
+    </div>
+    <div class="nav-links">
+      <a href="/upload-invoice.html"><i class="fas fa-file-invoice"></i> Upload Invoice</a>
+      <a href="/invoices.html"><i class="fas fa-list-alt"></i> Invoices</a>
+      <a href="/index.html"><i class="fas fa-boxes"></i> Products</a>
+      <a href="/recipes.html" class="active"><i class="fas fa-utensils"></i> Recipes</a>
+      <a href="/finished-products.html"><i class="fas fa-tag"></i> Finished Products</a>
+      <a href="/inventory.html"><i class="fas fa-warehouse"></i> Inventory</a>
+      <a href="/suppliers.html"><i class="fas fa-truck"></i> Suppliers</a>
+      <a href="/staff.html"><i class="fas fa-users"></i> Staff</a>
+      <a href="/certifications.html"><i class="fas fa-certificate"></i> Certifications</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <!-- HERO HEADER -->
+    <div class="page-header">
+      <h1><i class="fas fa-utensils"></i> Recipe Builder</h1>
+      <p>Create recipes from your product database and instantly calculate total ingredient costs.</p>
+    </div>
+
+    <div class="recipe-layout">
+      <!-- LEFT: Recipe Form -->
+      <section class="card recipe-form-card">
+        <div class="card-header">
+          <h2 id="recipeFormTitle"><i class="fas fa-plus-circle"></i> New Recipe</h2>
+        </div>
+        <div class="card-body">
+          <input type="hidden" id="editRecipeId" />
+
+          <div class="form-group">
+            <label>Recipe Name *</label>
+            <input type="text" id="recipeName" placeholder="e.g. Tomato Pasta Sauce" />
+          </div>
+          <div class="form-group">
+            <label>Description</label>
+            <textarea id="recipeDesc" rows="2" placeholder="Short description…"></textarea>
+          </div>
+          <div class="form-group">
+            <label>Yield</label>
+            <div class="pack-size-row">
+              <input type="number" id="recipeYieldQty" placeholder="e.g. 2" min="0" step="any" />
+              <select id="recipeYieldUnit">
+                <option value="kg">kg</option>
+                <option value="g">g</option>
+                <option value="lb">lb</option>
+                <option value="ml">ml</option>
+                <option value="L">L</option>
+                <option value="Can">Can</option>
+                <option value="Each">Each</option>
+                <option value="Pack">Pack</option>
+                <option value="Case">Case</option>
+                <option value="Dozen">Dozen</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Ingredient lines -->
+          <h3 class="section-title"><i class="fas fa-list"></i> Ingredients</h3>
+          <div id="ingredientLines"></div>
+          <button class="btn btn-secondary btn-sm" id="addIngredientBtn">
+            <i class="fas fa-plus"></i> Add Ingredient
+          </button>
+
+          <!-- Cost summary -->
+          <div class="cost-summary" id="costSummary">
+            <div class="cost-row">
+              <span>Total Recipe Cost</span>
+              <span class="cost-value" id="totalCostDisplay">$0.00</span>
+            </div>
+            <div class="cost-row sub">
+              <span id="costPerUnitLabel">Cost per kg</span>
+              <span class="cost-value" id="costPerServingDisplay">$0.00</span>
+            </div>
+          </div>
+
+          <div class="action-row">
+            <button class="btn btn-secondary" id="clearRecipeBtn"><i class="fas fa-times"></i> Clear</button>
+            <button class="btn btn-success" id="saveRecipeBtn"><i class="fas fa-save"></i> Save Recipe</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT: Saved Recipes List -->
+      <section class="card recipe-list-card">
+        <div class="card-header">
+          <h2><i class="fas fa-book"></i> Saved Recipes</h2>
+          <input type="text" id="recipeSearch" class="search-input" placeholder="Search recipes…" />
+        </div>
+        <div class="card-body">
+          <div id="recipeListContainer">
+            <div class="empty-row"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- RECIPE DETAIL MODAL -->
+    <div class="modal-overlay hidden" id="recipeDetailModal">
+      <div class="modal modal-wide">
+        <div class="modal-header">
+          <h3 id="detailRecipeName">Recipe Detail</h3>
+          <button class="modal-close" id="closeDetailModal"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body" id="recipeDetailBody">
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="closeDetailBtn">Close</button>
+          <button class="btn btn-primary" id="editFromDetailBtn"><i class="fas fa-edit"></i> Edit Recipe</button>
+          <button class="btn btn-success" id="produceBatchBtn"><i class="fas fa-blender"></i> Produce Batch</button>
+          <button class="btn btn-danger" id="deleteFromDetailBtn"><i class="fas fa-trash"></i> Delete</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PRODUCE BATCH MODAL -->
+  <div class="modal-overlay hidden" id="produceBatchModal">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-header">
+        <h3><i class="fas fa-blender"></i> Produce Batch</h3>
+        <button class="modal-close" id="closeProduceBatchModal"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <p style="margin-bottom:1rem;color:var(--text-muted);font-size:.9rem">
+          Enter how much you are producing. Ingredients will be automatically deducted from Raw Materials inventory.
+        </p>
+        <div style="font-weight:600;font-size:1rem;margin-bottom:1rem" id="pbRecipeName"></div>
+        <div class="form-grid" style="grid-template-columns:1fr 1fr">
+          <div class="form-group">
+            <label>Batch Quantity *</label>
+            <input type="number" id="pbQty" min="0.001" step="0.001" placeholder="e.g. 5" />
+          </div>
+          <div class="form-group">
+            <label>Unit</label>
+            <select id="pbUnit">
+              <option value="kg">kg</option>
+              <option value="g">g</option>
+              <option value="lb">lb</option>
+              <option value="ml">ml</option>
+              <option value="L">L</option>
+              <option value="Can">Can</option>
+              <option value="Each">Each</option>
+              <option value="Pack">Pack</option>
+              <option value="Case">Case</option>
+              <option value="Dozen">Dozen</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Note (optional)</label>
+          <input type="text" id="pbNote" placeholder="e.g. Morning production run" />
+        </div>
+        <div id="pbIngredientPreview" style="margin-top:1rem"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelProduceBatchModal">Cancel</button>
+        <button class="btn btn-success" id="confirmProduceBatchBtn"><i class="fas fa-blender"></i> Confirm Production</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/static/utils.js?v=20260328-3"></script>
+  <script src="/static/inventory.js?v=20260328-3"></script>
+  <script src="/static/recipes.js?v=20260328-3"></script>
+</body>
+</html>
