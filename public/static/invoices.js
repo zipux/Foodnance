@@ -315,7 +315,7 @@ async function loadAndRenderLines(invoiceId) {
 function renderLinesTable() {
   const tbody = document.getElementById('linesBody');
   if (!currentLines.length) {
-    tbody.innerHTML = `<tr><td colspan="9" class="empty-row" style="font-size:.82rem">
+    tbody.innerHTML = `<tr><td colspan="8" class="empty-row" style="font-size:.82rem">
       <i class="fas fa-info-circle"></i> No line items yet — add rows or re-upload invoice with AI extraction.
     </td></tr>`;
     document.getElementById('linesSubtotal').textContent = '';
@@ -326,11 +326,10 @@ function renderLinesTable() {
     <tr data-idx="${i}">
       <td><input type="text"   class="line-input" data-idx="${i}" data-f="product_name" value="${esc(l.product_name||'')}" placeholder="Product" style="width:110px"/></td>
       <td><input type="text"   class="line-input" data-idx="${i}" data-f="vendor_item"  value="${esc(l.vendor_item ||'')}" placeholder="Vendor item" style="width:110px"/></td>
-      <td><input type="text"   class="line-input" data-idx="${i}" data-f="category"     value="${esc(l.category    ||'')}" placeholder="Category" style="width:90px"/></td>
       <td><input type="text"   class="line-input" data-idx="${i}" data-f="item_code"    value="${esc(l.item_code   ||'')}" placeholder="Code" style="width:72px"/></td>
       <td><input type="text"   class="line-input" data-idx="${i}" data-f="packaging"    value="${esc(l.packaging   ||'')}" placeholder="Pkg" style="width:72px"/></td>
-      <td><input type="number" class="line-input line-num" data-idx="${i}" data-f="price" value="${l.price||''}" placeholder="0.00" step="0.01" style="width:72px;text-align:right"/></td>
-      <td><input type="number" class="line-input line-num" data-idx="${i}" data-f="qty"   value="${l.qty  ||''}" placeholder="0" step="any"  style="width:58px;text-align:right"/></td>
+      <td><input type="number" class="line-input line-num" data-idx="${i}" data-f="qty"   value="${l.qty  ||''}" placeholder="1" step="any"  style="width:58px;text-align:right"/></td>
+      <td><input type="number" class="line-input line-num" data-idx="${i}" data-f="price" value="${l.price||''}" placeholder="0.00" step="0.01" style="width:80px;text-align:right"/></td>
       <td style="text-align:right;font-weight:600;font-size:.85rem;white-space:nowrap">
 
         $${((parseFloat(l.price)||0) * (parseFloat(l.qty)||0)).toFixed(2)}
@@ -352,7 +351,7 @@ function renderLinesTable() {
       const row   = tbody.querySelector(`tr[data-idx="${idx}"]`);
       const price = parseFloat(currentLines[idx].price) || 0;
       const qty   = parseFloat(currentLines[idx].qty)   || 0;
-      if (row) row.querySelectorAll('td')[7].textContent = '$' + (price * qty).toFixed(2);
+      if (row) row.querySelectorAll('td')[6].textContent = '$' + (price * qty).toFixed(2);
       renderCostSummary();
     });
   });

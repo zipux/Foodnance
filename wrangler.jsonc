@@ -1,20 +1,22 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "webapp",
-  "compatibility_date": "2026-03-11",
-  "pages_build_output_dir": "./dist",
-  "compatibility_flags": ["nodejs_compat"],
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "invoicedb-production",
-      "database_id": "local-only-placeholder"
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "FILES",
-      "bucket_name": "invoicedb-files"
-    }
-  ]
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "webapp",
+	"compatibility_date": "2026-03-11",
+	"pages_build_output_dir": "./dist",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "invoicedb-production",
+			"database_id": "471dbf32-65e1-4a71-9f6e-dce00b1cffc5"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "FILES",
+			"bucket_name": "invoicedb-files"
+		}
+	]
 }

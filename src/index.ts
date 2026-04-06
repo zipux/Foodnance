@@ -575,7 +575,7 @@ app.post('/api/ai/parse-invoice', async (c) => {
 - For 'tax_pst': PST, QST, or any provincial sales tax amount (dollar value, not %)
 - For 'delivery': any delivery fee, freight charge, or shipping cost that is an actual charge applied to this specific invoice's total. Do NOT extract delivery amounts mentioned in general policy text, terms and conditions, fine print, or minimum order notices (e.g. "Free delivery on orders over $X" or "A $15 delivery fee applies to orders under $Y" in footer text). Only extract it if it appears as an actual line item with a dollar amount that affects the invoice total
 - For 'fuel_surcharge': any fuel surcharge, energy surcharge, or environmental fee that is an actual charge on this invoice — same rule: ignore any surcharge amounts mentioned only in policy text or terms
-- For 'credit': any credit, discount, or rebate applied (positive number)
+- - For 'credit': only extract a credit/discount if the line item prices are at FULL (undiscounted) price and the discount is applied separately at the bottom of the invoice. If the line item prices already reflect the discounted price (i.e. the discounted unit price × qty = the line total shown), set credit to 0.00
 - For 'other_cost': any other fee not covered above (handling fee, etc.)
 - For 'other_desc': description of the other_cost if applicable
 - For dates: convert any format to YYYY-MM-DD

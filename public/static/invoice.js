@@ -2257,8 +2257,8 @@ async function saveExtractedRows() {
     category:     r.brand     || '',
     item_code:    r.sku       || '',
     packaging:    r.pack_size || '',
-    price:        parseFloat(r.cost) || 0,
-    qty:          1,
+    price:        parseFloat(r.unit_price) || 0,
+    qty:          parseFloat(r.qty) || 1,
     line_total:   parseFloat(r.cost) || 0,
   }));
 
@@ -2411,8 +2411,8 @@ async function saveManualRows() {
     category:     r.brand     || '',
     item_code:    r.sku       || '',
     packaging:    r.pack_size || '',
-    price:        parseFloat(r.cost) || 0,
-    qty:          1,
+    price:        parseFloat(r.unit_price) || parseFloat(r.cost) || 0,
+    qty:          parseFloat(r.qty) || 1,
     line_total:   parseFloat(r.cost) || 0,
   }));
 
