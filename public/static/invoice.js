@@ -1458,24 +1458,46 @@ function mapOpenAIResult(result, fileName) {
 // ══════════════════════════════════════════════════════════════
 // PRODUCT MAPPING — auto-replace GPT-4o names with learned corrections
 // ══════════════════════════════════════════════════════════════
+
+// BUG 2 fix: extract a stable, minimal key from a row — SKU preferred, else description
+function extractMappingKey(sku, description) {
+  if (sku && sku.trim()) return sku.trim().toLowerCase();
+  if (description && description.trim()) return description.trim().toLowerCase();
+  return '';
+}
+
+// BUG 1 fix: partial word match for vendor names (case-insensitive, 3+ char words)
+function vendorNamesMatch(storedVendor, currentVendor) {
+  const a = (storedVendor || '').toLowerCase().trim();
+  const b = (currentVendor || '').toLowerCase().trim();
+  if (a === b) return true;
+  const aWords = a.split(/\s+/).filter(w => w.length >= 3);
+  const bWords = b.split(/\s+/).filter(w => w.length >= 3);
+  return aWords.some(w => b.includes(w)) || bWords.some(w => a.includes(w));
+}
+
 async function applyProductMappings(vendor) {
   if (!vendor || !vendor.trim()) return;
   try {
-    const data = await apiGet('product-mappings?vendor=' + encodeURIComponent(vendor.trim()));
-    const mappings = data.data || [];
+    // Fetch all mappings and filter client-side with partial vendor matching (BUG 1 fix)
+    const data = await apiGet('product-mappings');
+    const allMappings = data.data || [];
+    if (!allMappings.length) return;
+
+    const mappings = allMappings.filter(m => vendorNamesMatch(m.vendor_name, vendor));
     if (!mappings.length) return;
 
-    // Build a lookup: lowercase raw_ocr_text → mapping object
+    // Build lookup: stable key (SKU or description) → mapping (BUG 2 fix)
     const lookup = {};
     mappings.forEach(m => {
-      lookup[m.raw_ocr_text.toLowerCase().trim()] = m;
+      const key = (m.raw_ocr_text || '').toLowerCase().trim();
+      if (key) lookup[key] = m;
     });
 
     extractedRows.forEach((row, idx) => {
-      // Match against original_ocr first, then GPT name
-      const ocrKey = (row._original_ocr || '').toLowerCase().trim();
-      const nameKey = (originalGptNames[idx] || row.name || '').toLowerCase().trim();
-      const match = lookup[ocrKey] || lookup[nameKey];
+      // Use the same stable key extraction for lookup (BUG 2 fix)
+      const rowKey = extractMappingKey(row.sku, originalGptNames[idx] || row.name);
+      const match = rowKey ? lookup[rowKey] : null;
       if (match) {
         row.name      = match.corrected_name;
         row.brand     = match.corrected_brand || row.brand;
@@ -2292,23 +2314,23 @@ async function saveExtractedRows() {
 
   const result = await bulkSaveProducts(validWithInv, vendorName);
 
-  // ── Save product mappings using Azure OCR text as the key ───
+  // ── Save product mappings using stable key: SKU if available, else description (BUG 2 fix)
   if (vendorName) {
     for (let i = 0; i < valid.length; i++) {
-      const rawOcr = valid[i]._original_ocr || originalGptNames[i] || '';
+      const stableKey = extractMappingKey(valid[i].sku, valid[i].name);
       const correctedName = (valid[i].name || '').trim();
-      if (rawOcr && correctedName) {
+      if (stableKey && correctedName) {
         try {
           await apiPost('product-mappings', {
-            vendor_name:        vendorName,
-            raw_ocr_text:       rawOcr,
-            corrected_name:     correctedName,
-            corrected_brand:    valid[i].brand    || '',
-            corrected_sku:      valid[i].sku      || '',
+            vendor_name:         vendorName,
+            raw_ocr_text:        stableKey,
+            corrected_name:      correctedName,
+            corrected_brand:     valid[i].brand    || '',
+            corrected_sku:       valid[i].sku      || '',
             corrected_pack_size: valid[i].pack_size || '',
           });
         } catch (e) {
-          console.warn('Failed to save mapping for:', rawOcr, e.message);
+          console.warn('Failed to save mapping for:', stableKey, e.message);
         }
       }
     }

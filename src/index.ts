@@ -820,7 +820,13 @@ app.post('/api/ai/azure-analyze', async (c) => {
 // ─── Product Mappings: lookup by vendor + raw text ─────────────
 app.get('/api/product-mappings', async (c) => {
   const vendor = (c.req.query('vendor') || '').trim()
-  if (!vendor) return c.json({ error: 'vendor required' }, 400)
+  if (!vendor) {
+    // No vendor — return all mappings for client-side fuzzy matching
+    const rows = await c.env.DB.prepare(
+      'SELECT * FROM product_mappings ORDER BY updated_at DESC'
+    ).all()
+    return c.json({ data: rows.results })
+  }
   const rows = await c.env.DB.prepare(
     'SELECT * FROM product_mappings WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?)) ORDER BY updated_at DESC'
   ).bind(vendor).all()
