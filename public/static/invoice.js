@@ -2314,6 +2314,7 @@ async function saveExtractedRows() {
     invoice_file_key:  currentFileKey  || '',
     invoice_file_name: currentFileName || '',
     invoice_ref:       r.invoice_ref || invoiceNumber || '',
+    invoice_date:      invoiceDate || '',
   }));
 
   const result = await bulkSaveProducts(validWithInv, vendorName);
@@ -2468,6 +2469,7 @@ async function saveManualRows() {
     invoice_file_key:  currentFileKey  || '',
     invoice_file_name: currentFileName || '',
     invoice_ref:       r.invoice_ref || invoiceNumberM || '',
+    invoice_date:      invoiceDateM || '',
   }));
 
   const result = await bulkSaveProducts(rowsWithInv, vendorNameM);

@@ -544,7 +544,7 @@ app.post('/api/bulk/upsert-products', async (c) => {
       (p.sku as string) || '',
       packQty, packUnit,
       cost, costPerUnit,
-      today,
+      (p.invoice_date as string) || (p.purchase_date as string) || today,
       (p.expiry_date as string) || '',
       daysLeftVal,
       (p.invoice_ref as string) || '',
