@@ -229,7 +229,7 @@ app.post('/api/invoice-lines/:invoice_id/replace', async (c) => {
   const invoiceId = c.req.param('invoice_id')
   const body = await c.req.json() as {
     lines: Record<string, unknown>[]
-    tax_pst?: number; tax_gst?: number; delivery?: number
+    tax_pst?: number; tax_gst?: number; delivery?: number; fuel_surcharge?: number; deposit?: number
     credit?: number; other_cost?: number; other_desc?: string
   }
 
@@ -258,15 +258,16 @@ app.post('/api/invoice-lines/:invoice_id/replace', async (c) => {
 
   // Update extra cost fields on invoice
   await c.env.DB.prepare(
-    `UPDATE invoices SET tax_pst=?, tax_gst=?, delivery=?, fuel_surcharge=?, credit=?, other_cost=?, other_desc=? WHERE id=?`
+    `UPDATE invoices SET tax_pst=?, tax_gst=?, delivery=?, fuel_surcharge=?, deposit=?, credit=?, other_cost=?, other_desc=? WHERE id=?`
   ).bind(
-    body.tax_pst        ?? 0,
-    body.tax_gst        ?? 0,
-    body.delivery       ?? 0,
-    body.fuel_surcharge ?? 0,
-    body.credit         ?? 0,
-    body.other_cost     ?? 0,
-    body.other_desc     ?? '',
+    body.tax_pst         ?? 0,
+    body.tax_gst         ?? 0,
+    body.delivery        ?? 0,
+    body.fuel_surcharge  ?? 0,
+    body.deposit         ?? 0,
+    body.credit          ?? 0,
+    body.other_cost      ?? 0,
+    body.other_desc      ?? '',
     invoiceId
   ).run()
 
@@ -355,7 +356,7 @@ app.post('/api/ensure-invoice', async (c) => {
     file_key: string; file_name?: string
     vendor?: string; invoice_number?: string
     invoice_date?: string; total?: number
-    tax_gst?: number; tax_pst?: number; delivery?: number; fuel_surcharge?: number
+    tax_gst?: number; tax_pst?: number; delivery?: number; fuel_surcharge?: number; deposit?: number
     credit?: number; other_cost?: number; other_desc?: string
   }
   if (!body.file_key) return c.json({ error: 'file_key required' }, 400)
@@ -376,9 +377,9 @@ app.post('/api/ensure-invoice', async (c) => {
   await c.env.DB.prepare(
     `INSERT INTO invoices (id, vendor, invoice_number, invoice_date, upload_date, total,
        status, payment_account, file_name, file_key, file_url, notes,
-       tax_gst, tax_pst, delivery, fuel_surcharge, credit, other_cost, other_desc)
+       tax_gst, tax_pst, delivery, fuel_surcharge, deposit, credit, other_cost, other_desc)
      VALUES (?, ?, ?, ?, ?, ?, 'In Processing', 'A/P', ?, ?, ?, '',
-             ?, ?, ?, ?, ?, ?, ?)`
+             ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
     invoiceId,
     body.vendor         || '',
@@ -389,13 +390,14 @@ app.post('/api/ensure-invoice', async (c) => {
     body.file_name      || '',
     body.file_key,
     `/api/files/${body.file_key}`,
-    body.tax_gst        ?? 0,
-    body.tax_pst        ?? 0,
-    body.delivery       ?? 0,
-    body.fuel_surcharge ?? 0,
-    body.credit         ?? 0,
-    body.other_cost     ?? 0,
-    body.other_desc     || ''
+    body.tax_gst         ?? 0,
+    body.tax_pst         ?? 0,
+    body.delivery        ?? 0,
+    body.fuel_surcharge  ?? 0,
+    body.deposit         ?? 0,
+    body.credit          ?? 0,
+    body.other_cost      ?? 0,
+    body.other_desc      || ''
   ).run()
 
   return c.json({ id: invoiceId, created: true })
@@ -625,6 +627,7 @@ app.post('/api/ai/parse-invoice', async (c) => {
   "tax_pst": 0.00,
   "delivery": 0.00,
   "fuel_surcharge": 0.00,
+  "deposit": 0.00,
   "credit": 0.00,
   "other_cost": 0.00,
   "other_desc": "",
@@ -646,19 +649,28 @@ app.post('/api/ai/parse-invoice', async (c) => {
   const rules = `Rules:
 - Extract EVERY product line item in the text — do not skip any
 - For 'original_ocr': copy the exact original OCR text for each product line item, character-for-character, without cleaning or modifying it. This is used for product matching.
-- Do NOT include delivery fees, fuel surcharges, or taxes as items[] entries — put them in the dedicated fields instead
 - For 'name': use the generic product name, not the vendor-specific SKU description
 - For 'qty': the quantity ordered (number of units, cases, bags, etc. as shown on the invoice). Must be a number, not text
 - For 'unit_price': the price per single unit as shown on the invoice (e.g. $13.35 per bag). This is NOT the line total
 - For 'cost': the line total (qty × unit_price). Verify the math: cost should equal qty × unit_price
 - For 'pack_size': prioritize the unit weight or volume over the case count. For example, '20CS of 50KG' should be saved as '50KG'. Only use case count or 'Each' if there is no weight or volume available
-- For 'tax_gst': GST, HST, or any federal/harmonized sales tax amount (dollar value, not %)
-- For 'tax_pst': PST, QST, or any provincial sales tax amount (dollar value, not %)
-- For 'delivery': any delivery fee, freight charge, or shipping cost that is an actual charge applied to this specific invoice's total. Do NOT extract delivery amounts mentioned in general policy text, terms and conditions, fine print, or minimum order notices (e.g. "Free delivery on orders over $X" or "A $15 delivery fee applies to orders under $Y" in footer text). Only extract it if it appears as an actual line item with a dollar amount that affects the invoice total
-- For 'fuel_surcharge': any fuel surcharge, energy surcharge, or environmental fee that is an actual charge on this invoice — same rule: ignore any surcharge amounts mentioned only in policy text or terms
-- - For 'credit': only extract a credit/discount if the line item prices are at FULL (undiscounted) price and the discount is applied separately at the bottom of the invoice. If the line item prices already reflect the discounted price (i.e. the discounted unit price × qty = the line total shown), set credit to 0.00
-- For 'other_cost': any other fee not covered above (handling fee, etc.)
-- For 'other_desc': description of the other_cost if applicable
+
+CHARGE ROUTING — read carefully, this is critical:
+
+- TAX FIELDS (tax_gst, tax_pst): ONLY for actual government sales taxes. 'tax_gst' is ONLY for amounts explicitly labeled GST, HST, or a federal/harmonized sales tax percentage line. 'tax_pst' is ONLY for amounts explicitly labeled PST, QST, or a provincial sales tax percentage line. The word "Taxable" next to a charge (e.g. "FUEL (Taxable)") means that charge is SUBJECT TO tax — it does NOT mean the charge itself is a tax. Never put fuel surcharges, delivery fees, deposits, CRF, or any other fee into the tax fields, even if they appear near the tax section or are labeled "Taxable". Dollar values only, not percentages.
+
+- DELIVERY (delivery): any delivery fee, freight charge, or shipping cost that is an actual charge on this invoice total. Even if it appears as a line item in the products table (e.g. "DELIVERY CHARGE $5.49"), extract it here and do NOT include it in items[]. Do NOT extract delivery amounts mentioned only in general policy text, terms and conditions, or fine print.
+
+- FUEL SURCHARGE (fuel_surcharge): any fuel surcharge, energy surcharge, or environmental fee that is an actual charge on this invoice. Even if labeled "Taxable", this goes here — NOT in tax_gst or tax_pst. Do NOT extract amounts mentioned only in policy text or terms.
+
+- DEPOSITS (deposit): sum ALL deposit charges into this single field. This includes: dairy case deposits, bottle deposits, container deposits, pallet charges (e.g. CHEP pallets), crate deposits, keg deposits, or any other refundable/returnable container charge. These often appear as line items in the product table — do NOT include them in items[], put the total in 'deposit' instead. Also check for a DEPOSIT column in the line items table and sum any per-line deposit amounts (e.g. $0.50 deposit on milk) into this field as well.
+
+- CREDIT/DISCOUNT (credit): CRITICAL — only extract a credit or discount if the line item unit_prices are at FULL undiscounted price and the discount is applied separately (e.g. as a "PRODUCT DISCOUNT" line in the footer). To verify: check whether qty × unit_price = the line total (cost) shown on the invoice. If it does match, the prices already reflect the discount, so set credit to 0.00. Only set credit > 0 when the items use full/list prices and the discount is subtracted separately from the subtotal.
+
+- OTHER COSTS (other_cost, other_desc): any fee not covered above, such as CRF (Container Recovery Fee), container recovery charges, handling fees, restocking fees, broken case surcharges, or regulatory fees. Sum them into other_cost and list their descriptions in other_desc (e.g. "CRF $0.35, Broken Case $1.00").
+
+NON-PRODUCT LINE ITEMS: delivery charges, fuel surcharges, deposits, pallet charges, CRF fees, and similar non-product charges sometimes appear as regular line items in the invoice's product table. Do NOT add these to items[] — instead route them to the correct field above. Only actual purchasable products/goods belong in items[].
+
 - For dates: convert any format to YYYY-MM-DD
 - Use 0.00 for numeric fields you cannot find
 - Use empty string '' for text fields you cannot find

@@ -14,8 +14,9 @@ let currentFileKey  = '';   // R2 key of the first (or merged) file
 let currentFileUrl  = '';   // URL to view
 let currentTaxGst      = 0;
 let currentTaxPst      = 0;
-let currentDelivery    = 0;
+let currentDelivery      = 0;
 let currentFuelSurcharge = 0;
+let currentDeposit       = 0;
 let currentCredit      = 0;
 let currentOtherCost   = 0;
 let currentOtherDesc   = '';
@@ -196,7 +197,7 @@ function clearBatch() {
   azureOcrPages = [];
   gptRawPages   = [];
   invoiceFlags  = [];
-  currentTaxGst = 0; currentTaxPst = 0; currentDelivery = 0; currentFuelSurcharge = 0;
+  currentTaxGst = 0; currentTaxPst = 0; currentDelivery = 0; currentFuelSurcharge = 0; currentDeposit = 0;
   currentCredit = 0; currentOtherCost = 0; currentOtherDesc = '';
   currentFileName = ''; currentFileKey = ''; currentFileUrl = '';
   hideDebugPanel();
@@ -748,7 +749,7 @@ async function submitBatch() {
   invoiceFlags  = [];
   originalGptNames = [];
   currentFileName = ''; currentFileKey = ''; currentFileUrl = '';
-  currentTaxGst = 0; currentTaxPst = 0; currentDelivery = 0; currentFuelSurcharge = 0;
+  currentTaxGst = 0; currentTaxPst = 0; currentDelivery = 0; currentFuelSurcharge = 0; currentDeposit = 0;
   currentCredit = 0; currentOtherCost = 0; currentOtherDesc = '';
   pageInvoiceNumbers = [];
 
@@ -1413,26 +1414,27 @@ function mapOpenAIResult(result, fileName) {
   if (result.total)          { const el = document.getElementById('metaTotal');        if (el) el.value = result.total; }
 
   // Map each GPT-4o field directly to its own state variable — no merging.
-  currentTaxGst        = parseFloat(result.tax_gst)        || 0;
-  currentTaxPst        = parseFloat(result.tax_pst)        || 0;
+  currentTaxGst    = parseFloat(result.tax_gst)        || 0;
+  currentTaxPst    = parseFloat(result.tax_pst)        || 0;
   currentDelivery      = parseFloat(result.delivery)       || 0;
   currentFuelSurcharge = parseFloat(result.fuel_surcharge) || 0;
-  currentCredit        = parseFloat(result.credit)         || 0;
-  currentOtherCost     = parseFloat(result.other_cost)     || 0;
-  currentOtherDesc     = result.other_desc || '';
+  currentDeposit       = parseFloat(result.deposit)        || 0;
+  currentCredit    = parseFloat(result.credit)         || 0;
+  currentOtherCost = parseFloat(result.other_cost)     || 0;
+  currentOtherDesc = result.other_desc || '';
 
   // Populate the visible Additional Costs fields on the upload page
   const elGst   = document.getElementById('metaTaxGst');
   const elPst   = document.getElementById('metaTaxPst');
   const elDel   = document.getElementById('metaDelivery');
-  const elFuel  = document.getElementById('metaFuelSurcharge');
+  const elDep   = document.getElementById('metaDeposit');
   const elCred  = document.getElementById('metaCredit');
   const elOther = document.getElementById('metaOtherCost');
   const elODesc = document.getElementById('metaOtherDesc');
   if (elGst)   elGst.value   = currentTaxGst.toFixed(2);
   if (elPst)   elPst.value   = currentTaxPst.toFixed(2);
   if (elDel)   elDel.value   = currentDelivery.toFixed(2);
-  if (elFuel)  elFuel.value  = currentFuelSurcharge.toFixed(2);
+  if (elDep)   elDep.value   = currentDeposit > 0 ? currentDeposit.toFixed(2) : '';
   if (elCred)  elCred.value  = currentCredit.toFixed(2);
   if (elOther) elOther.value = currentOtherCost.toFixed(2);
   if (elODesc) elODesc.value = currentOtherDesc;
@@ -1901,14 +1903,13 @@ function runValidation(gptResult, ocrFullText, uploadedPageCount) {
   const total       = parseFloat(gptResult.total)          || 0;
   const taxGst      = parseFloat(gptResult.tax_gst)        || 0;
   const taxPst      = parseFloat(gptResult.tax_pst)        || 0;
-  const delivery    = parseFloat(gptResult.delivery)       || 0;
-  const fuelSurch   = parseFloat(gptResult.fuel_surcharge) || 0;
+  const delivery    = (parseFloat(gptResult.delivery) || 0) + (parseFloat(gptResult.fuel_surcharge) || 0);
   const credit      = parseFloat(gptResult.credit)         || 0;
   const otherCost   = parseFloat(gptResult.other_cost)     || 0;
 
   // ── 1 & 2. Totals validation ───────────────────────────────
   const itemsSum = items.reduce((s, it) => s + (parseFloat(it.cost) || 0), 0);
-  const charges  = taxGst + taxPst + delivery + fuelSurch + otherCost - credit;
+  const charges  = taxGst + taxPst + delivery + otherCost - credit;
 
   if (items.length > 0 && total > 0) {
     const tol = 1.00;
@@ -2178,17 +2179,18 @@ function retryWithAllLines() {
 // CREATE INVOICE RECORD
 // ══════════════════════════════════════════════════════════════
 async function createInvoiceRecord({ vendor, invoiceNumber, invoiceDate, total, fileName, fileKey, fileUrl,
-  taxGst = 0, taxPst = 0, delivery = 0, fuelSurcharge = 0, credit = 0, otherCost = 0, otherDesc = '', lines = [] }) {
+  taxGst = 0, taxPst = 0, delivery = 0, fuelSurcharge = 0, deposit = 0, credit = 0, otherCost = 0, otherDesc = '', lines = [] }) {
   const today = new Date().toISOString().slice(0, 10);
   try {
     let record;
     const extraCosts = {
-      tax_gst:        parseFloat(taxGst)        || 0,
-      tax_pst:        parseFloat(taxPst)        || 0,
-      delivery:       parseFloat(delivery)      || 0,
+      tax_gst:        parseFloat(taxGst)    || 0,
+      tax_pst:        parseFloat(taxPst)    || 0,
+      delivery:       parseFloat(delivery)  || 0,
       fuel_surcharge: parseFloat(fuelSurcharge) || 0,
-      credit:         parseFloat(credit)        || 0,
-      other_cost:     parseFloat(otherCost)     || 0,
+      deposit:        parseFloat(deposit)   || 0,
+      credit:         parseFloat(credit)    || 0,
+      other_cost:     parseFloat(otherCost) || 0,
       other_desc:     otherDesc || '',
     };
     if (fileKey) {
@@ -2229,12 +2231,13 @@ async function createInvoiceRecord({ vendor, invoiceNumber, invoiceDate, total, 
     if (lines.length && record.id) {
       await apiPost(`invoice-lines/${record.id}/replace`, {
         lines,
-        tax_gst:        parseFloat(taxGst)        || 0,
-        tax_pst:        parseFloat(taxPst)        || 0,
-        delivery:       parseFloat(delivery)      || 0,
+        tax_gst:        parseFloat(taxGst)    || 0,
+        tax_pst:        parseFloat(taxPst)    || 0,
+        delivery:       parseFloat(delivery)  || 0,
         fuel_surcharge: parseFloat(fuelSurcharge) || 0,
-        credit:         parseFloat(credit)        || 0,
-        other_cost:     parseFloat(otherCost)     || 0,
+        deposit:        parseFloat(deposit)   || 0,
+        credit:         parseFloat(credit)    || 0,
+        other_cost:     parseFloat(otherCost) || 0,
         other_desc:     otherDesc || '',
       });
     }
@@ -2269,13 +2272,13 @@ async function saveExtractedRows() {
   const invoiceTotal  = document.getElementById('metaTotal')?.value               || 0;
 
   // Read Additional Costs from the visible fields (user may have corrected them)
-  currentTaxGst        = parseFloat(document.getElementById('metaTaxGst')?.value)        || 0;
-  currentTaxPst        = parseFloat(document.getElementById('metaTaxPst')?.value)        || 0;
-  currentDelivery      = parseFloat(document.getElementById('metaDelivery')?.value)      || 0;
-  currentFuelSurcharge = parseFloat(document.getElementById('metaFuelSurcharge')?.value) || 0;
-  currentCredit        = parseFloat(document.getElementById('metaCredit')?.value)        || 0;
-  currentOtherCost     = parseFloat(document.getElementById('metaOtherCost')?.value)     || 0;
-  currentOtherDesc     = document.getElementById('metaOtherDesc')?.value?.trim()         || '';
+  currentTaxGst    = parseFloat(document.getElementById('metaTaxGst')?.value)    || 0;
+  currentTaxPst    = parseFloat(document.getElementById('metaTaxPst')?.value)    || 0;
+  currentDelivery  = parseFloat(document.getElementById('metaDelivery')?.value)  || 0;
+  currentDeposit   = parseFloat(document.getElementById('metaDeposit')?.value)   || 0;
+  currentCredit    = parseFloat(document.getElementById('metaCredit')?.value)    || 0;
+  currentOtherCost = parseFloat(document.getElementById('metaOtherCost')?.value) || 0;
+  currentOtherDesc = document.getElementById('metaOtherDesc')?.value?.trim()     || '';
 
   const invLines = valid.map(r => ({
     product_name: r.name      || '',
@@ -2300,6 +2303,7 @@ async function saveExtractedRows() {
     taxPst:        currentTaxPst,
     delivery:      currentDelivery,
     fuelSurcharge: currentFuelSurcharge,
+    deposit:       currentDeposit,
     credit:        currentCredit,
     otherCost:     currentOtherCost,
     otherDesc:     currentOtherDesc,
@@ -2424,13 +2428,13 @@ async function saveManualRows() {
   const invoiceTotalM  = document.getElementById('metaTotal')?.value               || 0;
 
   // Read Additional Costs from the visible fields (user may have corrected them)
-  currentTaxGst        = parseFloat(document.getElementById('metaTaxGst')?.value)        || 0;
-  currentTaxPst        = parseFloat(document.getElementById('metaTaxPst')?.value)        || 0;
-  currentDelivery      = parseFloat(document.getElementById('metaDelivery')?.value)      || 0;
-  currentFuelSurcharge = parseFloat(document.getElementById('metaFuelSurcharge')?.value) || 0;
-  currentCredit        = parseFloat(document.getElementById('metaCredit')?.value)        || 0;
-  currentOtherCost     = parseFloat(document.getElementById('metaOtherCost')?.value)     || 0;
-  currentOtherDesc     = document.getElementById('metaOtherDesc')?.value?.trim()         || '';
+  currentTaxGst    = parseFloat(document.getElementById('metaTaxGst')?.value)    || 0;
+  currentTaxPst    = parseFloat(document.getElementById('metaTaxPst')?.value)    || 0;
+  currentDelivery  = parseFloat(document.getElementById('metaDelivery')?.value)  || 0;
+  currentDeposit   = parseFloat(document.getElementById('metaDeposit')?.value)   || 0;
+  currentCredit    = parseFloat(document.getElementById('metaCredit')?.value)    || 0;
+  currentOtherCost = parseFloat(document.getElementById('metaOtherCost')?.value) || 0;
+  currentOtherDesc = document.getElementById('metaOtherDesc')?.value?.trim()     || '';
 
   const manualLines = rows.map(r => ({
     product_name: r.name      || '',
@@ -2455,6 +2459,7 @@ async function saveManualRows() {
     taxPst:        currentTaxPst,
     delivery:      currentDelivery,
     fuelSurcharge: currentFuelSurcharge,
+    deposit:       currentDeposit,
     credit:        currentCredit,
     otherCost:     currentOtherCost,
     otherDesc:     currentOtherDesc,

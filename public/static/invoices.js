@@ -65,7 +65,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('addLineBtn').addEventListener('click',          addLineRow);
 
   // Live cost summary as user edits additional costs
-  ['detailTaxPst','detailTaxGst','detailDelivery','detailFuelSurcharge','detailCredit','detailOtherCost'].forEach(id => {
+  ['detailTaxPst','detailTaxGst','detailDelivery','detailDeposit','detailCredit','detailOtherCost'].forEach(id => {
     document.getElementById(id).addEventListener('input', renderCostSummary);
   });
 });
@@ -215,40 +215,40 @@ async function openInvDetail(id) {
   document.getElementById('detailNotes').value         = inv.notes           || '';
 
   // Additional cost fields — load from invoice record first
-  const taxPstStored         = parseFloat(inv.tax_pst)          || 0;
-  const taxGstStored         = parseFloat(inv.tax_gst)          || 0;
-  const deliveryStored       = parseFloat(inv.delivery)         || 0;
-  const fuelSurchargeStored  = parseFloat(inv.fuel_surcharge)   || 0;
-  const creditStored         = parseFloat(inv.credit)           || 0;
-  const otherCostStored      = parseFloat(inv.other_cost)       || 0;
+  const taxPstStored        = parseFloat(inv.tax_pst)        || 0;
+  const taxGstStored        = parseFloat(inv.tax_gst)        || 0;
+  // Combine delivery + fuel_surcharge into one field
+  const deliveryStored      = (parseFloat(inv.delivery) || 0) + (parseFloat(inv.fuel_surcharge) || 0);
+  const depositStored       = parseFloat(inv.deposit)        || 0;
+  const creditStored        = parseFloat(inv.credit)         || 0;
+  const otherCostStored     = parseFloat(inv.other_cost)     || 0;
 
   // If ALL extra-cost fields are zero, try the vendor fee template
   let taxPst = taxPstStored, taxGst = taxGstStored, delivery = deliveryStored;
-  let credit = creditStored, fuelSurcharge = fuelSurchargeStored, otherCost = otherCostStored, otherDesc = inv.other_desc || '';
-  const allZero = (taxPstStored + taxGstStored + deliveryStored + fuelSurchargeStored + creditStored + otherCostStored) === 0;
+  let deposit = depositStored, credit = creditStored, otherCost = otherCostStored, otherDesc = inv.other_desc || '';
+  const allZero = (taxPstStored + taxGstStored + deliveryStored + depositStored + creditStored + otherCostStored) === 0;
   if (allZero && inv.vendor) {
     try {
       const tmpl = await apiGet(`vendor-fee-template?vendor=${encodeURIComponent(inv.vendor)}`);
       if (tmpl.found && tmpl.template) {
         const t = tmpl.template;
-        delivery       = parseFloat(t.delivery)        || 0;
-        fuelSurcharge  = parseFloat(t.fuel_surcharge)  || 0;
-        taxGst         = parseFloat(t.tax_gst)         || 0;
-        taxPst         = parseFloat(t.tax_pst)         || 0;
-        credit         = parseFloat(t.credit)          || 0;  // not stored in template but keep consistent
-        otherCost      = parseFloat(t.other_cost)      || 0;
-        otherDesc      = t.other_desc || '';
+        // Template stores delivery+fuel_surcharge combined in delivery
+        delivery  = (parseFloat(t.delivery) || 0) + (parseFloat(t.fuel_surcharge) || 0);
+        taxGst    = parseFloat(t.tax_gst)   || 0;
+        taxPst    = parseFloat(t.tax_pst)   || 0;
+        otherCost = parseFloat(t.other_cost) || 0;
+        otherDesc = t.other_desc || '';
       }
     } catch (_) { /* non-fatal */ }
   }
 
-  document.getElementById('detailTaxPst').value         = taxPst         || '';
-  document.getElementById('detailTaxGst').value         = taxGst         || '';
-  document.getElementById('detailDelivery').value       = delivery       || '';
-  document.getElementById('detailFuelSurcharge').value  = fuelSurcharge  || '';
-  document.getElementById('detailCredit').value         = credit         || '';
-  document.getElementById('detailOtherCost').value      = otherCost      || '';
-  document.getElementById('detailOtherDesc').value      = otherDesc      || '';
+  document.getElementById('detailTaxPst').value     = taxPst    || '';
+  document.getElementById('detailTaxGst').value     = taxGst    || '';
+  document.getElementById('detailDelivery').value   = delivery  || '';
+  document.getElementById('detailDeposit').value    = deposit   || '';
+  document.getElementById('detailCredit').value     = credit    || '';
+  document.getElementById('detailOtherCost').value  = otherCost || '';
+  document.getElementById('detailOtherDesc').value  = otherDesc || '';
 
   // ── Load and render line items ──────────────────────────────
   await loadAndRenderLines(id);
@@ -381,28 +381,26 @@ function renderCostSummary({ autoFill = false } = {}) {
   const taxPstEl  = document.getElementById('detailTaxPst');
   const taxGstEl  = document.getElementById('detailTaxGst');
   const delivEl   = document.getElementById('detailDelivery');
-  const fuelEl    = document.getElementById('detailFuelSurcharge');
   const creditEl  = document.getElementById('detailCredit');
   const otherEl   = document.getElementById('detailOtherCost');
 
   let taxPst   = parseFloat(taxPstEl?.value)  || 0;
   let taxGst   = parseFloat(taxGstEl?.value)  || 0;
   let delivery = parseFloat(delivEl?.value)   || 0;
-  let fuel     = parseFloat(fuelEl?.value)    || 0;
   let credit   = parseFloat(creditEl?.value)  || 0;
   let other    = parseFloat(otherEl?.value)   || 0;
 
   // Use the stored DB total as authoritative; fall back to computed if not set
-  const displayTotal = currentInvTotal > 0 ? currentInvTotal : (subtotal + taxPst + taxGst + delivery + fuel + other - credit);
+  const displayTotal = currentInvTotal > 0 ? currentInvTotal : (subtotal + taxPst + taxGst + delivery + other - credit);
 
   // Auto-fill: if all extra-cost fields are zero but there is a gap,
   // put the difference into Delivery (most common cause on food invoices)
-  const gap = Math.round((displayTotal - subtotal - taxPst - taxGst - delivery - fuel - other + credit) * 100) / 100;
-  if (autoFill && gap >= 0.01 && taxPst === 0 && taxGst === 0 && delivery === 0 && fuel === 0 && other === 0 && credit === 0) {
+  const gap = Math.round((displayTotal - subtotal - taxPst - taxGst - delivery - other + credit) * 100) / 100;
+  if (autoFill && gap >= 0.01 && taxPst === 0 && taxGst === 0 && delivery === 0 && other === 0 && credit === 0) {
     if (delivEl) { delivEl.value = gap.toFixed(2); delivery = gap; }
   }
 
-  const computed = subtotal + taxPst + taxGst + delivery + fuel + other - credit;
+  const computed = subtotal + taxPst + taxGst + delivery + other - credit;
   const diff     = Math.round((displayTotal - computed) * 100) / 100;
 
   const el = document.getElementById('detailCostSummary');
@@ -412,8 +410,7 @@ function renderCostSummary({ autoFill = false } = {}) {
   const parts = [`<span style="white-space:nowrap">Items: <strong>$${subtotal.toFixed(2)}</strong></span>`];
   if (taxPst)   parts.push(row('PST', taxPst));
   if (taxGst)   parts.push(row('GST/HST', taxGst));
-  if (delivery) parts.push(row('Delivery', delivery));
-  if (fuel)     parts.push(row('Fuel Surcharge', fuel));
+  if (delivery) parts.push(row('Delivery + Fuel Surcharge', delivery));
   if (credit)   parts.push(`<span style="white-space:nowrap">Credit: <strong style="color:#16a34a">−$${credit.toFixed(2)}</strong></span>`);
   if (other)    parts.push(row('Other', other));
   // Show warning only if gap remains after auto-fill
@@ -439,15 +436,15 @@ async function saveInvDetail() {
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
 
   try {
-    const taxPst         = parseFloat(document.getElementById('detailTaxPst').value)           || 0;
-    const taxGst         = parseFloat(document.getElementById('detailTaxGst').value)           || 0;
-    const delivery       = parseFloat(document.getElementById('detailDelivery').value)         || 0;
-    const fuelSurcharge  = parseFloat(document.getElementById('detailFuelSurcharge').value)    || 0;
-    const credit         = parseFloat(document.getElementById('detailCredit').value)           || 0;
-    const otherCost      = parseFloat(document.getElementById('detailOtherCost').value)        || 0;
-    const otherDesc      = document.getElementById('detailOtherDesc').value.trim();
-    const subtotal       = currentLines.reduce((s, l) => s + (parseFloat(l.price)||0) * (parseFloat(l.qty)||0), 0);
-    const newTotal       = subtotal + taxPst + taxGst + delivery + fuelSurcharge + otherCost - credit;
+    const taxPst    = parseFloat(document.getElementById('detailTaxPst').value)    || 0;
+    const taxGst    = parseFloat(document.getElementById('detailTaxGst').value)    || 0;
+    const delivery  = parseFloat(document.getElementById('detailDelivery').value)  || 0;
+    const deposit   = parseFloat(document.getElementById('detailDeposit').value)   || 0;
+    const credit    = parseFloat(document.getElementById('detailCredit').value)    || 0;
+    const otherCost = parseFloat(document.getElementById('detailOtherCost').value) || 0;
+    const otherDesc = document.getElementById('detailOtherDesc').value.trim();
+    const subtotal  = currentLines.reduce((s, l) => s + (parseFloat(l.price)||0) * (parseFloat(l.qty)||0), 0);
+    const newTotal  = subtotal + taxPst + taxGst + delivery + otherCost - credit;
     // Keep the higher of: recomputed total vs stored DB total (never silently lower it)
     const savedTotal = currentInvTotal > 0
       ? Math.max(currentInvTotal, newTotal)
@@ -456,14 +453,15 @@ async function saveInvDetail() {
     // 1. Patch status, notes, extra cost fields AND recalculated total on invoice
     await apiPatch(`tables/${INV_LIST_TABLE}/${id}`, {
       status, notes,
-      tax_pst:         taxPst,
-      tax_gst:         taxGst,
-      delivery:        delivery,
-      fuel_surcharge:  fuelSurcharge,
-      credit:          credit,
-      other_cost:      otherCost,
-      other_desc:      otherDesc,
-      total:           savedTotal,
+      tax_pst:        taxPst,
+      tax_gst:        taxGst,
+      delivery:       delivery,
+      fuel_surcharge: 0,
+      deposit:        deposit,
+      credit:         credit,
+      other_cost:     otherCost,
+      other_desc:     otherDesc,
+      total:          savedTotal,
     });
 
     // 2. Bulk-replace line items
@@ -478,44 +476,45 @@ async function saveInvDetail() {
         qty:          parseFloat(l.qty)   || 0,
         line_total:   (parseFloat(l.price)||0) * (parseFloat(l.qty)||0),
       })),
-      tax_pst:         taxPst,
-      tax_gst:         taxGst,
-      delivery:        delivery,
-      fuel_surcharge:  fuelSurcharge,
-      credit:          credit,
-      other_cost:      otherCost,
-      other_desc:      otherDesc,
+      tax_pst:        taxPst,
+      tax_gst:        taxGst,
+      delivery:       delivery,
+      fuel_surcharge: 0,
+      deposit:        deposit,
+      credit:         credit,
+      other_cost:     otherCost,
+      other_desc:     otherDesc,
     });
 
     // 3. Update local cache
     const inv = allInvoices.find(i => i.id === id);
     if (inv) {
-      inv.status          = status;
-      inv.notes           = notes;
-      inv.total           = savedTotal;
-      inv.tax_pst         = taxPst;
-      inv.tax_gst         = taxGst;
-      inv.delivery        = delivery;
-      inv.fuel_surcharge  = fuelSurcharge;
-      inv.credit          = credit;
-      inv.other_cost      = otherCost;
-      inv.other_desc      = otherDesc;
-      currentInvTotal     = savedTotal;
+      inv.status         = status;
+      inv.notes          = notes;
+      inv.total          = savedTotal;
+      inv.tax_pst        = taxPst;
+      inv.tax_gst        = taxGst;
+      inv.delivery       = delivery;
+      inv.fuel_surcharge = 0;
+      inv.deposit        = deposit;
+      inv.credit         = credit;
+      inv.other_cost     = otherCost;
+      inv.other_desc     = otherDesc;
+      currentInvTotal    = savedTotal;
     }
 
     // 4. Remember fee structure for this vendor (any non-zero fee field → save template)
     const vendorName = document.getElementById('detailVendor')?.textContent?.trim();
-    const hasAnyFee  = delivery > 0 || fuelSurcharge > 0 || taxGst > 0 || taxPst > 0 || otherCost > 0;
+    const hasAnyFee  = delivery > 0 || taxGst > 0 || taxPst > 0 || otherCost > 0;
     if (vendorName && vendorName !== '—' && hasAnyFee) {
       try {
         await apiPost('vendor-fee-template', {
-          vendor_name:     vendorName,
-          delivery:        delivery,
-          fuel_surcharge:  fuelSurcharge,
-          tax_gst:         taxGst,
-          tax_pst:         taxPst,
-          other_cost:      otherCost,
-          other_desc:      otherDesc,
+          vendor_name: vendorName,
+          delivery:    delivery,
+          tax_gst:     taxGst,
+          tax_pst:     taxPst,
+          other_cost:  otherCost,
+          other_desc:  otherDesc,
         });
       } catch (_) { /* non-fatal — don't block the save */ }
     }
