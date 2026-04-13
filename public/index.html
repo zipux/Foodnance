@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Products — InvoiceDB</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260328-3" />
+  <link rel="stylesheet" href="/static/style.css?v=20260407-1" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 </head>
@@ -82,9 +82,13 @@
             <select id="pCategory">
               <option value="">— Select category —</option>
               <option value="Ingredients">Ingredients</option>
-              <option value="Primary Packaging">Primary Packaging</option>
-              <option value="Labels & Branding">Labels &amp; Branding</option>
-              <option value="Shipping Supplies">Shipping Supplies</option>
+              <option value="Packaging">Packaging</option>
+              <option value="Disposables">Disposables</option>
+              <option value="Non-Alcoholic Beverages">Non-Alcoholic Beverages</option>
+              <option value="Alcohol">Alcohol</option>
+              <option value="Cleaning &amp; Sanitation">Cleaning &amp; Sanitation</option>
+              <option value="Linen">Linen</option>
+              <option value="Other">Other</option>
             </select>
           </div>
         </div>
@@ -102,6 +106,11 @@
               <label>Units per Pack</label>
               <input type="number" id="pSubUnitQty" placeholder="e.g. 12" min="1" step="1" />
             </div>
+          </div>
+          <div class="form-group" style="margin-top:.75rem">
+            <label>Average Weight per Unit (kg)</label>
+            <input type="number" id="pAvgWeight" placeholder="e.g. 0.300" min="0" step="0.001" />
+            <small style="color:var(--text-muted);font-size:.78rem">Used for recipe costing of items sold by each (e.g. 0.300 kg per fennel)</small>
           </div>
         </div>
         <div class="sub-unit-section" style="margin-top:1.25rem;border-color:#c7d2fe">
@@ -160,7 +169,7 @@
               <div class="form-group" style="grid-column:1/-1">
                 <label>Invoice Ref</label>
                 <div style="display:flex;gap:.5rem;align-items:center">
-                  <input type="text" id="eInvoiceRef" placeholder="e.g. INV-2025-001" style="flex:1" />
+                  <input type="text" id="eInvoiceRef" placeholder="—" style="flex:1;background:#f1f5f9;cursor:default" readonly />
                   <!-- hidden file input -->
                   <input type="file" id="eInvoiceFile" accept=".pdf,.png,.jpg,.jpeg,.webp"
                          style="display:none" onchange="handleEntryInvoiceFile(this)" />
@@ -251,10 +260,10 @@
     </div>
   </div>
 
-  <script src="/static/utils.js?v=20260328-3"></script>
-  <script src="/static/inventory.js?v=20260328-3"></script>
-  <script src="/static/suppliers.js?v=20260328-3"></script>
-  <script src="/static/products.js?v=20260328-3"></script>
+  <script src="/static/utils.js?v=20260407-1"></script>
+  <script src="/static/inventory.js?v=20260407-1"></script>
+  <script src="/static/suppliers.js?v=20260407-1"></script>
+  <script src="/static/products.js?v=20260409-1"></script>
 
   <!-- ── Inline invoice-file viewer modal (shared, lightweight) ── -->
   <div class="modal-overlay hidden" id="entryFileViewModal">

@@ -18,6 +18,70 @@ function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
 }
 
+// ─── Helper: parse pack_size strings into { packQty, packUnit } ─
+// Handles complex formats from OCR/GPT:
+//   "12 LB"       → { packQty: 12, packUnit: "LB" }
+//   "500g"        → { packQty: 500, packUnit: "g" }
+//   "1 × 1.89L"   → { packQty: 1.89, packUnit: "L" }   (1 × 1.89 = 1.89)
+//   "6 x 100OZ"   → { packQty: 600, packUnit: "OZ" }   (6 × 100 = 600)
+//   "1/5 KG CS"   → { packQty: 5, packUnit: "KG" }     (fraction: qty/size)
+//   "5L"          → { packQty: 5, packUnit: "L" }
+//   "35 LB"       → { packQty: 35, packUnit: "LB" }
+function parsePackSize(raw: string): { packQty: number; packUnit: string } {
+  const s = (raw || '').trim()
+  if (!s) return { packQty: 1, packUnit: 'Each' }
+
+  // Known measurable unit pattern (case-insensitive)
+  const unitPat = '(?:kg|g|lb|lbs|l|ml|oz|fl\\s*oz|gal)'
+
+  // Pattern 1: "N × N UNIT" or "N x N UNIT" (e.g. "1 × 1.89L", "6 x 100OZ", "6x100 OZ")
+  const multMatch = s.match(
+    new RegExp(`^([\\d.]+)\\s*[×xX]\\s*([\\d.]+)\\s*(${unitPat})\\b`, 'i')
+  )
+  if (multMatch) {
+    const a = parseFloat(multMatch[1]) || 1
+    const b = parseFloat(multMatch[2]) || 1
+    return { packQty: Math.round(a * b * 1000) / 1000, packUnit: multMatch[3].trim() }
+  }
+
+  // Pattern 2: "N/N UNIT" fraction notation (e.g. "1/5 KG CS" → 5 KG)
+  // The second number is the actual pack size
+  const fracMatch = s.match(
+    new RegExp(`^([\\d.]+)\\s*/\\s*([\\d.]+)\\s*(${unitPat})\\b`, 'i')
+  )
+  if (fracMatch) {
+    return { packQty: parseFloat(fracMatch[2]) || 1, packUnit: fracMatch[3].trim() }
+  }
+
+  // Pattern 3: simple "N UNIT" or "NUNIT" (e.g. "12 LB", "500g", "5L", "1.89 L")
+  const simpleMatch = s.match(/^([\d.]+)\s*(.*)$/)
+  if (simpleMatch) {
+    const qty  = parseFloat(simpleMatch[1]) || 1
+    const unit = (simpleMatch[2] || 'Each').trim()
+    return { packQty: qty, packUnit: unit }
+  }
+
+  // Fallback: no number found — treat entire string as unit
+  return { packQty: 1, packUnit: s || 'Each' }
+}
+
+// ─── Helper: infer product category from name via keyword matching ─
+function inferCategory(name: string): string {
+  const n = name.toLowerCase()
+  const rules: [string, string[]][] = [
+    ['Linen',                   ['napkin','towel','apron','cloth','uniform','rag','linen']],
+    ['Disposables',             ['glove','cup','plate','fork','spoon','tissue','straw','cutlery','bio cont','container']],
+    ['Packaging',               ['box','bag','wrap','film','pail','jar','bottle','packaging']],
+    ['Non-Alcoholic Beverages', ['juice','water','soda','coffee','tea','syrup','drink','beverage']],
+    ['Alcohol',                 ['wine','beer','spirit','liquor','vodka','whiskey','rum','gin','alcohol']],
+    ['Cleaning & Sanitation',   ['cleaner','sanitizer','soap','detergent','bleach','disinfectant','cleaning']],
+  ]
+  for (const [category, keywords] of rules) {
+    if (keywords.some(k => n.includes(k))) return category
+  }
+  return 'Ingredients'
+}
+
 // ─── Generic table CRUD helper ────────────────────────────────
 // GET /api/tables/:table  – list all rows (or filtered)
 // GET /api/tables/:table/:id – get one
@@ -413,13 +477,17 @@ app.post('/api/bulk/upsert-products', async (c) => {
       reusedGenerics++
     } else {
       genericId = uid()
+      const providedCategory = (p.category as string || '').trim()
+      const category = (providedCategory && providedCategory !== 'Ingredients')
+        ? providedCategory
+        : inferCategory(name)
       await c.env.DB.prepare(
         `INSERT INTO generic_products (id, name, category, sub_unit_name, sub_unit_qty)
          VALUES (?, ?, ?, ?, ?)`
       ).bind(
         genericId,
         name,
-        (p.category as string) || 'Ingredients',
+        category,
         (p.sub_unit_name as string) || '',
         p.sub_unit_qty ?? null
       ).run()
@@ -429,13 +497,26 @@ app.post('/api/bulk/upsert-products', async (c) => {
     // 2. Always add a new product_entry for this purchase
     const entryId = uid()
     const today   = new Date().toISOString().slice(0, 10)
-    const cost    = parseFloat(p.cost as string) || 0
+    const cost      = parseFloat(p.cost as string) || 0
+    const unitPrice = parseFloat(p.unit_price as string) || cost
+    // Split pack_size string into pack_qty + pack_unit, handling complex formats:
+    //   "500g"        → 500, "g"
+    //   "2 kg"        → 2, "kg"
+    //   "12 LB"       → 12, "LB"
+    //   "1 × 1.89L"   → 1.89, "L"    (multiplied: 1 × 1.89)
+    //   "6 x 100OZ"   → 600, "OZ"   (multiplied: 6 × 100)
+    //   "1/5 KG CS"   → 5, "KG"     (fraction notation: qty/size UNIT)
+    //   "12 Each"     → 12, "Each"
+    const { packQty, packUnit } = parsePackSize((p.pack_size as string) || '')
 
-    // Split pack_size string (e.g. "500g", "2 kg", "12 Each") into pack_qty + pack_unit
-    const packSizeStr = ((p.pack_size as string) || '').trim()
-    const packMatch   = packSizeStr.match(/^([\d.]+)\s*(.*)$/)
-    const packQty     = packMatch ? parseFloat(packMatch[1]) || 1 : 1
-    const packUnit    = (packMatch ? (packMatch[2] || 'Each') : (packSizeStr || 'Each')).trim()
+    // cost_per_unit: divide unit_price by pack_qty for standard weight/volume units
+    // e.g. Potato Fingerling 12LB at $29.96 → $29.96 ÷ 12 = $2.50/lb
+    // For "Each" or non-standard units, unit_price IS the cost per unit already
+    const STANDARD_UNITS = ['kg','g','lb','lbs','l','ml','oz','fl oz','gal']
+    const isStandardUnit = STANDARD_UNITS.includes(packUnit.toLowerCase().replace(/\.$/, ''))
+    const costPerUnit = isStandardUnit && packQty > 1
+      ? Math.round((unitPrice / packQty) * 100) / 100
+      : unitPrice
 
     // Calculate days_left from expiry_date
     let daysLeftVal: number | null = null
@@ -462,7 +543,7 @@ app.post('/api/bulk/upsert-products', async (c) => {
       (p.vendor_item_name as string) || name,
       (p.sku as string) || '',
       packQty, packUnit,
-      cost, cost,
+      cost, costPerUnit,
       today,
       (p.expiry_date as string) || '',
       daysLeftVal,

@@ -9,6 +9,7 @@ let searchQuery       = '';
 let allGeneric        = [];   // generic_products rows
 let allEntries        = [];   // product_entries rows
 let allSupplierList   = [];   // suppliers rows (for dropdowns)
+let allInvoices       = [];   // invoices rows (for invoice number lookup)
 let currentGenericId  = null; // which generic product is open in modal
 let _pendingEntryInv  = null; // { genericId, entryId, itemName, packQty, packUnit, category }
 
@@ -38,7 +39,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('openAddEntryBtn').addEventListener('click', openAddEntryForm);
   document.getElementById('eCost').addEventListener('input',    updateEntryCostPerUnit);
   document.getElementById('ePackQty').addEventListener('input',  updateEntryCostPerUnit);
-  document.getElementById('ePackUnit').addEventListener('change', updateEntryCostPerUnit);
+  document.getElementById('ePackUnit').addEventListener('change', onPackUnitChange);
 
   // Inventory prompt modal (after saving a supplier entry)
   document.getElementById('closeEntryInvModal').addEventListener('click', () => closeModal('entryInvModal'));
@@ -49,14 +50,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 // ── Load everything ────────────────────────────────────────────
 async function loadAll() {
   try {
-    const [gd, ed, sd] = await Promise.all([
+    const [gd, ed, sd, ivd] = await Promise.all([
       apiGet(`tables/${GENERIC_TABLE}?page=1&limit=500`),
       apiGet(`tables/${ENTRIES_TABLE}?page=1&limit=1000`),
       apiGet(`tables/suppliers?page=1&limit=500`),
+      apiGet(`tables/invoices?page=1&limit=1000`),
     ]);
-    allGeneric      = gd.data || [];
-    allEntries      = ed.data || [];
-    allSupplierList = sd.data || [];
+    allGeneric      = gd.data  || [];
+    allEntries      = ed.data  || [];
+    allSupplierList = sd.data  || [];
+    allInvoices     = ivd.data || [];
     renderProductTable();
     renderStats();
   } catch (e) {
@@ -64,6 +67,13 @@ async function loadAll() {
     document.getElementById('productBody').innerHTML =
       `<tr><td colspan="6" class="empty-row"><i class="fas fa-exclamation-triangle"></i> Failed to load products.</td></tr>`;
   }
+}
+
+// ── Invoice number lookup ──────────────────────────────────────
+function invoiceNumber(invoiceId) {
+  if (!invoiceId) return '';
+  const inv = allInvoices.find(i => i.id === invoiceId);
+  return (inv && inv.invoice_number) ? inv.invoice_number : '';
 }
 
 // ── Render generic product table ───────────────────────────────
@@ -94,15 +104,21 @@ function renderProductTable() {
   tbody.innerHTML = slice.map(g => {
     const entries      = allEntries.filter(e => e.generic_product_id === g.id);
     const supplierCount = [...new Set(entries.map(e => e.supplier_name).filter(Boolean))].length;
-    const supplierLabel = supplierCount
-      ? `<span class="entry-count-badge">${supplierCount} vendor${supplierCount > 1 ? 's' : ''}</span>`
-      : '<span style="color:var(--text-muted);font-size:.8rem">—</span>';
+    const latestSupplierName = [...entries].reverse().find(e => e.supplier_name)?.supplier_name || '';
+    const supplierLabel = supplierCount === 0
+      ? '<span style="color:var(--text-muted);font-size:.8rem">—</span>'
+      : supplierCount === 1
+        ? `<span class="entry-count-badge">${esc(latestSupplierName)}</span>`
+        : `<span class="entry-count-badge">${supplierCount} vendors</span>`;
 
     // Best (lowest) cost per unit across entries
+    // CHANGE 1: prefer stored cost_per_unit; fall back to computing from cost/pack_qty
     let bestCpu = null;
     let bestUnit = '';
     entries.forEach(e => {
-      const cpu = entryPackQty(e) > 0 ? e.cost / entryPackQty(e) : e.cost;
+      const cpu = (e.cost_per_unit != null && e.cost_per_unit > 0)
+        ? e.cost_per_unit
+        : (entryPackQty(e) > 0 ? e.cost / entryPackQty(e) : e.cost);
       if (bestCpu === null || cpu < bestCpu) { bestCpu = cpu; bestUnit = entryPackUnit(e); }
     });
 
@@ -143,7 +159,7 @@ function renderProductTable() {
 function renderStats() {
   const el   = document.getElementById('productStats');
   const total = allGeneric.length;
-  const cats  = ['Ingredients','Primary Packaging','Labels & Branding','Shipping Supplies'];
+  const cats  = ['Ingredients','Packaging','Disposables','Non-Alcoholic Beverages','Alcohol','Cleaning & Sanitation','Linen','Other'];
   const catCounts = cats.map(c => ({ label: c, count: allGeneric.filter(g => g.category === c).length }));
   const uncat = allGeneric.filter(g => !g.category).length;
 
@@ -180,6 +196,7 @@ async function openAddProductModal() {
   document.getElementById('pCategory').value    = '';
   document.getElementById('pSubUnitName').value = '';
   document.getElementById('pSubUnitQty').value  = '';
+  document.getElementById('pAvgWeight').value   = '';
 
   // Show entry form immediately — user fills everything on one screen
   document.getElementById('openAddEntryBtn').style.display = 'none';
@@ -210,8 +227,9 @@ async function openEditProduct(id) {
   document.getElementById('editProductId').value    = id;
   document.getElementById('pName').value            = g.name         || '';
   document.getElementById('pCategory').value        = g.category     || '';
-  document.getElementById('pSubUnitName').value     = g.sub_unit_name || '';
-  document.getElementById('pSubUnitQty').value      = g.sub_unit_qty  || '';
+  document.getElementById('pSubUnitName').value     = g.sub_unit_name        || '';
+  document.getElementById('pSubUnitQty').value      = g.sub_unit_qty         || '';
+  document.getElementById('pAvgWeight').value       = g.avg_weight_per_unit  != null ? g.avg_weight_per_unit : '';
 
   await loadSupplierDropdown();
 
@@ -230,10 +248,12 @@ async function openEditProduct(id) {
     document.getElementById('eSku').value           = latest.sku              || '';
     document.getElementById('ePackQty').value       = latest.pack_qty         || '';
     document.getElementById('ePackUnit').value      = latest.pack_unit        || 'kg';
-    document.getElementById('eCost').value          = latest.cost             || '';
+    document.getElementById('ePackUnit').dataset.prevUnit = latest.pack_unit || 'kg';
+    // CHANGE 4: show unit price (cost_per_unit), not line total (cost)
+    document.getElementById('eCost').value          = _getStoredCpu(latest) || '';
     document.getElementById('ePurchaseDate').value  = latest.purchase_date    || '';
     document.getElementById('eExpiry').value        = latest.expiry_date      || '';
-    document.getElementById('eInvoiceRef').value    = latest.invoice_ref      || '';
+    document.getElementById('eInvoiceRef').value    = invoiceNumber(latest.invoice_id) || latest.invoice_ref || '';
     updateEntryCostPerUnit();
     document.getElementById('entriesPlaceholder').style.display = 'none';
   } else {
@@ -244,6 +264,7 @@ async function openEditProduct(id) {
     document.getElementById('eSku').value           = '';
     document.getElementById('ePackQty').value       = '';
     document.getElementById('ePackUnit').value      = 'kg';
+    document.getElementById('ePackUnit').dataset.prevUnit = 'kg';
     document.getElementById('eCost').value          = '';
     document.getElementById('ePurchaseDate').value  = '';
     document.getElementById('eExpiry').value        = '';
@@ -280,11 +301,13 @@ async function saveGenericProduct() {
     if (isNaN(parseFloat(costVal)) || parseFloat(costVal) < 0)   { showToast('Enter a valid cost.', 'error'); return; }
   }
 
+  const avgWeightRaw = parseFloat(document.getElementById('pAvgWeight').value);
   const payload = {
     name,
     category,
-    sub_unit_name: document.getElementById('pSubUnitName').value.trim() || null,
-    sub_unit_qty:  parseFloat(document.getElementById('pSubUnitQty').value) || null,
+    sub_unit_name:        document.getElementById('pSubUnitName').value.trim() || null,
+    sub_unit_qty:         parseFloat(document.getElementById('pSubUnitQty').value) || null,
+    avg_weight_per_unit:  isNaN(avgWeightRaw) ? null : avgWeightRaw,
   };
 
   const btn = document.getElementById('saveProductBtn');
@@ -352,11 +375,19 @@ function renderEntriesTable(genericId) {
   scroll.classList.remove('hidden');
 
   // Find most recent price for variance calculation
-  const sorted     = [...entries].sort((a, b) => (a.purchase_date || '') < (b.purchase_date || '') ? 1 : -1);
-  const latestCpu  = sorted[0] ? (entryPackQty(sorted[0]) > 0 ? sorted[0].cost / entryPackQty(sorted[0]) : sorted[0].cost) : null;
+  // CHANGE 2: prefer stored cost_per_unit for latestCpu
+  const sorted    = [...entries].sort((a, b) => (a.purchase_date || '') < (b.purchase_date || '') ? 1 : -1);
+  const latestCpu = sorted[0]
+    ? ((sorted[0].cost_per_unit != null && sorted[0].cost_per_unit > 0)
+        ? sorted[0].cost_per_unit
+        : (entryPackQty(sorted[0]) > 0 ? sorted[0].cost / entryPackQty(sorted[0]) : sorted[0].cost))
+    : null;
 
   tbody.innerHTML = entries.map(e => {
-    const cpu       = entryPackQty(e) > 0 ? e.cost / entryPackQty(e) : e.cost;
+    // CHANGE 3: prefer stored cost_per_unit for per-row cpu
+    const cpu      = (e.cost_per_unit != null && e.cost_per_unit > 0)
+      ? e.cost_per_unit
+      : (entryPackQty(e) > 0 ? e.cost / entryPackQty(e) : e.cost);
     const variance  = latestCpu && latestCpu > 0 ? ((cpu - latestCpu) / latestCpu * 100) : 0;
     const varClass  = variance > 0 ? 'color:#dc2626' : variance < 0 ? 'color:#16a34a' : 'color:var(--text-muted)';
     const varText   = variance === 0 ? '0.0%' : (variance > 0 ? '+' : '') + variance.toFixed(1) + '%';
@@ -411,6 +442,7 @@ function openAddEntryForm() {
   document.getElementById('eSku').value           = '';
   document.getElementById('ePackQty').value       = '';
   document.getElementById('ePackUnit').value      = 'kg';
+  document.getElementById('ePackUnit').dataset.prevUnit = 'kg';
   document.getElementById('eCost').value          = '';
   document.getElementById('ePurchaseDate').value  = new Date().toISOString().split('T')[0];
   document.getElementById('eExpiry').value        = '';
@@ -425,16 +457,18 @@ function openEditEntryForm(entryId) {
   const e = allEntries.find(x => x.id === entryId);
   if (!e) return;
   document.getElementById('editEntryId').value   = entryId;
-  document.getElementById('eSupplier').value     = e.supplier_id    || '';
+  document.getElementById('eSupplier').value     = e.supplier_id      || '';
   document.getElementById('eVendorName').value   = e.vendor_item_name || '';
-  document.getElementById('eSku').value          = e.sku            || '';
-  document.getElementById('ePurchaseDate').value = e.purchase_date  || '';
-  document.getElementById('eExpiry').value       = e.expiry_date    || '';
-  document.getElementById('eInvoiceRef').value   = e.invoice_ref    || '';
-  document.getElementById('eCost').value         = e.cost           || '';
+  document.getElementById('eSku').value          = e.sku              || '';
+  document.getElementById('ePurchaseDate').value = e.purchase_date    || '';
+  document.getElementById('eExpiry').value       = e.expiry_date      || '';
+  document.getElementById('eInvoiceRef').value   = invoiceNumber(e.invoice_id) || e.invoice_ref || '';
+  // CHANGE 5: show unit price (cost_per_unit), not line total (cost)
+  document.getElementById('eCost').value         = _getStoredCpu(e) || '';
   // Populate pack qty + unit directly from columns
   document.getElementById('ePackQty').value  = e.pack_qty  || '';
   document.getElementById('ePackUnit').value = e.pack_unit || 'kg';
+  document.getElementById('ePackUnit').dataset.prevUnit = e.pack_unit || 'kg';
   // Restore attached invoice file (if any)
   if (e.invoice_file_key) {
     setEntryInvoiceFileBadge(e.invoice_file_name || e.invoice_file_key, e.invoice_file_key);
@@ -450,6 +484,14 @@ function closeEntryForm() {
   document.getElementById('entryForm').classList.add('hidden');
 }
 
+function _getStoredCpu(e) {
+  const cpu = parseFloat(e.cost_per_unit);
+  if (!isNaN(cpu) && cpu > 0) return cpu;
+  const qty = entryPackQty(e);
+  const cost = parseFloat(e.cost) || 0;
+  return qty > 0 ? cost / qty : cost;
+}
+
 function updateEntryCostPerUnit() {
   const cost    = parseFloat(document.getElementById('eCost').value);
   const qty     = parseFloat(document.getElementById('ePackQty').value);
@@ -462,7 +504,134 @@ function updateEntryCostPerUnit() {
     return;
   }
   box.classList.add('ready');
-  display.textContent = `${fmt(cost / qty)} / ${unit}`;
+  display.textContent = `${fmt(cost)} / ${unit}`;
+}
+
+// ── Unit conversion for ePackUnit dropdown ─────────────────────
+const _WEIGHT_UNITS = ['kg', 'lb', 'g'];
+const _VOLUME_UNITS = ['L', 'ml'];
+const _COUNT_UNITS  = ['Can', 'Pack', 'Case', 'Dozen'];
+
+// Returns { cost: number } on success, or { error: string } on failure.
+// All costs are expressed as cost-per-unit-of-measure (e.g. $/kg, $/lb).
+// avg_weight_per_unit is in kg (used only for Each conversions).
+function _convertUnitCost(cost, fromUnit, toUnit, avgWeightPerUnit) {
+  if (fromUnit === toUnit) return { cost };
+
+  const fromIsWeight = _WEIGHT_UNITS.includes(fromUnit);
+  const fromIsVolume = _VOLUME_UNITS.includes(fromUnit);
+  const fromIsEach   = fromUnit === 'Each';
+  const fromIsCount  = _COUNT_UNITS.includes(fromUnit);
+
+  const toIsWeight   = _WEIGHT_UNITS.includes(toUnit);
+  const toIsVolume   = _VOLUME_UNITS.includes(toUnit);
+  const toIsEach     = toUnit === 'Each';
+  const toIsCount    = _COUNT_UNITS.includes(toUnit);
+
+  // Can/Pack/Case/Dozen can't convert to or from anything
+  if (fromIsCount || toIsCount) {
+    return { error: `Cannot convert ${fromUnit} to ${toUnit}` };
+  }
+
+  // Weight <-> Volume: not possible
+  if ((fromIsWeight && toIsVolume) || (fromIsVolume && toIsWeight)) {
+    return { error: `Cannot convert ${fromUnit} to ${toUnit}` };
+  }
+
+  // Weight or Volume -> Each: not possible
+  if ((fromIsWeight || fromIsVolume) && toIsEach) {
+    return { error: `Cannot convert ${fromUnit} to ${toUnit}` };
+  }
+
+  // Each -> Weight or Volume: requires avg_weight_per_unit
+  if (fromIsEach && toIsVolume) {
+    return { error: `Cannot convert ${fromUnit} to ${toUnit}` };
+  }
+  if (fromIsEach && toIsWeight) {
+    if (!avgWeightPerUnit || isNaN(avgWeightPerUnit) || avgWeightPerUnit <= 0) {
+      return { error: 'Set Average Weight per Unit first to enable conversion' };
+    }
+    // avg_weight_per_unit is in kg; cost_per_kg = cost_per_each / avg_weight_per_unit
+    const costPerKg = cost / avgWeightPerUnit;
+    if (toUnit === 'kg') return { cost: costPerKg };
+    if (toUnit === 'lb') return { cost: costPerKg * 0.45359 };
+    if (toUnit === 'g')  return { cost: costPerKg * 0.001 };
+  }
+
+  // Weight <-> Weight: normalise through kg
+  if (fromIsWeight && toIsWeight) {
+    let costPerKg;
+    if (fromUnit === 'kg') costPerKg = cost;
+    if (fromUnit === 'lb') costPerKg = cost * 2.20462;
+    if (fromUnit === 'g')  costPerKg = cost * 1000;
+    if (toUnit === 'kg') return { cost: costPerKg };
+    if (toUnit === 'lb') return { cost: costPerKg * 0.45359 };
+    if (toUnit === 'g')  return { cost: costPerKg * 0.001 };
+  }
+
+  // Volume <-> Volume: normalise through L
+  if (fromIsVolume && toIsVolume) {
+    const costPerL = fromUnit === 'L' ? cost : cost * 1000;
+    return { cost: toUnit === 'L' ? costPerL : costPerL * 0.001 };
+  }
+
+  return { error: `Cannot convert ${fromUnit} to ${toUnit}` };
+}
+
+async function onPackUnitChange() {
+  const select  = document.getElementById('ePackUnit');
+  const newUnit = select.value;
+  const prevUnit = select.dataset.prevUnit || newUnit;
+
+  // Track the new unit so subsequent changes have the right baseline
+  select.dataset.prevUnit = newUnit;
+
+  if (newUnit === prevUnit) { updateEntryCostPerUnit(); return; }
+
+  const costStr = document.getElementById('eCost').value.trim();
+  const cost    = parseFloat(costStr);
+
+  // No cost entered yet — nothing to convert, just update display
+  if (!costStr || isNaN(cost) || cost <= 0) { updateEntryCostPerUnit(); return; }
+
+  // Look up avg_weight_per_unit for the current product
+  let avgWeight = null;
+  if (currentGenericId) {
+    const g = allGeneric.find(x => x.id === currentGenericId);
+    if (g) avgWeight = parseFloat(g.avg_weight_per_unit) || null;
+  }
+
+  const result = _convertUnitCost(cost, prevUnit, newUnit, avgWeight);
+
+  if (result.error) {
+    const keepAnyway = await new Promise(resolve => {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999';
+      overlay.innerHTML = `
+        <div style="background:#fff;border-radius:8px;padding:24px 28px;max-width:380px;box-shadow:0 4px 24px rgba(0,0,0,.2)">
+          <p style="margin:0 0 20px;font-size:15px;line-height:1.5">Cannot convert <strong>${prevUnit}</strong> to <strong>${newUnit}</strong> automatically. Keep the same price with the new unit?</p>
+          <div style="display:flex;gap:10px;justify-content:flex-end">
+            <button id="_ucc_cancel" style="padding:7px 16px;border:1px solid #ccc;border-radius:5px;background:#fff;cursor:pointer">Cancel</button>
+            <button id="_ucc_keep"   style="padding:7px 16px;border:none;border-radius:5px;background:#2563eb;color:#fff;cursor:pointer">Keep anyway</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector('#_ucc_cancel').onclick = () => { document.body.removeChild(overlay); resolve(false); };
+      overlay.querySelector('#_ucc_keep').onclick   = () => { document.body.removeChild(overlay); resolve(true); };
+    });
+
+    if (!keepAnyway) {
+      select.value = prevUnit;
+      select.dataset.prevUnit = prevUnit;
+    }
+    // Either way, no recalculation — just update the display label
+    updateEntryCostPerUnit();
+    return;
+  }
+
+  // Round to 6 significant decimal places, strip trailing zeros
+  document.getElementById('eCost').value = parseFloat(result.cost.toFixed(6));
+  updateEntryCostPerUnit();
 }
 
 // Called by the inline "Save Entry" button (editing an existing product)
@@ -515,6 +684,10 @@ async function _saveEntryForGeneric(genericId, overrideName, overrideCategory) {
     } catch (_) { /* non-fatal — entry still saves without invoice link */ }
   }
 
+  // CHANGE 6: eCost now holds the unit price; derive line total from unit price × pack qty
+  const unitPrice = cost;
+  const lineTotal = pQty > 0 ? unitPrice * pQty : unitPrice;
+
   const payload = {
     generic_product_id:   genericId,
     generic_product_name: gName,
@@ -524,8 +697,8 @@ async function _saveEntryForGeneric(genericId, overrideName, overrideCategory) {
     sku:                  document.getElementById('eSku').value.trim(),
     pack_qty:             pQty,
     pack_unit:            pUnit,
-    cost,
-    cost_per_unit:        pQty > 0 ? cost / pQty : cost,
+    cost:                 lineTotal,      // line total  (e.g. 106.80 for 8 × $13.35)
+    cost_per_unit:        unitPrice,      // unit price  (e.g. 13.35)
     purchase_date:        document.getElementById('ePurchaseDate').value,
     expiry_date:          expiry,
     days_left:            daysLeft(expiry),
@@ -664,8 +837,11 @@ function fifoCostPerUnit(genericId) {
   const qty     = entryPackQty(oldest);
   const unit    = entryPackUnit(oldest);
   const g       = allGeneric.find(x => x.id === genericId);
+  // CHANGE 7: prefer stored cost_per_unit; fall back to computing from cost/pack_qty
   return {
-    cpu:          qty > 0 ? oldest.cost / qty : oldest.cost,
+    cpu: (oldest.cost_per_unit != null && oldest.cost_per_unit > 0)
+           ? oldest.cost_per_unit
+           : (qty > 0 ? oldest.cost / qty : oldest.cost),
     unit,
     packUnit:     unit,
     subUnitName:  g?.sub_unit_name || '',

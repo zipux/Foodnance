@@ -1621,6 +1621,7 @@ function detectTableByColumns(items, invoiceRef) {
       brand:       cleanStr(obj.brand  || ''),
       sku:         cleanStr(obj.sku    || ''),
       pack_size:   cleanStr(obj.pack_size || ''),
+      unit_price:  cost.toFixed(2),
       cost:        cost.toFixed(2),
       expiry_date: expiry,
       invoice_ref: refName,
@@ -1670,6 +1671,7 @@ function parseTextToRows(text, invoiceRef) {
       brand:       '',
       sku:         skuM  ? skuM[1]  : '',
       pack_size:   packM ? packM[1] : '',
+      unit_price:  cost.toFixed(2),
       cost:        cost.toFixed(2),
       expiry_date: parseDate(dateM ? dateM[1] : ''),
       invoice_ref: refName,
@@ -1760,6 +1762,7 @@ function parseCSVText(text, invoiceRef) {
       brand:       get(cols.brand),
       sku:         get(cols.sku),
       pack_size:   get(cols.pack_size),
+      unit_price:  isNaN(cost) ? '0.00' : cost.toFixed(2),
       cost:        isNaN(cost) ? '0.00' : cost.toFixed(2),
       expiry_date: parseDate(get(cols.expiry_date)),
       invoice_ref: get(cols.invoice_ref) || refName,
@@ -1812,6 +1815,7 @@ function mapSpreadsheetRows(json, invoiceRef) {
       brand:       get('brand'),
       sku:         get('sku'),
       pack_size:   get('pack_size'),
+      unit_price:  isNaN(cost) ? '0.00' : cost.toFixed(2),
       cost:        isNaN(cost) ? '0.00' : cost.toFixed(2),
       expiry_date: parseDate(get('expiry_date')),
       invoice_ref: get('invoice_ref') || refName,
@@ -2405,7 +2409,7 @@ async function saveManualRows() {
     const cost     = parseFloat(document.getElementById(`mcost-${idx}`)?.value || '0');
     const expiry   = (document.getElementById(`mexpiry-${idx}`)?.value || '').trim();
     const ref      = (document.getElementById(`mref-${idx}`)?.value   || '').trim();
-    if (name) rows.push({ name, brand, sku, pack_size: pack, cost: isNaN(cost)?0:cost, expiry_date: expiry, invoice_ref: ref });
+    if (name) rows.push({ name, brand, sku, pack_size: pack, unit_price: isNaN(cost)?0:cost, cost: isNaN(cost)?0:cost, expiry_date: expiry, invoice_ref: ref });
   });
 
   if (!rows.length) { showToast('No valid rows to save.', 'error'); return; }
