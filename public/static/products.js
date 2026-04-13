@@ -6,6 +6,7 @@ const PAGE_SIZE      = 15;
 
 let currentPage       = 1;
 let searchQuery       = '';
+let categoryFilter    = null; // null = all, or category string
 let allGeneric        = [];   // generic_products rows
 let allEntries        = [];   // product_entries rows
 let allSupplierList   = [];   // suppliers rows (for dropdowns)
@@ -78,12 +79,22 @@ function invoiceNumber(invoiceId) {
 
 // ── Render generic product table ───────────────────────────────
 function filteredGeneric() {
-  if (!searchQuery) return allGeneric;
+  let list = allGeneric;
+  if (categoryFilter) list = list.filter(g => g.category === categoryFilter);
+  if (!searchQuery) return list;
   const q = searchQuery.toLowerCase();
-  return allGeneric.filter(g =>
+  return list.filter(g =>
     (g.name     || '').toLowerCase().includes(q) ||
     (g.category || '').toLowerCase().includes(q)
   );
+}
+
+function setCategoryFilter(cat) {
+  // Clicking the same tab again clears the filter
+  categoryFilter = (categoryFilter === cat) ? null : cat;
+  currentPage = 1;
+  renderStats();
+  renderProductTable();
 }
 
 function renderProductTable() {
@@ -177,9 +188,18 @@ function renderStats() {
     return Math.floor((d - today) / 86400000) < 0;
   }).length;
 
+  const allActive = categoryFilter === null;
   el.innerHTML = `
-    <div class="stat-chip"><i class="fas fa-boxes"></i> ${total} Products</div>
-    ${catCounts.map(c => c.count > 0 ? `<div class="stat-chip cat-chip cat-${slugify(c.label)}"><i class="fas fa-tag"></i> ${c.count} ${c.label}</div>` : '').join('')}
+    <div class="stat-chip${allActive ? ' stat-chip-selected' : ''}" style="cursor:pointer" onclick="setCategoryFilter(null)" title="Show all products">
+      <i class="fas fa-boxes"></i> ${total} Products
+    </div>
+    ${catCounts.map(c => {
+      if (c.count === 0) return '';
+      const isActive = categoryFilter === c.label;
+      return `<div class="stat-chip cat-chip cat-${slugify(c.label)}${isActive ? ' cat-chip-active' : ''}" style="cursor:pointer" onclick="setCategoryFilter('${c.label.replace(/'/g, "\\'")}')" title="Filter by ${esc(c.label)}">
+        <i class="fas fa-tag"></i> ${c.count} ${esc(c.label)}
+      </div>`;
+    }).join('')}
     ${uncat > 0 ? `<div class="stat-chip" style="background:#f1f5f9;color:#64748b"><i class="fas fa-question-circle"></i> ${uncat} Uncategorised</div>` : ''}
     ${expiring > 0 ? `<div class="stat-chip" style="background:#fef9c3;color:#854d0e"><i class="fas fa-clock"></i> ${expiring} Expiring soon</div>` : ''}
     ${expired  > 0 ? `<div class="stat-chip" style="background:#fee2e2;color:#991b1b"><i class="fas fa-skull-crossbones"></i> ${expired} Expired</div>` : ''}
