@@ -11,7 +11,11 @@ async function apiGet(url) {
 }
 async function apiPost(url, data) {
   const r = await fetch(`${API_BASE}/${url}`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
-  if (!r.ok) throw new Error(`POST ${url} failed: ${r.status}`);
+  if (!r.ok) {
+    let msg = `POST ${url} failed: ${r.status}`;
+    try { const j = await r.json(); if (j.error) msg = j.error; } catch (_) {}
+    throw new Error(msg);
+  }
   return r.json();
 }
 async function apiPut(url, data) {
@@ -97,3 +101,114 @@ function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 function slugify(str) {
   return (str || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
+
+// ── Manage Units ──────────────────────────────────────────────────
+const _unitRefreshCallbacks = [];
+let _manageUnitsCache = [];
+
+function registerUnitRefreshCallback(fn) {
+  _unitRefreshCallbacks.push(fn);
+}
+
+async function _refreshAllUnitsAndDropdowns() {
+  for (const fn of _unitRefreshCallbacks) {
+    try { await fn(); } catch (e) { console.error('Unit refresh error', e); }
+  }
+}
+
+async function openManageUnitsModal() {
+  if (!document.getElementById('manageUnitsModal')) return;
+  await renderManageUnitsList();
+  openModal('manageUnitsModal');
+}
+
+async function renderManageUnitsList() {
+  const container = document.getElementById('manageUnitsList');
+  if (!container) return;
+  container.innerHTML = '<div style="color:var(--text-muted);font-size:.85rem;padding:.5rem 0"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
+  try {
+    const data = await apiGet('tables/units?page=1&limit=100');
+    _manageUnitsCache = (data.data || []).sort((a, b) => a.sort_order - b.sort_order);
+    if (!_manageUnitsCache.length) {
+      container.innerHTML = '<div style="color:var(--text-muted);font-size:.85rem;padding:.5rem 0">No units defined yet.</div>';
+      return;
+    }
+    container.innerHTML = _manageUnitsCache.map(u => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:.45rem .65rem;border:1px solid var(--border);border-radius:6px;margin-bottom:.35rem;background:#fafbff">
+        <span style="font-weight:500;font-size:.92rem">${esc(u.name)}</span>
+        <button class="btn btn-danger btn-icon" onclick="deleteUnit(${u.id},'${esc(u.name)}')" title="Delete unit" style="padding:.3rem .55rem;font-size:.78rem">
+          <i class="fas fa-trash"></i>
+        </button>
+      </div>
+    `).join('');
+  } catch (e) {
+    container.innerHTML = '<div style="color:#dc2626;font-size:.85rem">Failed to load units.</div>';
+  }
+}
+
+async function addUnit() {
+  const input = document.getElementById('newUnitName');
+  const errEl = document.getElementById('manageUnitsError');
+  const raw = (input?.value || '').trim();
+
+  errEl.style.display = 'none';
+
+  if (!raw) {
+    errEl.textContent = 'Please enter a unit name.';
+    errEl.style.display = '';
+    return;
+  }
+
+  // Normalize: lowercase, except 'l' / 'L' (litre) stays uppercase
+  const name = raw.toLowerCase() === 'l' ? 'L' : raw.toLowerCase();
+
+  if (_manageUnitsCache.some(u => u.name.toLowerCase() === name.toLowerCase())) {
+    errEl.textContent = `Unit "${name}" already exists.`;
+    errEl.style.display = '';
+    return;
+  }
+
+  try {
+    await apiPost('tables/units', { name, sort_order: 0 });
+    input.value = '';
+    await renderManageUnitsList();
+    await _refreshAllUnitsAndDropdowns();
+  } catch (e) {
+    errEl.textContent = e.message || 'Failed to add unit.';
+    errEl.style.display = '';
+  }
+}
+
+async function deleteUnit(id, name) {
+  const res = await fetch(`/api/units/${id}`, { method: 'DELETE' });
+
+  if (res.status === 204) {
+    await renderManageUnitsList();
+    await _refreshAllUnitsAndDropdowns();
+    return;
+  }
+
+  let data = {};
+  try { data = await res.json(); } catch (_) {}
+
+  if (data.warning) {
+    const confirmed = confirm(
+      `This unit is used by ${data.count} product ${data.count === 1 ? 'entry' : 'entries'}. Are you sure you want to delete it?`
+    );
+    if (!confirmed) return;
+    const res2 = await fetch(`/api/units/${id}?force=true`, { method: 'DELETE' });
+    if (res2.status === 204) {
+      await renderManageUnitsList();
+      await _refreshAllUnitsAndDropdowns();
+    } else {
+      showToast('Failed to delete unit.', 'error');
+    }
+    return;
+  }
+
+  showToast(data.error || 'Failed to delete unit.', 'error');
+}
+
+window.openManageUnitsModal = openManageUnitsModal;
+window.addUnit  = addUnit;
+window.deleteUnit = deleteUnit;

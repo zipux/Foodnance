@@ -140,10 +140,7 @@
                 <div class="pack-size-row">
                   <input type="number" id="ePackQty" placeholder="e.g. 1" min="0" step="any" />
                   <select id="ePackUnit">
-                    <option value="kg">kg</option><option value="g">g</option><option value="lb">lb</option>
-                    <option value="ml">ml</option><option value="L">L</option><option value="Can">Can</option>
-                    <option value="Each">Each</option><option value="Pack">Pack</option>
-                    <option value="Case">Case</option><option value="Dozen">Dozen</option>
+                    <option value="">Loading…</option>
                   </select>
                 </div>
               </div>
@@ -260,10 +257,34 @@
     </div>
   </div>
 
-  <script src="/static/utils.js?v=20260407-1"></script>
+  <!-- MANAGE UNITS MODAL -->
+  <div class="modal-overlay hidden" id="manageUnitsModal">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header">
+        <h3><i class="fas fa-sliders-h"></i> Manage Units</h3>
+        <button class="modal-close" onclick="closeModal('manageUnitsModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <div id="manageUnitsList" style="margin-bottom:1rem;max-height:320px;overflow-y:auto"></div>
+        <div style="display:flex;gap:.5rem;align-items:center">
+          <input type="text" id="newUnitName" placeholder="New unit name…" style="flex:1"
+                 onkeydown="if(event.key==='Enter') addUnit()" />
+          <button class="btn btn-primary btn-sm" onclick="addUnit()">
+            <i class="fas fa-plus"></i> Add
+          </button>
+        </div>
+        <div id="manageUnitsError" style="color:#dc2626;font-size:.82rem;margin-top:.35rem;display:none"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('manageUnitsModal')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/utils.js?v=20260422-2"></script>
   <script src="/static/inventory.js?v=20260407-1"></script>
   <script src="/static/suppliers.js?v=20260407-1"></script>
-  <script src="/static/products.js?v=20260409-1"></script>
+  <script src="/static/products.js?v=20260422-2"></script>
 
   <!-- ── Inline invoice-file viewer modal (shared, lightweight) ── -->
   <div class="modal-overlay hidden" id="entryFileViewModal">

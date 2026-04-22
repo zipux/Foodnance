@@ -95,7 +95,7 @@ const ALLOWED_TABLES = [
   'recipes', 'recipe_items', 'finished_products', 'finished_product_items',
   'inventory', 'stock_log', 'invoices', 'invoice_lines',
   'staff', 'certification_types', 'staff_certifications',
-  'product_mappings'
+  'product_mappings', 'units'
 ]
 
 // ── List / query
@@ -132,18 +132,22 @@ app.get('/api/tables/:table/:id', async (c) => {
   return c.json(row)
 })
 
+// Tables that use INTEGER PRIMARY KEY AUTOINCREMENT — don't inject a UUID id
+const INTEGER_PK_TABLES = ['units']
+
 // ── Insert
 app.post('/api/tables/:table', async (c) => {
   const table = c.req.param('table')
   if (!ALLOWED_TABLES.includes(table)) return c.json({ error: 'Unknown table' }, 400)
   const body = await c.req.json() as Record<string, unknown>
-  if (!body.id) body.id = uid()
+  if (!body.id && !INTEGER_PK_TABLES.includes(table)) body.id = uid()
   const keys = Object.keys(body)
   const vals = Object.values(body)
-  await c.env.DB.prepare(
+  const result = await c.env.DB.prepare(
     `INSERT INTO ${table} (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`
   ).bind(...vals).run()
-  return c.json({ id: body.id, ...body }, 201)
+  const insertedId = INTEGER_PK_TABLES.includes(table) ? result.meta.last_row_id : body.id
+  return c.json({ id: insertedId, ...body }, 201)
 })
 
 // ── Replace (PUT)
@@ -229,7 +233,7 @@ app.post('/api/invoice-lines/:invoice_id/replace', async (c) => {
   const invoiceId = c.req.param('invoice_id')
   const body = await c.req.json() as {
     lines: Record<string, unknown>[]
-    tax_pst?: number; tax_gst?: number; delivery?: number; fuel_surcharge?: number; deposit?: number
+    tax_pst?: number; tax_gst?: number; delivery?: number; deposit?: number
     credit?: number; other_cost?: number; other_desc?: string
   }
 
@@ -258,16 +262,15 @@ app.post('/api/invoice-lines/:invoice_id/replace', async (c) => {
 
   // Update extra cost fields on invoice
   await c.env.DB.prepare(
-    `UPDATE invoices SET tax_pst=?, tax_gst=?, delivery=?, fuel_surcharge=?, deposit=?, credit=?, other_cost=?, other_desc=? WHERE id=?`
+    `UPDATE invoices SET tax_pst=?, tax_gst=?, delivery=?, fuel_surcharge=0, deposit=?, credit=?, other_cost=?, other_desc=? WHERE id=?`
   ).bind(
-    body.tax_pst         ?? 0,
-    body.tax_gst         ?? 0,
-    body.delivery        ?? 0,
-    body.fuel_surcharge  ?? 0,
-    body.deposit         ?? 0,
-    body.credit          ?? 0,
-    body.other_cost      ?? 0,
-    body.other_desc      ?? '',
+    body.tax_pst    ?? 0,
+    body.tax_gst    ?? 0,
+    body.delivery   ?? 0,
+    body.deposit    ?? 0,
+    body.credit     ?? 0,
+    body.other_cost ?? 0,
+    body.other_desc ?? '',
     invoiceId
   ).run()
 
@@ -356,7 +359,7 @@ app.post('/api/ensure-invoice', async (c) => {
     file_key: string; file_name?: string
     vendor?: string; invoice_number?: string
     invoice_date?: string; total?: number
-    tax_gst?: number; tax_pst?: number; delivery?: number; fuel_surcharge?: number; deposit?: number
+    tax_gst?: number; tax_pst?: number; delivery?: number; deposit?: number
     credit?: number; other_cost?: number; other_desc?: string
   }
   if (!body.file_key) return c.json({ error: 'file_key required' }, 400)
@@ -379,7 +382,7 @@ app.post('/api/ensure-invoice', async (c) => {
        status, payment_account, file_name, file_key, file_url, notes,
        tax_gst, tax_pst, delivery, fuel_surcharge, deposit, credit, other_cost, other_desc)
      VALUES (?, ?, ?, ?, ?, ?, 'In Processing', 'A/P', ?, ?, ?, '',
-             ?, ?, ?, ?, ?, ?, ?, ?)`
+             ?, ?, ?, 0, ?, ?, ?, ?)`
   ).bind(
     invoiceId,
     body.vendor         || '',
@@ -390,14 +393,13 @@ app.post('/api/ensure-invoice', async (c) => {
     body.file_name      || '',
     body.file_key,
     `/api/files/${body.file_key}`,
-    body.tax_gst         ?? 0,
-    body.tax_pst         ?? 0,
-    body.delivery        ?? 0,
-    body.fuel_surcharge  ?? 0,
-    body.deposit         ?? 0,
-    body.credit          ?? 0,
-    body.other_cost      ?? 0,
-    body.other_desc      || ''
+    body.tax_gst    ?? 0,
+    body.tax_pst    ?? 0,
+    body.delivery   ?? 0,
+    body.deposit    ?? 0,
+    body.credit     ?? 0,
+    body.other_cost ?? 0,
+    body.other_desc || ''
   ).run()
 
   return c.json({ id: invoiceId, created: true })
@@ -626,8 +628,6 @@ app.post('/api/ai/parse-invoice', async (c) => {
   "tax_gst": 0.00,
   "tax_pst": 0.00,
   "delivery": 0.00,
-  "fuel_surcharge": 0.00,
-  "deposit": 0.00,
   "credit": 0.00,
   "other_cost": 0.00,
   "other_desc": "",
@@ -649,28 +649,18 @@ app.post('/api/ai/parse-invoice', async (c) => {
   const rules = `Rules:
 - Extract EVERY product line item in the text — do not skip any
 - For 'original_ocr': copy the exact original OCR text for each product line item, character-for-character, without cleaning or modifying it. This is used for product matching.
+- Do NOT include delivery fees, fuel surcharges, or taxes as items[] entries — put them in the dedicated fields (delivery, tax_gst, tax_pst) instead
 - For 'name': use the generic product name, not the vendor-specific SKU description
 - For 'qty': the quantity ordered (number of units, cases, bags, etc. as shown on the invoice). Must be a number, not text
 - For 'unit_price': the price per single unit as shown on the invoice (e.g. $13.35 per bag). This is NOT the line total
 - For 'cost': the line total (qty × unit_price). Verify the math: cost should equal qty × unit_price
 - For 'pack_size': prioritize the unit weight or volume over the case count. For example, '20CS of 50KG' should be saved as '50KG'. Only use case count or 'Each' if there is no weight or volume available
-
-CHARGE ROUTING — read carefully, this is critical:
-
-- TAX FIELDS (tax_gst, tax_pst): ONLY for actual government sales taxes. 'tax_gst' is ONLY for amounts explicitly labeled GST, HST, or a federal/harmonized sales tax percentage line. 'tax_pst' is ONLY for amounts explicitly labeled PST, QST, or a provincial sales tax percentage line. The word "Taxable" next to a charge (e.g. "FUEL (Taxable)") means that charge is SUBJECT TO tax — it does NOT mean the charge itself is a tax. Never put fuel surcharges, delivery fees, deposits, CRF, or any other fee into the tax fields, even if they appear near the tax section or are labeled "Taxable". Dollar values only, not percentages.
-
-- DELIVERY (delivery): any delivery fee, freight charge, or shipping cost that is an actual charge on this invoice total. Even if it appears as a line item in the products table (e.g. "DELIVERY CHARGE $5.49"), extract it here and do NOT include it in items[]. Do NOT extract delivery amounts mentioned only in general policy text, terms and conditions, or fine print.
-
-- FUEL SURCHARGE (fuel_surcharge): any fuel surcharge, energy surcharge, or environmental fee that is an actual charge on this invoice. Even if labeled "Taxable", this goes here — NOT in tax_gst or tax_pst. Do NOT extract amounts mentioned only in policy text or terms.
-
-- DEPOSITS (deposit): sum ALL deposit charges into this single field. This includes: dairy case deposits, bottle deposits, container deposits, pallet charges (e.g. CHEP pallets), crate deposits, keg deposits, or any other refundable/returnable container charge. These often appear as line items in the product table — do NOT include them in items[], put the total in 'deposit' instead. Also check for a DEPOSIT column in the line items table and sum any per-line deposit amounts (e.g. $0.50 deposit on milk) into this field as well.
-
-- CREDIT/DISCOUNT (credit): CRITICAL — only extract a credit or discount if the line item unit_prices are at FULL undiscounted price and the discount is applied separately (e.g. as a "PRODUCT DISCOUNT" line in the footer). To verify: check whether qty × unit_price = the line total (cost) shown on the invoice. If it does match, the prices already reflect the discount, so set credit to 0.00. Only set credit > 0 when the items use full/list prices and the discount is subtracted separately from the subtotal.
-
-- OTHER COSTS (other_cost, other_desc): any fee not covered above, such as CRF (Container Recovery Fee), container recovery charges, handling fees, restocking fees, broken case surcharges, or regulatory fees. Sum them into other_cost and list their descriptions in other_desc (e.g. "CRF $0.35, Broken Case $1.00").
-
-NON-PRODUCT LINE ITEMS: delivery charges, fuel surcharges, deposits, pallet charges, CRF fees, and similar non-product charges sometimes appear as regular line items in the invoice's product table. Do NOT add these to items[] — instead route them to the correct field above. Only actual purchasable products/goods belong in items[].
-
+- For 'tax_gst': GST, HST, or any federal/harmonized sales tax amount (dollar value, not %)
+- For 'tax_pst': PST, QST, or any provincial sales tax amount (dollar value, not %)
+- For 'delivery': the combined total of any delivery fee, freight charge, shipping cost, fuel surcharge, energy surcharge, or environmental fee that are actual charges applied to this specific invoice's total. Add them together into this single field. Do NOT extract amounts mentioned only in general policy text, terms and conditions, fine print, or minimum order notices (e.g. "Free delivery on orders over $X"). Only extract actual line item charges that affect the invoice total
+- - For 'credit': only extract a credit/discount if the line item prices are at FULL (undiscounted) price and the discount is applied separately at the bottom of the invoice. If the line item prices already reflect the discounted price (i.e. the discounted unit price × qty = the line total shown), set credit to 0.00
+- For 'other_cost': any other fee not covered above (handling fee, etc.)
+- For 'other_desc': description of the other_cost if applicable
 - For dates: convert any format to YYYY-MM-DD
 - Use 0.00 for numeric fields you cannot find
 - Use empty string '' for text fields you cannot find
@@ -684,11 +674,19 @@ NON-PRODUCT LINE ITEMS: delivery charges, fuel surcharges, deposits, pallet char
   const contentType = c.req.header('content-type') || ''
 
   if (!contentType.includes('multipart/form-data')) {
-    const body = await c.req.json() as { ocrText?: string; base64?: string; mimeType?: string }
+    const body = await c.req.json() as {
+      ocrText?: string
+      base64?: string
+      mimeType?: string
+      base64Images?: Array<{ base64: string; mimeType?: string }>
+    }
 
     if (body.ocrText) {
-      // ── Mode 1: Azure OCR text → GPT-4o text-only ──────────
-      const prompt = `You are an expert invoice parser. Below is the raw text extracted from an invoice by OCR. The OCR text is accurate in most cases, but small decimal values may be misread (e.g., '.15' read as '15'). Always cross-check individual amounts against the invoice total to catch these errors.
+      // ── Mode 1: Azure OCR text → GPT-4o ──────────────────────
+      // If base64Images are also provided, send both text + images
+      // so GPT can use the image to verify the totals/charges section
+      // that OCR often mangles.
+      const prompt = `You are an expert invoice parser. Below is the raw text extracted from an invoice by OCR. The OCR text is accurate for product line items, but the totals/charges section (taxes, fees, deposits, surcharges) may have broken formatting where labels and values appear on separate lines or are misassociated.${body.base64Images?.length ? ' You also have the original invoice image(s) — use them to VISUALLY VERIFY all charges in the totals section. When the OCR text is ambiguous about which value belongs to which label, trust the image layout over the OCR text.' : ' Always cross-check individual amounts against the invoice total to catch these errors.'}
 
 Parse this text carefully and extract ALL line items AND all additional charges. Return ONLY a valid JSON object in this exact format (no markdown, no explanation, no code fences):
 ${jsonSchema}
@@ -698,7 +696,23 @@ ${rules}
 ${body.ocrText}
 --- INVOICE OCR TEXT END ---`
 
-      messages = [{ role: 'user', content: prompt }]
+      if (body.base64Images?.length) {
+        // Dual mode: text + images
+        const content: Array<{ type: string; text?: string; image_url?: { url: string; detail: string } }> = [
+          { type: 'text', text: prompt }
+        ]
+        for (const img of body.base64Images) {
+          const mime = img.mimeType || 'image/jpeg'
+          content.push({
+            type: 'image_url',
+            image_url: { url: `data:${mime};base64,${img.base64}`, detail: 'high' }
+          })
+        }
+        messages = [{ role: 'user', content }]
+      } else {
+        // Text-only mode (PDFs or when images not available)
+        messages = [{ role: 'user', content: prompt }]
+      }
 
     } else if (body.base64) {
       // ── Mode 2: raw image (fallback when Azure not configured) ──
@@ -973,6 +987,32 @@ app.post('/api/product-mappings', async (c) => {
     now, now
   ).run()
   return c.json({ id, created: true })
+})
+
+// ─── Units: delete with usage check ──────────────────────────────
+// DELETE /api/units/:id
+// Without ?force=true: returns { warning, count, message } if unit is in use.
+// With ?force=true: deletes regardless of usage.
+app.delete('/api/units/:id', async (c) => {
+  const id    = c.req.param('id')
+  const force = c.req.query('force') === 'true'
+
+  const unit = await c.env.DB.prepare(`SELECT * FROM units WHERE id = ?`)
+    .bind(id).first<{ id: number; name: string; sort_order: number }>()
+  if (!unit) return c.json({ error: 'Not found' }, 404)
+
+  if (!force) {
+    const usage = await c.env.DB.prepare(
+      `SELECT COUNT(*) as count FROM product_entries WHERE pack_unit = ?`
+    ).bind(unit.name).first<{ count: number }>()
+    const count = usage?.count ?? 0
+    if (count > 0) {
+      return c.json({ warning: true, count, message: `Used by ${count} product entries` })
+    }
+  }
+
+  await c.env.DB.prepare(`DELETE FROM units WHERE id = ?`).bind(id).run()
+  return c.body(null, 204)
 })
 
 export default app

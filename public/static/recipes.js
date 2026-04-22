@@ -8,18 +8,27 @@ let allProducts    = [];      // product catalogue
 let ingredientRows = [];      // [{product_id, product_name, quantity, unit, unit_cost}]
 let allRecipes     = [];      // full recipe list
 let currentDetailId = null;
+let allUnits_r     = [];      // units table rows, sorted by sort_order
 
 // ── Bootstrap ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   if (!document.getElementById('recipeName')) return; // guard
 
-  await Promise.all([loadProductCatalogue(), loadRecipes()]);
+  await Promise.all([loadProductCatalogue(), loadRecipes(), loadUnits()]);
 
   document.getElementById('addIngredientBtn').addEventListener('click', addIngredientLine);
   document.getElementById('saveRecipeBtn').addEventListener('click', saveRecipe);
   document.getElementById('clearRecipeBtn').addEventListener('click', clearRecipeForm);
   document.getElementById('recipeYieldQty').addEventListener('input',  recalcCosts);
-  document.getElementById('recipeYieldUnit').addEventListener('change', recalcCosts);
+  document.getElementById('recipeYieldUnit').addEventListener('change', e => {
+    if (e.target.value === '__manage_units__') {
+      e.target.value = e.target.dataset.prevUnit || '';
+      openManageUnitsModal();
+      return;
+    }
+    e.target.dataset.prevUnit = e.target.value;
+    recalcCosts();
+  });
   document.getElementById('recipeSearch').addEventListener('input', e => {
     renderRecipeList(e.target.value.trim());
   });
@@ -45,20 +54,66 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   document.getElementById('confirmProduceBatchBtn').addEventListener('click', confirmProduceBatch);
   document.getElementById('pbQty').addEventListener('input',   updatePbPreview);
-  document.getElementById('pbUnit').addEventListener('change', updatePbPreview);
+  document.getElementById('pbUnit').addEventListener('change', e => {
+    if (e.target.value === '__manage_units__') {
+      e.target.value = e.target.dataset.prevUnit || '';
+      openManageUnitsModal();
+      return;
+    }
+    e.target.dataset.prevUnit = e.target.value;
+    updatePbPreview();
+  });
 
   // Start with one ingredient line
   addIngredientLine();
 });
 
+// ── Units loading ─────────────────────────────────────────────
+async function loadUnits() {
+  try {
+    const ud = await apiGet(`tables/units?page=1&limit=100`);
+    allUnits_r = (ud.data || []).slice().sort((a, b) => a.sort_order - b.sort_order);
+    populateUnitDropdown_r(document.getElementById('recipeYieldUnit'));
+    populateUnitDropdown_r(document.getElementById('pbUnit'));
+  } catch (e) {
+    console.error('Failed to load units', e);
+  }
+}
+
+function populateUnitDropdown_r(select, selectedValue) {
+  if (!select) return;
+  const prev = selectedValue !== undefined ? selectedValue : select.value;
+  const seen = new Set();
+  const uniqueUnits = allUnits_r.filter(u => {
+    const key = (u.name || '').toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  select.innerHTML = uniqueUnits
+    .map(u => `<option value="${u.name}">${u.name}</option>`)
+    .join('') +
+    '<option value="__manage_units__" style="color:var(--primary);font-style:italic">+ Manage units</option>';
+  setSelectValueCI_r(select, prev);
+  select.dataset.prevUnit = select.value;
+}
+
+function setSelectValueCI_r(select, value) {
+  if (!value) return;
+  const lower = value.toLowerCase();
+  const opt = Array.from(select.options).find(o => o.value.toLowerCase() === lower);
+  if (opt) select.value = opt.value;
+}
+
 // ── Unit helpers ──────────────────────────────────────────────
-// Parse pack_size string (e.g. "2 kg", "500 g", "3 L", "1 Case") → numeric qty
+// Prefer dedicated pack_qty / pack_unit columns (written by products.js); fall back to parsing legacy pack_size.
 function packQty(p) {
+  if (p.pack_qty != null && p.pack_qty !== '') return parseFloat(p.pack_qty) || 1;
   const m = (p.pack_size || '').match(/^([\d.]+)/);
   return m ? parseFloat(m[1]) : 1;
 }
-// Return just the unit label from pack_size — preserves original case (e.g. 'Each', 'L', 'kg')
 function packUnit(p) {
+  if (p.pack_unit) return p.pack_unit;
   const m = (p.pack_size || '').match(/[\d.]+\s*(.+)$/);
   return m ? m[1].trim() : 'unit';
 }
@@ -93,7 +148,16 @@ function unitConversionFactor(packUnitStr, recipeUnitStr) {
 // If the product has a sub-unit defined, append it at the top as a highlighted option.
 function buildUnitOptions(selectedUnit, product) {
   const su  = product?.sub_unit_name || '';
-  const std = ['kg','g','lb','ml','L','Can','Each','Pack','Case','Dozen'];
+  const seen = new Set();
+  const stdRaw = allUnits_r.length
+    ? allUnits_r.map(u => u.name)
+    : ['kg','g','lb','ml','L','each','case'];
+  const std = stdRaw.filter(name => {
+    const key = (name || '').toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   const sel = (selectedUnit || '').toLowerCase();
   let html  = '';
 
@@ -108,6 +172,8 @@ function buildUnitOptions(selectedUnit, product) {
     const isSelected = sel === u.toLowerCase() ? 'selected' : '';
     return `<option value="${u}" ${isSelected}>${u}</option>`;
   }).join('');
+
+  html += '<option value="__manage_units__" style="color:var(--primary);font-style:italic">+ Manage units</option>';
 
   return html;
 }
@@ -149,15 +215,22 @@ async function loadProductCatalogue() {
       const packSz  = activeEntry.pack_size || '';
       const pqMatch = packSz.match(/^([\d.]+)/);
       const puMatch = packSz.match(/[\d.]+\s*(.+)$/);
-      const pQty    = pqMatch ? parseFloat(pqMatch[1]) : 1;
-      const pUnit   = puMatch ? puMatch[1].trim() : 'unit';
-      const cpu     = pQty > 0 ? activeEntry.cost / pQty : 0;
+      // Prefer dedicated columns (written by products.js); fall back to parsing pack_size string.
+      const pQty    = (activeEntry.pack_qty != null && activeEntry.pack_qty !== '')
+           ? (parseFloat(activeEntry.pack_qty) || 1)
+           : (pqMatch ? parseFloat(pqMatch[1]) : 1);
+      const pUnit   = activeEntry.pack_unit || (puMatch ? puMatch[1].trim() : 'unit');
+      const cpu     = (activeEntry.cost_per_unit != null && activeEntry.cost_per_unit > 0)
+           ? activeEntry.cost_per_unit
+           : (pQty > 0 ? activeEntry.cost / pQty : 0);
 
       return {
         id:            g.id,
         name:          g.name,
         category:      g.category,
         pack_size:     packSz,
+        pack_qty:      pQty,
+        pack_unit:     pUnit,
         cost:          activeEntry.cost || 0,
         sub_unit_name: g.sub_unit_name || '',
         sub_unit_qty:  g.sub_unit_qty  || 0,
@@ -263,6 +336,7 @@ function addIngredientLine(prefill = null) {
       <select id="ing-unit-${idx}" onchange="onUnitChange(${idx})">
         ${unitOpts}
       </select>
+      <span id="ing-cpu-${idx}" style="font-size:.72rem;color:var(--text-muted);margin-top:.15rem;display:block;min-height:.9rem"></span>
     </div>
     <div>
       ${idx === 0 ? '<label style="font-size:.72rem;font-weight:600;color:transparent">x</label>' : ''}
@@ -270,6 +344,10 @@ function addIngredientLine(prefill = null) {
     </div>
   `;
   container.appendChild(div);
+
+  // Track prevUnit so __manage_units__ selection can reset correctly
+  const unitSelInit = document.getElementById(`ing-unit-${idx}`);
+  if (unitSelInit) unitSelInit.dataset.prevUnit = unitSelInit.value;
 
   // If prefill had product_id, initialise cost
   if (row.product_id) onProductChange(idx);
@@ -305,9 +383,21 @@ function onProductChange(idx) {
   const unitSel = document.getElementById(`ing-unit-${idx}`);
   if (unitSel) {
     unitSel.innerHTML = buildUnitOptions(ingredientRows[idx].unit, product);
+    unitSel.dataset.prevUnit = unitSel.value;
   }
 
+  _updateIngCostDisplay(idx);
   recalcCosts();
+}
+
+function _updateIngCostDisplay(idx) {
+  const el = document.getElementById(`ing-cpu-${idx}`);
+  if (!el) return;
+  const r = ingredientRows[idx];
+  if (!r || !r.product_id || !r.unit_cost || !r.pack_unit) { el.textContent = ''; return; }
+  const unit   = r.unit || r.pack_unit;
+  const factor = unitConversionFactor(r.pack_unit, unit);
+  el.textContent = `${fmt(r.unit_cost * factor)} / ${unit}`;
 }
 
 function onQtyChange(idx) {
@@ -317,10 +407,38 @@ function onQtyChange(idx) {
 }
 
 function onUnitChange(idx) {
-  const sel = document.getElementById(`ing-unit-${idx}`);
-  ingredientRows[idx].unit         = sel.value || 'kg';
-  ingredientRows[idx]._manualUnit  = true;  // user explicitly chose — lock it
-  ingredientRows[idx]._autoUnit    = false;
+  const sel     = document.getElementById(`ing-unit-${idx}`);
+  const newUnit = sel.value;
+
+  if (newUnit === '__manage_units__') {
+    sel.value = sel.dataset.prevUnit || ingredientRows[idx]?.unit || '';
+    openManageUnitsModal();
+    return;
+  }
+
+  const prevUnit = sel.dataset.prevUnit || ingredientRows[idx]?.unit || '';
+
+  // Block weight ↔ volume swaps — check the two unit values being switched between
+  if (newUnit !== prevUnit) {
+    const WEIGHT     = ['kg', 'g', 'lb'];
+    const VOLUME     = ['l', 'ml'];
+    const fromU      = prevUnit.toLowerCase().trim();
+    const toU        = newUnit.toLowerCase().trim();
+    const impossible = (WEIGHT.includes(fromU) && VOLUME.includes(toU)) ||
+                       (VOLUME.includes(fromU) && WEIGHT.includes(toU));
+    if (impossible) {
+      sel.value = prevUnit;
+      showToast(`Cannot convert ${prevUnit} to ${newUnit} — unit reset.`, 'warning');
+      return;
+    }
+  }
+
+  sel.dataset.prevUnit            = newUnit;
+  ingredientRows[idx].unit        = newUnit || 'kg';
+  ingredientRows[idx]._manualUnit = true;
+  ingredientRows[idx]._autoUnit   = false;
+
+  _updateIngCostDisplay(idx);
   recalcCosts();
 }
 function removeIngredientLine(idx) {
@@ -441,7 +559,7 @@ function clearRecipeForm() {
   document.getElementById('recipeName').value      = '';
   document.getElementById('recipeDesc').value      = '';
   document.getElementById('recipeYieldQty').value  = '';
-  document.getElementById('recipeYieldUnit').value = 'kg';
+  setSelectValueCI_r(document.getElementById('recipeYieldUnit'), 'kg');
   document.getElementById('recipeFormTitle').innerHTML = '<i class="fas fa-plus-circle"></i> New Recipe';
   document.getElementById('ingredientLines').innerHTML = '';
   ingredientRows = [];
@@ -609,7 +727,7 @@ async function loadRecipeIntoForm(id) {
   document.getElementById('recipeName').value      = recipe.name || '';
   document.getElementById('recipeDesc').value      = recipe.description || '';
   document.getElementById('recipeYieldQty').value  = recipe.servings || '';
-  document.getElementById('recipeYieldUnit').value = recipe.yield_unit || 'kg';
+  setSelectValueCI_r(document.getElementById('recipeYieldUnit'), recipe.yield_unit || 'kg');
   document.getElementById('recipeFormTitle').innerHTML =
     '<i class="fas fa-edit"></i> Edit Recipe: ' + esc(recipe.name);
 
@@ -690,7 +808,7 @@ async function openProduceBatchModal(recipeId) {
 
   document.getElementById('pbRecipeName').textContent = recipe.name;
   document.getElementById('pbQty').value  = recipe.servings || '';
-  document.getElementById('pbUnit').value = recipe.yield_unit || 'kg';
+  setSelectValueCI_r(document.getElementById('pbUnit'), recipe.yield_unit || 'kg');
   document.getElementById('pbNote').value = '';
 
   updatePbPreview();
@@ -762,6 +880,25 @@ function updatePbPreview() {
 
   container.innerHTML = html;
 }
+
+// Reload unit dropdowns after manage-units changes
+registerUnitRefreshCallback(async () => {
+  if (!document.getElementById('recipeYieldUnit')) return;
+  const ud = await apiGet(`tables/units?page=1&limit=100`);
+  allUnits_r = (ud.data || []).slice().sort((a, b) => a.sort_order - b.sort_order);
+  populateUnitDropdown_r(document.getElementById('recipeYieldUnit'));
+  populateUnitDropdown_r(document.getElementById('pbUnit'));
+  // Rebuild ingredient line unit dropdowns, preserving selected value
+  ingredientRows.forEach((row, idx) => {
+    if (!row) return;
+    const unitSel = document.getElementById(`ing-unit-${idx}`);
+    if (!unitSel) return;
+    const product = row.product_id ? allProducts.find(p => p.id === row.product_id) : null;
+    const currentUnit = unitSel.value !== '__manage_units__' ? unitSel.value : (row.unit || '');
+    unitSel.innerHTML = buildUnitOptions(currentUnit, product);
+    unitSel.dataset.prevUnit = unitSel.value;
+  });
+});
 
 async function confirmProduceBatch() {
   const batchQty  = parseFloat(document.getElementById('pbQty').value);

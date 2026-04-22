@@ -13,6 +13,7 @@ let allSupplierList   = [];   // suppliers rows (for dropdowns)
 let allInvoices       = [];   // invoices rows (for invoice number lookup)
 let currentGenericId  = null; // which generic product is open in modal
 let _pendingEntryInv  = null; // { genericId, entryId, itemName, packQty, packUnit, category }
+let allUnits          = [];   // units table rows, sorted by sort_order
 
 // ── Bootstrap ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -51,16 +52,19 @@ document.addEventListener('DOMContentLoaded', async () => {
 // ── Load everything ────────────────────────────────────────────
 async function loadAll() {
   try {
-    const [gd, ed, sd, ivd] = await Promise.all([
+    const [gd, ed, sd, ivd, ud] = await Promise.all([
       apiGet(`tables/${GENERIC_TABLE}?page=1&limit=500`),
       apiGet(`tables/${ENTRIES_TABLE}?page=1&limit=1000`),
       apiGet(`tables/suppliers?page=1&limit=500`),
       apiGet(`tables/invoices?page=1&limit=1000`),
+      apiGet(`tables/units?page=1&limit=100`),
     ]);
     allGeneric      = gd.data  || [];
     allEntries      = ed.data  || [];
     allSupplierList = sd.data  || [];
     allInvoices     = ivd.data || [];
+    allUnits        = (ud.data || []).slice().sort((a, b) => a.sort_order - b.sort_order);
+    populateUnitDropdown(document.getElementById('ePackUnit'));
     renderProductTable();
     renderStats();
   } catch (e) {
@@ -68,6 +72,32 @@ async function loadAll() {
     document.getElementById('productBody').innerHTML =
       `<tr><td colspan="6" class="empty-row"><i class="fas fa-exclamation-triangle"></i> Failed to load products.</td></tr>`;
   }
+}
+
+// ── Unit helpers ──────────────────────────────────────────────
+function populateUnitDropdown(select, selectedValue) {
+  if (!select) return;
+  const prev = selectedValue !== undefined ? selectedValue : select.value;
+  const seen = new Set();
+  const uniqueUnits = allUnits.filter(u => {
+    const key = (u.name || '').toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  select.innerHTML = uniqueUnits
+    .map(u => `<option value="${u.name}">${u.name}</option>`)
+    .join('') +
+    '<option value="__manage_units__" style="color:var(--primary);font-style:italic">+ Manage units</option>';
+  setSelectValueCI(select, prev);
+  select.dataset.prevUnit = select.value;
+}
+
+function setSelectValueCI(select, value) {
+  if (!value) return;
+  const lower = value.toLowerCase();
+  const opt = Array.from(select.options).find(o => o.value.toLowerCase() === lower);
+  if (opt) select.value = opt.value;
 }
 
 // ── Invoice number lookup ──────────────────────────────────────
@@ -267,8 +297,8 @@ async function openEditProduct(id) {
     document.getElementById('eVendorName').value    = latest.vendor_item_name || '';
     document.getElementById('eSku').value           = latest.sku              || '';
     document.getElementById('ePackQty').value       = latest.pack_qty         || '';
-    document.getElementById('ePackUnit').value      = latest.pack_unit        || 'kg';
-    document.getElementById('ePackUnit').dataset.prevUnit = latest.pack_unit || 'kg';
+    setSelectValueCI(document.getElementById('ePackUnit'), latest.pack_unit || 'kg');
+    document.getElementById('ePackUnit').dataset.prevUnit = document.getElementById('ePackUnit').value || 'kg';
     // CHANGE 4: show unit price (cost_per_unit), not line total (cost)
     document.getElementById('eCost').value          = _getStoredCpu(latest) || '';
     document.getElementById('ePurchaseDate').value  = latest.purchase_date    || '';
@@ -283,7 +313,7 @@ async function openEditProduct(id) {
     document.getElementById('eVendorName').value    = '';
     document.getElementById('eSku').value           = '';
     document.getElementById('ePackQty').value       = '';
-    document.getElementById('ePackUnit').value      = 'kg';
+    setSelectValueCI(document.getElementById('ePackUnit'), 'kg');
     document.getElementById('ePackUnit').dataset.prevUnit = 'kg';
     document.getElementById('eCost').value          = '';
     document.getElementById('ePurchaseDate').value  = '';
@@ -461,7 +491,7 @@ function openAddEntryForm() {
   document.getElementById('eVendorName').value    = '';
   document.getElementById('eSku').value           = '';
   document.getElementById('ePackQty').value       = '';
-  document.getElementById('ePackUnit').value      = 'kg';
+  setSelectValueCI(document.getElementById('ePackUnit'), 'kg');
   document.getElementById('ePackUnit').dataset.prevUnit = 'kg';
   document.getElementById('eCost').value          = '';
   document.getElementById('ePurchaseDate').value  = new Date().toISOString().split('T')[0];
@@ -487,8 +517,8 @@ function openEditEntryForm(entryId) {
   document.getElementById('eCost').value         = _getStoredCpu(e) || '';
   // Populate pack qty + unit directly from columns
   document.getElementById('ePackQty').value  = e.pack_qty  || '';
-  document.getElementById('ePackUnit').value = e.pack_unit || 'kg';
-  document.getElementById('ePackUnit').dataset.prevUnit = e.pack_unit || 'kg';
+  setSelectValueCI(document.getElementById('ePackUnit'), e.pack_unit || 'kg');
+  document.getElementById('ePackUnit').dataset.prevUnit = document.getElementById('ePackUnit').value || 'kg';
   // Restore attached invoice file (if any)
   if (e.invoice_file_key) {
     setEntryInvoiceFileBadge(e.invoice_file_name || e.invoice_file_key, e.invoice_file_key);
@@ -601,6 +631,13 @@ function _convertUnitCost(cost, fromUnit, toUnit, avgWeightPerUnit) {
 async function onPackUnitChange() {
   const select  = document.getElementById('ePackUnit');
   const newUnit = select.value;
+
+  if (newUnit === '__manage_units__') {
+    select.value = select.dataset.prevUnit || '';
+    openManageUnitsModal();
+    return;
+  }
+
   const prevUnit = select.dataset.prevUnit || newUnit;
 
   // Track the new unit so subsequent changes have the right baseline
@@ -956,6 +993,14 @@ async function migrateOldProducts() {
   }
 }
 window.migrateOldProducts = migrateOldProducts;
+
+// Reload unit dropdowns after manage-units changes
+registerUnitRefreshCallback(async () => {
+  if (!document.getElementById('ePackUnit')) return;
+  const ud = await apiGet(`tables/units?page=1&limit=100`);
+  allUnits = (ud.data || []).slice().sort((a, b) => a.sort_order - b.sort_order);
+  populateUnitDropdown(document.getElementById('ePackUnit'));
+});
 
 // ══════════════════════════════════════════════════════════════
 // ENTRY INVOICE FILE — attach, preview, clear
