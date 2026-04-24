@@ -14,6 +14,8 @@ let allInvoices       = [];   // invoices rows (for invoice number lookup)
 let currentGenericId  = null; // which generic product is open in modal
 let _pendingEntryInv  = null; // { genericId, entryId, itemName, packQty, packUnit, category }
 let allUnits          = [];   // units table rows, sorted by sort_order
+let _entrySnapshots   = null; // Map<id,{cost_per_unit,pack_unit}> captured when modal opens; null = no pending changes
+let _entriesShownCount = 10; // how many entries are visible in the modal table
 
 // ── Bootstrap ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -31,10 +33,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     await migrateOldProducts();
   });
   document.getElementById('saveProductBtn').addEventListener('click', saveGenericProduct);
-  document.getElementById('closeModal').addEventListener('click', () => closeModal('productModal'));
-  document.getElementById('cancelModal').addEventListener('click', () => closeModal('productModal'));
+  document.getElementById('closeModal').addEventListener('click', () => { _restoreEntrySnapshots(); closeModal('productModal'); });
+  document.getElementById('cancelModal').addEventListener('click', () => { _restoreEntrySnapshots(); closeModal('productModal'); });
   document.getElementById('productModal').addEventListener('click', e => {
-    if (e.target === document.getElementById('productModal')) closeModal('productModal');
+    if (e.target === document.getElementById('productModal')) { _restoreEntrySnapshots(); closeModal('productModal'); }
   });
 
   // Entry form controls
@@ -239,6 +241,7 @@ function renderStats() {
 // ── Add/Edit Generic Product Modal ─────────────────────────────
 async function openAddProductModal() {
   currentGenericId = null;
+  _entrySnapshots = null;
   document.getElementById('modalTitle').textContent = 'Add Product';
   document.getElementById('saveProductBtn').innerHTML = '<i class="fas fa-save"></i> Save Product';
   document.getElementById('editProductId').value = '';
@@ -270,6 +273,7 @@ async function openEditProduct(id) {
   const g = allGeneric.find(x => x.id === id);
   if (!g) return;
   currentGenericId = id;
+  _captureEntrySnapshots(id);
 
   // ── Fill product fields ─────────────────────────────────────
   document.getElementById('modalTitle').textContent = 'Edit Product';
@@ -326,6 +330,7 @@ async function openEditProduct(id) {
   // Always show the entry form and Add button, always show existing entries table
   document.getElementById('entryForm').classList.remove('hidden');
   document.getElementById('openAddEntryBtn').style.display = entries.length ? '' : 'none';
+  _entriesShownCount = 10;
   renderEntriesTable(id);
   openModal('productModal');
 }
@@ -377,8 +382,10 @@ async function saveGenericProduct() {
       document.getElementById('editProductId').value = savedId;
     }
 
-    // Save entry if any entry fields are filled (always true when editing an existing entry)
+    // Persist any pending unit conversions to DB before saving the entry
     const entryId = document.getElementById('editEntryId').value;
+    await _flushEntryConversions(savedId, entryId);
+
     if (entryHasData || entryId) {
       await _saveEntryForGeneric(savedId, name, category);
       // _saveEntryForGeneric handles toast + inventory prompt
@@ -412,29 +419,30 @@ async function deleteGenericProduct(id) {
 
 // ── Supplier entries table (inside modal) ──────────────────────
 function renderEntriesTable(genericId) {
-  const entries  = allEntries.filter(e => e.generic_product_id === genericId)
-    .slice().sort((a, b) => (a.purchase_date || '') > (b.purchase_date || '') ? 1 : -1); // oldest first = FIFO order
+  const allSorted = allEntries.filter(e => e.generic_product_id === genericId)
+    .slice().sort((a, b) => (b.purchase_date || b.created_at || '') > (a.purchase_date || a.created_at || '') ? 1 : -1); // newest first
 
   const scroll = document.getElementById('entriesTableScroll');
   const tbody  = document.getElementById('entriesBody');
+  const smEl   = document.getElementById('entriesShowMore');
 
-  if (!entries.length) {
+  if (!allSorted.length) {
     scroll.classList.add('hidden');
+    if (smEl) smEl.style.display = 'none';
     return;
   }
   scroll.classList.remove('hidden');
 
-  // Find most recent price for variance calculation
-  // CHANGE 2: prefer stored cost_per_unit for latestCpu
-  const sorted    = [...entries].sort((a, b) => (a.purchase_date || '') < (b.purchase_date || '') ? 1 : -1);
-  const latestCpu = sorted[0]
-    ? ((sorted[0].cost_per_unit != null && sorted[0].cost_per_unit > 0)
-        ? sorted[0].cost_per_unit
-        : (entryPackQty(sorted[0]) > 0 ? sorted[0].cost / entryPackQty(sorted[0]) : sorted[0].cost))
+  // latestCpu = most recent entry (first in newest-first order)
+  const latestCpu = allSorted[0]
+    ? ((allSorted[0].cost_per_unit != null && allSorted[0].cost_per_unit > 0)
+        ? allSorted[0].cost_per_unit
+        : (entryPackQty(allSorted[0]) > 0 ? allSorted[0].cost / entryPackQty(allSorted[0]) : allSorted[0].cost))
     : null;
 
-  tbody.innerHTML = entries.map(e => {
-    // CHANGE 3: prefer stored cost_per_unit for per-row cpu
+  const visible = allSorted.slice(0, _entriesShownCount);
+
+  tbody.innerHTML = visible.map(e => {
     const cpu      = (e.cost_per_unit != null && e.cost_per_unit > 0)
       ? e.cost_per_unit
       : (entryPackQty(e) > 0 ? e.cost / entryPackQty(e) : e.cost);
@@ -472,7 +480,25 @@ function renderEntriesTable(genericId) {
       </tr>
     `;
   }).join('');
+
+  // Show more button
+  if (smEl) {
+    const remaining = allSorted.length - _entriesShownCount;
+    if (remaining > 0) {
+      smEl.style.display = '';
+      smEl.querySelector('button').innerHTML =
+        `<i class="fas fa-chevron-down"></i> Show more (${remaining} older ${remaining === 1 ? 'entry' : 'entries'})`;
+    } else {
+      smEl.style.display = 'none';
+    }
+  }
 }
+
+function showMoreEntries() {
+  _entriesShownCount += 10;
+  renderEntriesTable(currentGenericId);
+}
+window.showMoreEntries = showMoreEntries;
 
 // ── Entry form (inline in modal) ───────────────────────────────
 async function loadSupplierDropdown() {
@@ -648,8 +674,12 @@ async function onPackUnitChange() {
   const costStr = document.getElementById('eCost').value.trim();
   const cost    = parseFloat(costStr);
 
-  // No cost entered yet — nothing to convert, just update display
-  if (!costStr || isNaN(cost) || cost <= 0) { updateEntryCostPerUnit(); return; }
+  // No cost entered yet — still convert other entries' units
+  if (!costStr || isNaN(cost) || cost <= 0) {
+    await _convertAllEntriesToUnit(prevUnit, newUnit);
+    updateEntryCostPerUnit();
+    return;
+  }
 
   // Look up avg_weight_per_unit for the current product
   let avgWeight = null;
@@ -680,15 +710,104 @@ async function onPackUnitChange() {
     if (!keepAnyway) {
       select.value = prevUnit;
       select.dataset.prevUnit = prevUnit;
+      updateEntryCostPerUnit();
+      return;  // reverted — leave other entries alone
     }
-    // Either way, no recalculation — just update the display label
+    // "Keep anyway" — unit changed, try to convert other entries even if this one couldn't
+    await _convertAllEntriesToUnit(prevUnit, newUnit);
     updateEntryCostPerUnit();
     return;
   }
 
   // Round to 6 significant decimal places, strip trailing zeros
   document.getElementById('eCost').value = parseFloat(result.cost.toFixed(6));
+  await _convertAllEntriesToUnit(prevUnit, newUnit);
   updateEntryCostPerUnit();
+}
+
+// Convert cost_per_unit + pack_unit for all sibling entries (not the one in the form).
+// Skips entries whose unit can't be converted and shows a warning for them.
+async function _convertAllEntriesToUnit(fromUnit, toUnit) {
+  if (!currentGenericId || fromUnit === toUnit) return;
+
+  const siblings = allEntries.filter(e =>
+    e.generic_product_id === currentGenericId
+  );
+  if (!siblings.length) return;
+
+  const g = allGeneric.find(x => x.id === currentGenericId);
+  const avgWeight = g ? parseFloat(g.avg_weight_per_unit) || null : null;
+
+  const failed = [];
+
+  for (const e of siblings) {
+    const entryUnit = e.pack_unit || '';
+    if (!entryUnit || entryUnit === toUnit) continue;
+
+    const cpu = parseFloat(e.cost_per_unit);
+    if (!cpu || cpu <= 0) {
+      e.pack_unit = toUnit;
+      continue;
+    }
+
+    const result = _convertUnitCost(cpu, entryUnit, toUnit, avgWeight);
+    if (result.error) {
+      const label = [e.supplier_name, e.purchase_date].filter(Boolean).join(' ') || e.id.slice(0, 8);
+      failed.push(label);
+      continue;
+    }
+
+    e.cost_per_unit = parseFloat(result.cost.toFixed(6));
+    e.pack_unit     = toUnit;
+  }
+
+  if (failed.length) {
+    showToast(
+      `Could not convert ${failed.length} entr${failed.length === 1 ? 'y' : 'ies'} (incompatible units): ${failed.slice(0, 3).join(', ')}${failed.length > 3 ? '…' : ''}`,
+      'warning'
+    );
+  }
+
+  renderEntriesTable(currentGenericId);
+}
+
+// Snapshot helpers — keep unit conversions in memory until Save is confirmed
+
+function _captureEntrySnapshots(genericId) {
+  _entrySnapshots = new Map();
+  for (const e of allEntries) {
+    if (e.generic_product_id === genericId) {
+      _entrySnapshots.set(e.id, { cost_per_unit: e.cost_per_unit, pack_unit: e.pack_unit });
+    }
+  }
+}
+
+function _restoreEntrySnapshots() {
+  if (!_entrySnapshots) return;
+  for (const e of allEntries) {
+    const snap = _entrySnapshots.get(e.id);
+    if (snap) {
+      e.cost_per_unit = snap.cost_per_unit;
+      e.pack_unit     = snap.pack_unit;
+    }
+  }
+  _entrySnapshots = null;
+}
+
+async function _flushEntryConversions(genericId, skipEntryId) {
+  if (!_entrySnapshots) return;
+  for (const e of allEntries) {
+    if (e.generic_product_id !== genericId) continue;
+    if (skipEntryId && e.id === skipEntryId) continue; // the form entry is saved separately
+    const snap = _entrySnapshots.get(e.id);
+    if (!snap) continue;
+    if (e.cost_per_unit === snap.cost_per_unit && e.pack_unit === snap.pack_unit) continue;
+    await apiPatch(`tables/${ENTRIES_TABLE}/${e.id}`, {
+      cost_per_unit: e.cost_per_unit,
+      pack_unit:     e.pack_unit,
+    });
+  }
+  _entrySnapshots = null;
 }
 
 // Called by the inline "Save Entry" button (editing an existing product)
@@ -699,6 +818,7 @@ async function saveEntry() {
     showToast('Please save the product name & category first.', 'error');
     return;
   }
+  await _flushEntryConversions(genericId, document.getElementById('editEntryId').value);
   await _saveEntryForGeneric(genericId, null, null);
 }
 

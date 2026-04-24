@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Home — InvoiceDB</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260422-3" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    .pm-layout {
+      display: grid;
+      grid-template-columns: minmax(320px, 420px) 1fr;
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (max-width: 980px) {
+      .pm-layout { grid-template-columns: 1fr; }
+    }
+    .pm-filter-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .6rem;
+      align-items: end;
+      margin-bottom: 1rem;
+    }
+    .pm-filter-row .form-group { gap: .2rem; min-width: 0; }
+    .pm-filter-row .form-group label { font-size: .72rem; }
+    .pm-filter-row input[type="date"],
+    .pm-filter-row input[type="text"] {
+      padding: .4rem .65rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-family: inherit;
+      font-size: .85rem;
+      color: var(--text);
+      background: #fff;
+    }
+    .pm-filter-row input:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(79,70,229,.1);
+    }
+    .pm-search-wrap { position: relative; flex: 1; min-width: 160px; }
+    .pm-search-wrap input { width: 100%; }
+    .pm-suggestions {
+      position: absolute;
+      top: calc(100% + 2px);
+      left: 0;
+      right: 0;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      box-shadow: var(--shadow);
+      max-height: 240px;
+      overflow-y: auto;
+      z-index: 50;
+    }
+    .pm-suggestion {
+      padding: .5rem .75rem;
+      cursor: pointer;
+      font-size: .85rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .pm-suggestion:last-child { border-bottom: none; }
+    .pm-suggestion:hover { background: #eef2ff; }
+    .pm-suggestion .sub {
+      font-size: .75rem;
+      color: var(--text-muted);
+      margin-top: .1rem;
+    }
+
+    .pm-list { display: flex; flex-direction: column; gap: .4rem; }
+    .pm-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: .5rem .75rem;
+      align-items: center;
+      padding: .65rem .85rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: #fff;
+      cursor: pointer;
+      transition: var(--transition);
+    }
+    .pm-row:hover { border-color: var(--primary); box-shadow: 0 2px 8px rgba(79,70,229,.12); }
+    .pm-row.selected {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px rgba(79,70,229,.2);
+    }
+    .pm-row.up   { background: #fef2f2; border-color: #fecaca; }
+    .pm-row.down { background: #f0fdf4; border-color: #bbf7d0; }
+    .pm-row.flat { background: #f8fafc; }
+    .pm-name { font-weight: 600; font-size: .9rem; color: var(--text); }
+    .pm-meta { font-size: .75rem; color: var(--text-muted); margin-top: .15rem; }
+    .pm-change {
+      font-weight: 700;
+      font-size: .95rem;
+      font-family: ui-monospace, monospace;
+      white-space: nowrap;
+    }
+    .pm-change.up   { color: #b91c1c; }
+    .pm-change.down { color: #15803d; }
+    .pm-change.flat { color: var(--text-muted); }
+    .pm-empty { text-align: center; color: var(--text-muted); font-size: .9rem; padding: 2rem 1rem; }
+
+    .pm-chart-wrap {
+      position: relative;
+      height: 340px;
+      padding: .5rem;
+    }
+    .pm-chart-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+      margin-bottom: .5rem;
+      flex-wrap: wrap;
+    }
+    .pm-chart-title { font-weight: 600; font-size: 1rem; color: var(--text); }
+    .pm-chart-sub { font-size: .82rem; color: var(--text-muted); margin-top: .2rem; }
+    .pm-chart-change {
+      font-weight: 700;
+      font-size: 1.1rem;
+      font-family: ui-monospace, monospace;
+    }
+    .pm-chart-placeholder {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 340px;
+      color: var(--text-muted);
+      font-size: .95rem;
+      flex-direction: column;
+      gap: .5rem;
+    }
+    .pm-chart-placeholder i { font-size: 2.5rem; color: #cbd5e1; }
+    .pm-warning {
+      background: #fff7ed;
+      border: 1px solid #fdba74;
+      color: #9a3412;
+      padding: .6rem .85rem;
+      border-radius: var(--radius-sm);
+      font-size: .85rem;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+    }
+    .pm-vendor-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .4rem .75rem;
+      margin-top: .5rem;
+      font-size: .78rem;
+      color: var(--text-muted);
+    }
+    .pm-vendor-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: .35rem;
+    }
+    .pm-vendor-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand"><i class="fas fa-receipt"></i> InvoiceDB</div>
+    <div class="nav-links">
+      <a href="/home.html" class="active"><i class="fas fa-home"></i> Home</a>
+      <a href="/upload-invoice.html"><i class="fas fa-file-invoice"></i> Upload Invoice</a>
+      <a href="/invoices.html"><i class="fas fa-list-alt"></i> Invoices</a>
+      <a href="/index.html"><i class="fas fa-boxes"></i> Products</a>
+      <a href="/recipes.html"><i class="fas fa-utensils"></i> Recipes</a>
+      <a href="/finished-products.html"><i class="fas fa-tag"></i> Finished Products</a>
+      <a href="/inventory.html"><i class="fas fa-warehouse"></i> Inventory</a>
+      <a href="/suppliers.html"><i class="fas fa-truck"></i> Suppliers</a>
+      <a href="/staff.html"><i class="fas fa-users"></i> Staff</a>
+      <a href="/certifications.html"><i class="fas fa-certificate"></i> Certifications</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="page-header">
+      <h1><i class="fas fa-chart-line"></i> Price Movers</h1>
+      <p>Products with the biggest price swings between their two most recent purchases.</p>
+    </div>
+
+    <div class="pm-layout">
+      <!-- LEFT: filters + list -->
+      <section class="card">
+        <div class="card-header">
+          <h2><i class="fas fa-arrow-trend-up"></i> Top 10 Movers</h2>
+        </div>
+        <div class="card-body">
+          <div class="pm-filter-row">
+            <div class="form-group">
+              <label>From</label>
+              <input type="date" id="pmFrom" />
+            </div>
+            <div class="form-group">
+              <label>To</label>
+              <input type="date" id="pmTo" />
+            </div>
+            <div class="form-group pm-search-wrap">
+              <label>Search</label>
+              <input type="text" id="pmSearch" placeholder="Find any product…" autocomplete="off" />
+              <div id="pmSuggestions" class="pm-suggestions hidden"></div>
+            </div>
+          </div>
+          <div id="pmList" class="pm-list">
+            <div class="pm-empty"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT: chart + detail table -->
+      <section class="card">
+        <div class="card-header">
+          <h2><i class="fas fa-chart-area"></i> Purchase History</h2>
+        </div>
+        <div class="card-body">
+          <div id="pmWarning" class="pm-warning hidden"></div>
+          <div class="pm-chart-header">
+            <div>
+              <div class="pm-chart-title" id="pmChartTitle">Select a product</div>
+              <div class="pm-chart-sub" id="pmChartSub">Click any row on the left to see its last 10 purchases.</div>
+            </div>
+            <div class="pm-chart-change" id="pmChartChange"></div>
+          </div>
+          <div class="pm-chart-wrap">
+            <canvas id="pmChart"></canvas>
+            <div id="pmChartPlaceholder" class="pm-chart-placeholder">
+              <i class="fas fa-chart-line"></i>
+              <div>No product selected yet</div>
+            </div>
+          </div>
+          <div id="pmVendorLegend" class="pm-vendor-legend"></div>
+          <div class="table-scroll" style="margin-top: 1.25rem;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Vendor</th>
+                  <th>Invoice Date</th>
+                  <th>Quantity</th>
+                  <th>Price per Unit</th>
+                </tr>
+              </thead>
+              <tbody id="pmDetailBody">
+                <tr><td colspan="4" class="empty-row">Select a product to see its purchase history.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="/static/utils.js?v=20260422-3"></script>
+  <script src="/static/home.js?v=20260422-3"></script>
+</body>
+</html>

@@ -590,6 +590,108 @@ app.get('/api/stats/certifications', async (c) => {
   })
 })
 
+// ─── Price Movers ─────────────────────────────────────────────
+// GET /api/price-movers?from=YYYY-MM-DD&to=YYYY-MM-DD
+// Returns one row per generic_product that has purchases in the date range.
+// Each row contains the last 10 purchases (newest first) and the % change
+// between the two most recent purchases (null if fewer than 2 in range).
+// Sorted by absolute % change descending, nulls last.
+app.get('/api/price-movers', async (c) => {
+  const from = (c.req.query('from') || '').trim()
+  const to   = (c.req.query('to')   || '').trim()
+
+  let sql = `
+    SELECT pe.generic_product_id AS product_id,
+           pe.generic_product_name AS product_name,
+           pe.supplier_name,
+           pe.purchase_date,
+           pe.pack_qty,
+           pe.pack_unit,
+           pe.cost,
+           pe.cost_per_unit,
+           pe.invoice_ref
+    FROM product_entries pe
+    WHERE pe.purchase_date IS NOT NULL AND pe.purchase_date != ''
+      AND pe.generic_product_id IS NOT NULL AND pe.generic_product_id != ''
+  `
+  const args: string[] = []
+  if (from) { sql += ' AND pe.purchase_date >= ?'; args.push(from) }
+  if (to)   { sql += ' AND pe.purchase_date <= ?'; args.push(to)   }
+  sql += ' ORDER BY pe.purchase_date DESC, pe.created_at DESC'
+
+  const rows = await c.env.DB.prepare(sql).bind(...args).all()
+
+  type Purchase = {
+    date: string
+    vendor: string
+    pack_qty: number
+    pack_unit: string
+    cost: number
+    cost_per_unit: number
+    invoice_ref: string
+  }
+  type Group = {
+    product_id: string
+    product_name: string
+    unit: string
+    purchases: Purchase[]
+  }
+
+  const groups = new Map<string, Group>()
+  for (const r of rows.results as Record<string, unknown>[]) {
+    const pid = String(r.product_id || '')
+    if (!pid) continue
+    let g = groups.get(pid)
+    if (!g) {
+      g = {
+        product_id:   pid,
+        product_name: String(r.product_name || ''),
+        unit:         String(r.pack_unit || ''),
+        purchases:    []
+      }
+      groups.set(pid, g)
+    }
+    g.purchases.push({
+      date:          String(r.purchase_date || ''),
+      vendor:        String(r.supplier_name || ''),
+      pack_qty:      Number(r.pack_qty || 0),
+      pack_unit:     String(r.pack_unit || ''),
+      cost:          Number(r.cost || 0),
+      cost_per_unit: Number(r.cost_per_unit || 0),
+      invoice_ref:   String(r.invoice_ref || ''),
+    })
+  }
+
+  const products = Array.from(groups.values()).map(g => {
+    // Already DESC sorted by the query. Take at most the latest 10.
+    const purchases = g.purchases.slice(0, 10)
+    let pct_change: number | null = null
+    if (purchases.length >= 2) {
+      const latest = purchases[0].cost_per_unit
+      const prev   = purchases[1].cost_per_unit
+      if (prev > 0) {
+        pct_change = Math.round(((latest - prev) / prev) * 1000) / 10
+      }
+    }
+    return {
+      product_id:     g.product_id,
+      product_name:   g.product_name,
+      unit:           g.unit,
+      purchase_count: g.purchases.length,
+      pct_change,
+      purchases,
+    }
+  })
+
+  products.sort((a, b) => {
+    const aAbs = a.pct_change === null ? -1 : Math.abs(a.pct_change)
+    const bAbs = b.pct_change === null ? -1 : Math.abs(b.pct_change)
+    return bAbs - aAbs
+  })
+
+  return c.json({ data: products })
+})
+
 // Static HTML + assets are served by Cloudflare Pages directly from the dist/ folder.
 // The worker only needs to handle /api/* routes.
 

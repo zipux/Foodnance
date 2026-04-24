@@ -12,6 +12,7 @@
   <nav class="navbar">
     <div class="nav-brand"><i class="fas fa-receipt"></i> InvoiceDB</div>
     <div class="nav-links">
+      <a href="/home.html"><i class="fas fa-home"></i> Home</a>
       <a href="/upload-invoice.html"><i class="fas fa-file-invoice"></i> Upload Invoice</a>
       <a href="/invoices.html"><i class="fas fa-list-alt"></i> Invoices</a>
       <a href="/index.html" class="active"><i class="fas fa-boxes"></i> Products</a>
@@ -210,6 +211,11 @@
                 </thead>
                 <tbody id="entriesBody"></tbody>
               </table>
+            </div>
+            <div id="entriesShowMore" style="text-align:center;margin-top:.5rem;display:none">
+              <button class="btn btn-secondary btn-sm" onclick="showMoreEntries()">
+                <i class="fas fa-chevron-down"></i> Show more
+              </button>
             </div>
           </div>
         </div>
