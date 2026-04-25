@@ -204,6 +204,7 @@ function clearBatch() {
   hideOcrPanel();
   clearGptPanel();
   hideValidationBanner();
+  hideUnitWarningBanner();
 }
 
 function makeImageThumb(file) {
@@ -929,7 +930,7 @@ async function processPDFBatch() {
   }
 
   showProgress(100, 'Done!');
-  await checkInvoiceNumberConsistency(() => finalizeParse(files[0].name));
+  await checkInvoiceNumberConsistency(() => checkDuplicateInvoiceNumber(() => finalizeParse(files[0].name)));
 }
 
 // ── Image batch: Azure OCR first, then AI Vision for structured extraction ──
@@ -1050,7 +1051,7 @@ async function processImageBatch() {
   }
 
   showProgress(100, 'Done!');
-  await checkInvoiceNumberConsistency(() => finalizeParse(files[0].name));
+  await checkInvoiceNumberConsistency(() => checkDuplicateInvoiceNumber(() => finalizeParse(files[0].name)));
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1090,6 +1091,47 @@ async function checkInvoiceNumberConsistency(proceedFn) {
 
   openModal('invNumWarnModal');
   // proceedFn is only called when user decides
+}
+
+// ══════════════════════════════════════════════════════════════
+// DUPLICATE INVOICE NUMBER CHECK
+// Called after parser finishes. Checks DB before finalizeParse.
+// ══════════════════════════════════════════════════════════════
+async function checkDuplicateInvoiceNumber(proceedFn) {
+  const invoiceNumber = (document.getElementById('metaInvoiceNum')?.value || '').trim();
+
+  if (!invoiceNumber) {
+    // No invoice number — show warning modal; user must confirm to proceed
+    const cancelBtn  = document.getElementById('cancelNoInvNumBtn');
+    const proceedBtn = document.getElementById('proceedNoInvNumBtn');
+    const closeBtn   = document.getElementById('closeNoInvNumModal');
+
+    const dismiss = () => closeModal('noInvNumModal');
+    const proceed = () => { closeModal('noInvNumModal'); proceedFn(); };
+
+    cancelBtn.onclick  = dismiss;
+    closeBtn.onclick   = dismiss;
+    proceedBtn.onclick = proceed;
+
+    openModal('noInvNumModal');
+    return;
+  }
+
+  // Invoice number found — check DB for duplicates
+  try {
+    const data = await apiGet(`tables/invoices?invoice_number=${encodeURIComponent(invoiceNumber)}`);
+    if (data.data && data.data.length > 0) {
+      document.getElementById('dupInvNumMsg').textContent =
+        `Invoice #${invoiceNumber} already exists in the system. Upload cancelled.`;
+      openModal('dupInvNumModal');
+      return; // Block save — don't call proceedFn
+    }
+  } catch (e) {
+    console.warn('Duplicate invoice check failed:', e.message);
+    // On network error, allow proceeding rather than blocking the user
+  }
+
+  proceedFn();
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1990,6 +2032,7 @@ function finalizeParse(fileName) {
         hideValidationBanner();
         showToast(`✅ Extracted ${extractedRows.length} item(s) from ${stagedFiles.length > 1 ? stagedFiles.length + ' pages' : '1 page'}. Review and save.`, 'success');
       }
+      checkUnknownUnits();
     } else {
       showDebugPanel(fileName);
       manualSec().classList.remove('hidden');
@@ -2062,6 +2105,82 @@ function renderValidationBanner() {
 
 function hideValidationBanner() {
   const banner = document.getElementById('validationBanner');
+  if (banner) banner.remove();
+}
+
+// ── Non-blocking unit validation ──────────────────────────────
+async function checkUnknownUnits() {
+  hideUnitWarningBanner();
+  if (!extractedRows.length) return;
+
+  let approvedUnits = [];
+  try {
+    const data = await apiGet('tables/units?page=1&limit=100');
+    approvedUnits = (data.data || []).map(u => (u.name || '').toLowerCase());
+  } catch (e) {
+    console.warn('[UnitCheck] Could not fetch units list:', e.message);
+    return;
+  }
+  if (!approvedUnits.length) return;
+
+  // Group unknown units: Map<lowerName, { displayName, products[] }>
+  const unknownMap = new Map();
+  for (const row of extractedRows) {
+    const packSize = (row.pack_size || '').trim();
+    if (!packSize) continue;
+    const m = packSize.match(/[\d.,]+\s*(.+)$/);
+    if (!m) continue;
+    const rawUnit = m[1].trim();
+    if (!rawUnit) continue;
+    const unitLower = rawUnit.toLowerCase();
+    if (approvedUnits.includes(unitLower)) continue;
+    if (!unknownMap.has(unitLower)) {
+      unknownMap.set(unitLower, { displayName: rawUnit.toUpperCase(), products: [] });
+    }
+    unknownMap.get(unitLower).products.push((row.name || '').trim() || '(unnamed)');
+  }
+  if (!unknownMap.size) return;
+
+  const banner = document.createElement('div');
+  banner.id = 'unitWarningBanner';
+  banner.className = 'validation-banner';
+
+  const itemsHtml = [...unknownMap.values()].map(({ displayName, products }) => {
+    const count = products.length;
+    const preview = products.slice(0, 3).join(', ') + (products.length > 3 ? ', …' : '');
+    return `
+      <div class="vflag-item">
+        <i class="fas fa-exclamation-triangle vflag-icon"></i>
+        <span>Unknown unit <strong>${esc(displayName)}</strong> found on ${count} product${count !== 1 ? 's' : ''} (${esc(preview)}). This unit is not in your approved list.</span>
+      </div>`;
+  }).join('');
+
+  banner.innerHTML = `
+    <div class="vbanner-header">
+      <div class="vbanner-title">
+        <i class="fas fa-exclamation-triangle"></i>
+        Unknown Unit${unknownMap.size !== 1 ? 's' : ''} Detected
+      </div>
+      <button class="vbanner-approve-btn" id="dismissUnitWarnBtn" style="background:#6b7280" title="Dismiss this warning">
+        <i class="fas fa-times"></i> Dismiss
+      </button>
+    </div>
+    <div class="vflag-list">${itemsHtml}</div>
+    <p class="vbanner-note">
+      Saving is not blocked — you can proceed. To silence this warning, add the unit(s) to your approved list.
+    </p>
+  `;
+
+  const extSec = extractedSec();
+  if (extSec && extSec.parentNode) {
+    extSec.parentNode.insertBefore(banner, extSec);
+  }
+
+  document.getElementById('dismissUnitWarnBtn').addEventListener('click', () => banner.remove());
+}
+
+function hideUnitWarningBanner() {
+  const banner = document.getElementById('unitWarningBanner');
   if (banner) banner.remove();
 }
 

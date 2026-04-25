@@ -28,11 +28,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderProductTable();
   });
   document.getElementById('openAddProductModal').addEventListener('click', openAddProductModal);
-  document.getElementById('migrateOldBtn').addEventListener('click', async () => {
-    if (!confirm('This will import all products from the old products table into the new two-level structure (generic_products + product_entries). Only run this once. Continue?')) return;
-    await migrateOldProducts();
-  });
-  document.getElementById('saveProductBtn').addEventListener('click', saveGenericProduct);
+document.getElementById('saveProductBtn').addEventListener('click', saveGenericProduct);
   document.getElementById('closeModal').addEventListener('click', () => { _restoreEntrySnapshots(); closeModal('productModal'); });
   document.getElementById('cancelModal').addEventListener('click', () => { _restoreEntrySnapshots(); closeModal('productModal'); });
   document.getElementById('productModal').addEventListener('click', e => {
@@ -461,11 +457,9 @@ function renderEntriesTable(genericId) {
         <td style="font-size:.8rem">${e.purchase_date || '—'}</td>
         <td style="font-size:.8rem">${e.expiry_date ? daysBadge(daysLeft) : '—'}</td>
         <td style="font-size:.8rem">
-          ${e.invoice_ref
-            ? (e.invoice_id
-                ? `<a href="/invoices.html#${esc(e.invoice_id)}" title="View invoice" style="color:var(--primary);font-weight:500;text-decoration:none">${esc(e.invoice_ref)}</a>`
-                : esc(e.invoice_ref))
-            : '—'}
+          ${e.invoice_id
+            ? `<a href="/invoices.html#${esc(e.invoice_id)}" title="View invoice" style="color:var(--primary);font-weight:500;text-decoration:none">${esc(invoiceNumber(e.invoice_id) || 'N/A')}</a>`
+            : (e.invoice_ref ? 'N/A' : '—')}
           ${e.invoice_file_key
             ? `<button class="btn btn-primary btn-icon" style="padding:.15rem .35rem;font-size:.72rem;margin-left:.3rem"
                 onclick="viewEntryInvoiceFile('${esc(e.invoice_file_key)}','${esc(e.invoice_file_name||e.invoice_ref||'Invoice')}')"
@@ -1072,47 +1066,6 @@ async function loadProducts() {
   await loadAll();
 }
 window.loadProducts = loadProducts;
-
-// ── Migration helper: run once to migrate old products table ───
-async function migrateOldProducts() {
-  try {
-    const data = await apiGet(`tables/products?page=1&limit=500`);
-    const old  = data.data || [];
-    if (!old.length) return;
-
-    let migrated = 0;
-    for (const p of old) {
-      // 1. Create generic product
-      const generic = await apiPost(`tables/${GENERIC_TABLE}`, {
-        name:          p.name,
-        category:      p.category || 'Ingredients',
-        sub_unit_name: p.sub_unit_name || null,
-        sub_unit_qty:  p.sub_unit_qty  || null,
-      });
-      // 2. Create one supplier entry with existing data (no vendor assigned)
-      await apiPost(`tables/${ENTRIES_TABLE}`, {
-        generic_product_id:   generic.id,
-        generic_product_name: p.name,
-        supplier_id:          '',
-        supplier_name:        '',
-        vendor_item_name:     p.name,
-        sku:                  p.sku          || '',
-        pack_size:            p.pack_size    || '',
-        cost:                 p.cost         || 0,
-        purchase_date:        p.expiry_date  ? '' : '',
-        expiry_date:          p.expiry_date  || '',
-        days_left:            p.days_left    || null,
-        invoice_ref:          p.invoice_ref  || '',
-      });
-      migrated++;
-    }
-    showToast(`Migrated ${migrated} products to new structure!`, 'success');
-    await loadAll();
-  } catch (e) {
-    showToast('Migration failed: ' + e.message, 'error');
-  }
-}
-window.migrateOldProducts = migrateOldProducts;
 
 // Reload unit dropdowns after manage-units changes
 registerUnitRefreshCallback(async () => {

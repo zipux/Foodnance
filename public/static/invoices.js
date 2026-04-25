@@ -10,6 +10,7 @@ let activeStatus  = 'all';
 let sortField     = 'upload_date';
 let sortDir       = 'desc'; // 'asc' | 'desc'
 let currentInvTotal = 0;   // stored DB total for the open invoice (source of truth)
+let _invImgZoomCleanup = null;
 
 // ── Bootstrap ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -58,8 +59,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // Detail modal
-  document.getElementById('closeInvDetailModal').addEventListener('click', () => closeModal('invDetailModal'));
-  document.getElementById('closeInvDetailBtn').addEventListener('click',   () => closeModal('invDetailModal'));
+  document.getElementById('closeInvDetailModal').addEventListener('click', () => { _cleanInvImgZoom(); closeModal('invDetailModal'); });
+  document.getElementById('closeInvDetailBtn').addEventListener('click',   () => { _cleanInvImgZoom(); closeModal('invDetailModal'); });
   document.getElementById('saveInvDetailBtn').addEventListener('click',    saveInvDetail);
   document.getElementById('deleteInvBtn').addEventListener('click',        deleteInvoice);
   document.getElementById('addLineBtn').addEventListener('click',          addLineRow);
@@ -271,23 +272,25 @@ async function openInvDetail(id) {
         </div>`;
     } else if (isImage) {
       preview = `
-        <div style="margin-top:.5rem;text-align:center">
-          <img src="${esc(fileUrl)}" alt="Invoice" style="max-width:100%;max-height:420px;border-radius:8px;border:1px solid var(--border);object-fit:contain" />
+        <div id="invImgZoomWrap" style="margin-top:.5rem;overflow:hidden;height:420px;border-radius:8px;border:1px solid var(--border);position:relative;background:#f1f5f9;cursor:zoom-in">
+          <img id="invZoomImg" src="${esc(fileUrl)}" alt="Invoice"
+            style="width:100%;height:420px;object-fit:contain;display:block;transform-origin:0 0;user-select:none"
+            draggable="false" />
         </div>`;
     }
+    const openBtn = `<a href="${esc(fileUrl)}" target="_blank" class="btn btn-primary btn-sm" style="margin-left:auto"><i class="fas fa-external-link-alt"></i> Open</a>`;
     fileBox.innerHTML = `
       <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.35rem">
         <i class="fas fa-${isPdf ? 'file-pdf' : isImage ? 'file-image' : 'file-alt'}" style="color:var(--primary);font-size:1.1rem"></i>
-        <span style="font-weight:600;font-size:.9rem">${esc(fileName)}</span>
-        <a href="${esc(fileUrl)}" target="_blank" class="btn btn-primary btn-sm" style="margin-left:auto">
-          <i class="fas fa-external-link-alt"></i> Open
-        </a>
+        <span style="font-weight:600;font-size:.9rem">${esc(inv.invoice_number || 'N/A')}</span>
+        ${openBtn}
         <a href="${esc(fileUrl)}" download="${esc(fileName)}" class="btn btn-secondary btn-sm">
           <i class="fas fa-download"></i> Download
         </a>
       </div>
       ${preview}`;
     fileBox.classList.remove('hidden');
+    if (isImage) _initInvImgZoom();
   } else {
     fileBox.innerHTML = `<span style="color:var(--text-muted);font-size:.85rem"><i class="fas fa-paperclip"></i> No file attached</span>`;
     fileBox.classList.remove('hidden');
@@ -520,6 +523,7 @@ async function saveInvDetail() {
     }
 
     showToast('Invoice saved!', 'success');
+    _cleanInvImgZoom();
     closeModal('invDetailModal');
     applyFilters();
   } catch (e) {
@@ -538,12 +542,115 @@ async function deleteInvoice() {
     await apiDelete(`tables/${INV_LIST_TABLE}/${id}`);
     allInvoices = allInvoices.filter(i => i.id !== id);
     showToast('Invoice deleted.', 'warning');
+    _cleanInvImgZoom();
     closeModal('invDetailModal');
     populateVendorFilter();
     applyFilters();
   } catch (e) {
     showToast('Delete failed: ' + e.message, 'error');
   }
+}
+
+// ── Invoice image zoom ──────────────────────────────────────────
+function _cleanInvImgZoom() {
+  if (_invImgZoomCleanup) { _invImgZoomCleanup(); _invImgZoomCleanup = null; }
+}
+
+function _initInvImgZoom() {
+  _cleanInvImgZoom();
+  const wrap = document.getElementById('invImgZoomWrap');
+  const img  = document.getElementById('invZoomImg');
+  if (!wrap || !img) return;
+
+  let scale = 1, panX = 0, panY = 0;
+  let zoomActive = false;
+  let dragging = false, startX = 0, startY = 0, startPanX = 0, startPanY = 0;
+
+  function apply() {
+    img.style.transform = `translate(${panX}px,${panY}px) scale(${scale})`;
+    if (!zoomActive) {
+      wrap.style.cursor  = 'zoom-in';
+      wrap.style.outline = '';
+    } else {
+      wrap.style.cursor  = scale > 1 ? (dragging ? 'grabbing' : 'grab') : 'zoom-in';
+      wrap.style.outline = '2px solid var(--primary)';
+    }
+  }
+
+  function reset() {
+    scale = 1; panX = 0; panY = 0;
+    zoomActive = false; dragging = false;
+    apply();
+  }
+
+  function clampPan() {
+    if (scale <= 1) { panX = 0; panY = 0; return; }
+    const W = wrap.clientWidth, H = wrap.clientHeight;
+    panX = Math.min(0, Math.max(panX, W * (1 - scale)));
+    panY = Math.min(0, Math.max(panY, H * (1 - scale)));
+  }
+
+  function onWrapClick() {
+    if (!zoomActive) { zoomActive = true; apply(); }
+  }
+
+  function onDocClick(e) {
+    if (zoomActive && !wrap.contains(e.target)) reset();
+  }
+
+  function onWheel(e) {
+    if (!zoomActive) return; // let scroll propagate normally when not in zoom mode
+    e.preventDefault();
+    const rect   = wrap.getBoundingClientRect();
+    const mx     = e.clientX - rect.left;
+    const my     = e.clientY - rect.top;
+    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    const s2     = Math.min(8, Math.max(1, scale * factor));
+    panX  = mx + (panX - mx) * s2 / scale;
+    panY  = my + (panY - my) * s2 / scale;
+    scale = s2;
+    clampPan();
+    apply();
+  }
+
+  function onMouseDown(e) {
+    if (!zoomActive || scale <= 1) return;
+    dragging  = true;
+    startX    = e.clientX; startY    = e.clientY;
+    startPanX = panX;      startPanY = panY;
+    apply();
+    e.preventDefault();
+  }
+
+  function onMouseMove(e) {
+    if (!dragging) return;
+    panX = startPanX + (e.clientX - startX);
+    panY = startPanY + (e.clientY - startY);
+    clampPan();
+    apply();
+  }
+
+  function onMouseUp() {
+    if (!dragging) return;
+    dragging = false;
+    apply();
+  }
+
+  wrap.addEventListener('click',     onWrapClick);
+  wrap.addEventListener('wheel',     onWheel,     { passive: false });
+  wrap.addEventListener('mousedown', onMouseDown);
+  document.addEventListener('click',     onDocClick);
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('mouseup',   onMouseUp);
+
+  _invImgZoomCleanup = () => {
+    wrap.removeEventListener('click',     onWrapClick);
+    wrap.removeEventListener('wheel',     onWheel);
+    wrap.removeEventListener('mousedown', onMouseDown);
+    document.removeEventListener('click',     onDocClick);
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup',   onMouseUp);
+  };
 }
 
 // ── Expose helper for invoice.js to call after upload ──────────

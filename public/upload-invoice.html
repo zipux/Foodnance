@@ -682,6 +682,39 @@
     </div>
   </div>
 
+  <!-- DUPLICATE INVOICE NUMBER MODAL -->
+  <div class="modal-overlay hidden" id="dupInvNumModal">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-header">
+        <h3 style="color:#dc2626"><i class="fas fa-ban"></i> Duplicate Invoice</h3>
+        <button class="modal-close" onclick="closeModal('dupInvNumModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <p id="dupInvNumMsg" style="color:var(--text-muted);font-size:.9rem;margin:0"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('dupInvNumModal')">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- NO INVOICE NUMBER WARNING MODAL -->
+  <div class="modal-overlay hidden" id="noInvNumModal">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-header">
+        <h3 style="color:#d97706"><i class="fas fa-exclamation-triangle"></i> No Invoice Number Found</h3>
+        <button class="modal-close" id="closeNoInvNumModal"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <p style="color:var(--text-muted);font-size:.9rem;margin:0">No invoice number found — this may be a duplicate. Do you want to continue?</p>
+      </div>
+      <div class="modal-footer" style="gap:.6rem">
+        <button class="btn btn-secondary" id="cancelNoInvNumBtn">Cancel</button>
+        <button class="btn btn-warning" id="proceedNoInvNumBtn"><i class="fas fa-upload"></i> Upload Anyway</button>
+      </div>
+    </div>
+  </div>
+
   <!-- TOAST -->
   <div id="toast" class="toast hidden"></div>
 
