@@ -37,9 +37,10 @@ document.getElementById('saveProductBtn').addEventListener('click', saveGenericP
 
   // Entry form controls
   document.getElementById('openAddEntryBtn').addEventListener('click', openAddEntryForm);
-  document.getElementById('eCost').addEventListener('input',    updateEntryCostPerUnit);
-  document.getElementById('ePackQty').addEventListener('input',  updateEntryCostPerUnit);
-  document.getElementById('ePackUnit').addEventListener('change', onPackUnitChange);
+  document.getElementById('eCost').addEventListener('input',       updateEntryCostPerUnit);
+  document.getElementById('ePackQty').addEventListener('input',    updateEntryCostPerUnit);
+  document.getElementById('eQtyOrdered').addEventListener('input', updateEntryCostPerUnit);
+  document.getElementById('ePackUnit').addEventListener('change',  onPackUnitChange);
 
   // Inventory prompt modal (after saving a supplier entry)
   document.getElementById('closeEntryInvModal').addEventListener('click', () => closeModal('entryInvModal'));
@@ -107,7 +108,7 @@ function invoiceNumber(invoiceId) {
 
 // ── Render generic product table ───────────────────────────────
 function filteredGeneric() {
-  let list = allGeneric;
+  let list = allGeneric.filter(g => !g.deleted_at);
   if (categoryFilter) list = list.filter(g => g.category === categoryFilter);
   if (!searchQuery) return list;
   const q = searchQuery.toLowerCase();
@@ -175,6 +176,9 @@ function renderProductTable() {
         <td onclick="event.stopPropagation()" style="white-space:nowrap">
           <button class="btn btn-primary btn-icon" onclick="openEditProduct('${esc(g.id)}')" title="Edit product">
             <i class="fas fa-pen"></i>
+          </button>
+          <button class="btn btn-icon" style="background:#6b7280;color:#fff" onclick="openMergeModal('${esc(g.id)}')" title="Merge into another product">
+            <i class="fas fa-code-merge"></i>
           </button>
           <button class="btn btn-danger btn-icon" onclick="deleteGenericProduct('${esc(g.id)}')" title="Delete">
             <i class="fas fa-trash"></i>
@@ -255,6 +259,7 @@ async function openAddProductModal() {
   document.getElementById('eVendorName').value   = '';
   document.getElementById('eSku').value          = '';
   document.getElementById('ePackQty').value      = '';
+  document.getElementById('eQtyOrdered').value   = '';
   document.getElementById('eCost').value         = '';
   document.getElementById('ePurchaseDate').value = '';
   document.getElementById('eExpiry').value       = '';
@@ -297,10 +302,11 @@ async function openEditProduct(id) {
     document.getElementById('eVendorName').value    = latest.vendor_item_name || '';
     document.getElementById('eSku').value           = latest.sku              || '';
     document.getElementById('ePackQty').value       = latest.pack_qty         || '';
+    document.getElementById('eQtyOrdered').value    = latest.qty_ordered      || '';
     setSelectValueCI(document.getElementById('ePackUnit'), latest.pack_unit || 'kg');
     document.getElementById('ePackUnit').dataset.prevUnit = document.getElementById('ePackUnit').value || 'kg';
-    // CHANGE 4: show unit price (cost_per_unit), not line total (cost)
-    document.getElementById('eCost').value          = _getStoredCpu(latest) || '';
+    // eCost holds the line total from the invoice; per-unit price is derived below.
+    document.getElementById('eCost').value          = (parseFloat(latest.cost) > 0 ? parseFloat(latest.cost) : '');
     document.getElementById('ePurchaseDate').value  = latest.purchase_date    || '';
     document.getElementById('eExpiry').value        = latest.expiry_date      || '';
     document.getElementById('eInvoiceRef').value    = invoiceNumber(latest.invoice_id) || latest.invoice_ref || '';
@@ -313,6 +319,7 @@ async function openEditProduct(id) {
     document.getElementById('eVendorName').value    = '';
     document.getElementById('eSku').value           = '';
     document.getElementById('ePackQty').value       = '';
+    document.getElementById('eQtyOrdered').value    = '';
     setSelectValueCI(document.getElementById('ePackUnit'), 'kg');
     document.getElementById('ePackUnit').dataset.prevUnit = 'kg';
     document.getElementById('eCost').value          = '';
@@ -511,6 +518,7 @@ function openAddEntryForm() {
   document.getElementById('eVendorName').value    = '';
   document.getElementById('eSku').value           = '';
   document.getElementById('ePackQty').value       = '';
+  document.getElementById('eQtyOrdered').value    = '';
   setSelectValueCI(document.getElementById('ePackUnit'), 'kg');
   document.getElementById('ePackUnit').dataset.prevUnit = 'kg';
   document.getElementById('eCost').value          = '';
@@ -533,10 +541,11 @@ function openEditEntryForm(entryId) {
   document.getElementById('ePurchaseDate').value = e.purchase_date    || '';
   document.getElementById('eExpiry').value       = e.expiry_date      || '';
   document.getElementById('eInvoiceRef').value   = invoiceNumber(e.invoice_id) || e.invoice_ref || '';
-  // CHANGE 5: show unit price (cost_per_unit), not line total (cost)
-  document.getElementById('eCost').value         = _getStoredCpu(e) || '';
+  // eCost holds the line total from the invoice; per-unit price is derived below.
+  document.getElementById('eCost').value         = (parseFloat(e.cost) > 0 ? parseFloat(e.cost) : '');
   // Populate pack qty + unit directly from columns
-  document.getElementById('ePackQty').value  = e.pack_qty  || '';
+  document.getElementById('ePackQty').value      = e.pack_qty    || '';
+  document.getElementById('eQtyOrdered').value   = e.qty_ordered || '';
   setSelectValueCI(document.getElementById('ePackUnit'), e.pack_unit || 'kg');
   document.getElementById('ePackUnit').dataset.prevUnit = document.getElementById('ePackUnit').value || 'kg';
   // Restore attached invoice file (if any)
@@ -563,18 +572,30 @@ function _getStoredCpu(e) {
 }
 
 function updateEntryCostPerUnit() {
-  const cost    = parseFloat(document.getElementById('eCost').value);
-  const qty     = parseFloat(document.getElementById('ePackQty').value);
-  const unit    = document.getElementById('ePackUnit').value;
-  const box     = document.getElementById('eCostPerUnitBox');
-  const display = document.getElementById('eCostPerUnitDisplay');
+  const cost       = parseFloat(document.getElementById('eCost').value);
+  const packQty    = parseFloat(document.getElementById('ePackQty').value);
+  const qtyOrdered = parseFloat(document.getElementById('eQtyOrdered').value) || 1;
+  const unit       = document.getElementById('ePackUnit').value;
+  const box        = document.getElementById('eCostPerUnitBox');
+  const display    = document.getElementById('eCostPerUnitDisplay');
+  const totalEl    = document.getElementById('ePackTotal');
+
+  // Update Total display
+  if (!isNaN(packQty) && packQty > 0) {
+    const tot = packQty * qtyOrdered;
+    totalEl.textContent = `${Number.isInteger(tot) ? tot : parseFloat(tot.toFixed(4))} ${unit}`;
+  } else {
+    totalEl.textContent = '—';
+  }
+
   box.classList.remove('ready', 'error');
-  if (isNaN(cost) || isNaN(qty) || qty <= 0) {
+  if (isNaN(cost) || isNaN(packQty) || packQty <= 0) {
     display.textContent = 'Enter cost & pack size';
     return;
   }
+  const totalUnits = packQty * qtyOrdered;
   box.classList.add('ready');
-  display.textContent = `${fmt(cost)} / ${unit}`;
+  display.textContent = `${fmt(cost / totalUnits)} / ${unit}`;
 }
 
 // ── Unit conversion for ePackUnit dropdown ─────────────────────
@@ -713,8 +734,10 @@ async function onPackUnitChange() {
     return;
   }
 
-  // Round to 6 significant decimal places, strip trailing zeros
-  document.getElementById('eCost').value = parseFloat(result.cost.toFixed(6));
+  // eCost is the invoice line total — it does not change when the unit changes.
+  // The derived per-unit display recalculates via updateEntryCostPerUnit().
+  // _convertUnitCost is still called above for the error/keep-anyway branch.
+  void result;
   await _convertAllEntriesToUnit(prevUnit, newUnit);
   updateEntryCostPerUnit();
 }
@@ -832,9 +855,10 @@ async function _saveEntryForGeneric(genericId, overrideName, overrideCategory) {
   const gName      = overrideName     || g?.name     || '';
   const gCategory  = overrideCategory || g?.category || 'Ingredients';
   const supplier   = allSupplierList.find(s => s.id === supplierId);
-  const expiry     = document.getElementById('eExpiry').value;
-  const pQty       = parseFloat(packQtyVal) || 1;
-  const pUnit      = document.getElementById('ePackUnit').value;
+  const expiry      = document.getElementById('eExpiry').value;
+  const pQty        = parseFloat(packQtyVal) || 1;
+  const qtyOrdered  = parseFloat(document.getElementById('eQtyOrdered').value) || 1;
+  const pUnit       = document.getElementById('ePackUnit').value;
 
   const invFileKey  = document.getElementById('eInvoiceFileKey').value.trim();
   const invFileName = document.getElementById('eInvoiceFileName')?.textContent.trim() || '';
@@ -855,9 +879,10 @@ async function _saveEntryForGeneric(genericId, overrideName, overrideCategory) {
     } catch (_) { /* non-fatal — entry still saves without invoice link */ }
   }
 
-  // CHANGE 6: eCost now holds the unit price; derive line total from unit price × pack qty
-  const unitPrice = cost;
-  const lineTotal = pQty > 0 ? unitPrice * pQty : unitPrice;
+  // eCost holds the line total; derive per-unit price as line_total ÷ (pack_qty × qty_ordered).
+  const lineTotal  = cost;
+  const totalUnits = pQty * qtyOrdered;
+  const unitPrice  = totalUnits > 0 ? lineTotal / totalUnits : lineTotal;
 
   const payload = {
     generic_product_id:   genericId,
@@ -868,8 +893,9 @@ async function _saveEntryForGeneric(genericId, overrideName, overrideCategory) {
     sku:                  document.getElementById('eSku').value.trim(),
     pack_qty:             pQty,
     pack_unit:            pUnit,
-    cost:                 lineTotal,      // line total  (e.g. 106.80 for 8 × $13.35)
-    cost_per_unit:        unitPrice,      // unit price  (e.g. 13.35)
+    qty_ordered:          qtyOrdered,
+    cost:                 lineTotal,      // line total  (e.g. 53.28 for 3 × 5 lb at $3.55/lb)
+    cost_per_unit:        unitPrice,      // per-unit    (e.g. 3.55)
     purchase_date:        document.getElementById('ePurchaseDate').value,
     expiry_date:          expiry,
     days_left:            daysLeft(expiry),
@@ -1187,3 +1213,124 @@ function viewEntryInvoiceFile(fileKey, fileName) {
   openModal('entryFileViewModal');
 }
 window.viewEntryInvoiceFile = viewEntryInvoiceFile;
+
+// ── Merge product ──────────────────────────────────────────────
+
+let _mergeSurvivingId   = null;
+let _mergeSurvivingName = null;
+
+function openMergeModal(sourceId) {
+  const product = allGeneric.find(g => g.id === sourceId);
+  if (!product) return;
+
+  _mergeSurvivingId   = null;
+  _mergeSurvivingName = null;
+
+  document.getElementById('mergeSourceId').value        = sourceId;
+  document.getElementById('mergeSourceName').textContent = product.name;
+  document.getElementById('mergeSurvivingSearch').value  = '';
+  document.getElementById('mergeSurvivingDropdown').style.display = 'none';
+  document.getElementById('mergeSurvivingChosen').style.display   = 'none';
+  document.getElementById('confirmMergeBtn').disabled = true;
+
+  openModal('mergeProductModal');
+}
+
+function closeMergeModal() {
+  closeModal('mergeProductModal');
+}
+
+function onMergeSearchInput() {
+  const q       = (document.getElementById('mergeSurvivingSearch').value || '').trim().toLowerCase();
+  const sourceId = document.getElementById('mergeSourceId').value;
+  const dd = document.getElementById('mergeSurvivingDropdown');
+
+  _mergeSurvivingId   = null;
+  _mergeSurvivingName = null;
+  document.getElementById('mergeSurvivingChosen').style.display = 'none';
+  document.getElementById('confirmMergeBtn').disabled = true;
+
+  if (q.length < 1) { dd.style.display = 'none'; return; }
+
+  const matches = allGeneric
+    .filter(g => !g.deleted_at && g.id !== sourceId)
+    .filter(g => (g.name || '').toLowerCase().includes(q))
+    .slice(0, 10);
+
+  if (!matches.length) { dd.innerHTML = '<div style="padding:.6rem 1rem;color:var(--text-muted);font-size:.85rem">No products found</div>'; dd.style.display = 'block'; return; }
+
+  dd.innerHTML = matches.map(g => `
+    <div class="merge-dd-item" onclick="selectMergeSurviving('${esc(g.id)}', '${esc(g.name)}')"
+         style="padding:.55rem 1rem;cursor:pointer;font-size:.9rem;border-bottom:1px solid #f1f5f9"
+         onmouseover="this.style.background='#f0f9ff'" onmouseout="this.style.background=''">
+      <strong>${esc(g.name)}</strong>
+      ${g.category ? `<span style="color:var(--text-muted);font-size:.78rem;margin-left:.4rem">${esc(g.category)}</span>` : ''}
+    </div>`).join('');
+  dd.style.display = 'block';
+}
+
+function selectMergeSurviving(id, name) {
+  _mergeSurvivingId   = id;
+  _mergeSurvivingName = name;
+  document.getElementById('mergeSurvivingSearch').value  = name;
+  document.getElementById('mergeSurvivingDropdown').style.display = 'none';
+  const chosen = document.getElementById('mergeSurvivingChosen');
+  chosen.textContent = '✓ Will merge into: ' + name;
+  chosen.style.display = 'block';
+  document.getElementById('confirmMergeBtn').disabled = false;
+}
+
+async function confirmMerge() {
+  const sourceId   = document.getElementById('mergeSourceId').value;
+  const sourceName = document.getElementById('mergeSourceName').textContent;
+  if (!sourceId || !_mergeSurvivingId) return;
+
+  const btn = document.getElementById('confirmMergeBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Merging…';
+
+  try {
+    await apiPost('products/merge', { merged_id: sourceId, surviving_id: _mergeSurvivingId });
+
+    // Update local cache: mark merged product as soft-deleted
+    const local = allGeneric.find(g => g.id === sourceId);
+    if (local) local.deleted_at = new Date().toISOString();
+
+    showToast(`"${sourceName}" merged into "${_mergeSurvivingName}"`, 'success');
+    closeMergeModal();
+    renderStats();
+    renderProductTable();
+
+    // Offer to save as alias
+    _showAliasPrompt(sourceName, _mergeSurvivingId, _mergeSurvivingName);
+  } catch (e) {
+    showToast('Merge failed: ' + e.message, 'error');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-code-merge"></i> Confirm Merge';
+  }
+}
+
+function _showAliasPrompt(mergedName, survivingId, survivingName) {
+  const msg = document.getElementById('mergeAliasMsg');
+  msg.innerHTML = `Do you want to remember <strong>${esc(mergedName)}</strong> as an alternate name for <strong>${esc(survivingName)}</strong>?<br><br>
+    <span style="color:var(--text-muted);font-size:.85rem">If yes, future invoices containing <em>${esc(mergedName)}</em> will be automatically linked to <em>${esc(survivingName)}</em>.</span>`;
+
+  const yesBtn = document.getElementById('mergeAliasYesBtn');
+  yesBtn.onclick = async () => {
+    try {
+      await apiPost('tables/product_aliases', { alias_name: mergedName, generic_product_id: survivingId });
+      showToast(`"${mergedName}" saved as alternate name for "${survivingName}"`, 'success');
+    } catch (e) {
+      showToast('Could not save alias: ' + e.message, 'error');
+    }
+    closeModal('mergeAliasModal');
+  };
+
+  openModal('mergeAliasModal');
+}
+
+window.openMergeModal     = openMergeModal;
+window.closeMergeModal    = closeMergeModal;
+window.onMergeSearchInput = onMergeSearchInput;
+window.selectMergeSurviving = selectMergeSurviving;
+window.confirmMerge       = confirmMerge;

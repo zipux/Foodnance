@@ -209,25 +209,46 @@
 
   <!-- ── INVOICE DETAIL MODAL ── -->
   <div class="modal-overlay hidden" id="invDetailModal">
-    <div class="modal" style="max-width:860px">
+    <div class="modal" style="max-width:860px;max-height:96vh">
       <div class="modal-header">
         <h3><i class="fas fa-file-invoice-dollar"></i> Invoice Detail</h3>
         <button class="modal-close" id="closeInvDetailModal"><i class="fas fa-times"></i></button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="detailInvId" />
+
+        <!-- ── Action Required banner (shown only when status = Action Required) ── -->
+        <div id="actionRequiredBanner" class="hidden" style="margin-bottom:1rem;padding:.85rem 1rem;background:#fffbeb;border:2px solid #f59e0b;border-radius:10px">
+          <div style="display:flex;align-items:center;gap:.5rem;font-weight:700;color:#92400e;margin-bottom:.35rem">
+            <i class="fas fa-clipboard-check"></i> Review &amp; Confirm
+          </div>
+          <p style="margin:0;font-size:.86rem;color:#78350f;line-height:1.5">
+            This invoice was uploaded but <strong>not yet saved</strong> to your products database. Review the parsed data below, then click <strong>Confirm &amp; Save</strong> to add the products, supplier, and line items.
+          </p>
+          <div id="parsedWarnings" style="margin-top:.65rem;display:flex;flex-direction:column;gap:.4rem"></div>
+        </div>
+
+        <!-- File viewer — full-width, shown only in review (Action Required) mode -->
+        <div id="detailFileBoxTop" class="hidden" style="position:sticky;top:4.1rem;height:calc(55vh - 40px);overflow:hidden;margin:0 -1.5rem;width:calc(100% + 3rem);padding:0;background:#f8fafc;border-bottom:1px solid var(--border);z-index:1"></div>
+
         <div class="inv-detail-grid">
           <div>
             <div class="inv-detail-label">Vendor</div>
             <div class="inv-detail-value" id="detailVendor">—</div>
+            <input type="text" id="detailVendorInput" class="hidden"
+              style="width:100%;padding:.4rem .55rem;border:1px solid var(--border);border-radius:6px;font-size:.92rem;margin-top:.15rem" />
           </div>
           <div>
             <div class="inv-detail-label">Invoice Number</div>
             <div class="inv-detail-value" id="detailNumber">—</div>
+            <input type="text" id="detailNumberInput" class="hidden"
+              style="width:100%;padding:.4rem .55rem;border:1px solid var(--border);border-radius:6px;font-size:.92rem;margin-top:.15rem" />
           </div>
           <div>
             <div class="inv-detail-label">Invoice Date</div>
             <div class="inv-detail-value" id="detailDate">—</div>
+            <input type="date" id="detailDateInput" class="hidden"
+              style="width:100%;padding:.4rem .55rem;border:1px solid var(--border);border-radius:6px;font-size:.92rem;margin-top:.15rem" />
           </div>
           <div>
             <div class="inv-detail-label">Upload Date</div>
@@ -236,6 +257,8 @@
           <div>
             <div class="inv-detail-label">Total</div>
             <div class="inv-detail-value" id="detailTotal">—</div>
+            <input type="number" id="detailTotalInput" step="0.01" class="hidden"
+              style="width:100%;padding:.4rem .55rem;border:1px solid var(--border);border-radius:6px;font-size:.92rem;margin-top:.15rem" />
           </div>
           <div>
             <div class="inv-detail-label">Payment Account</div>
@@ -291,7 +314,7 @@
                 style="width:100%;padding:.35rem .6rem;border:1px solid var(--border);border-radius:6px;font-size:.85rem;background:var(--bg-primary)" />
             </div>
             <div>
-              <label style="font-size:.75rem;color:var(--text-muted);font-weight:600;display:block;margin-bottom:.2rem">Delivery / Freight + Fuel Surcharge ($)</label>
+              <label style="font-size:.75rem;color:var(--text-muted);font-weight:600;display:block;margin-bottom:.2rem">Freight + Fuel ($)</label>
               <input type="number" id="detailDelivery" step="0.01" min="0" placeholder="0.00"
                 style="width:100%;padding:.35rem .6rem;border:1px solid var(--border);border-radius:6px;font-size:.85rem;background:var(--bg-primary)" />
             </div>
@@ -344,6 +367,31 @@
         <button class="btn btn-danger btn-sm" id="deleteInvBtn"><i class="fas fa-trash"></i> Delete</button>
         <button class="btn btn-secondary" id="closeInvDetailBtn">Cancel</button>
         <button class="btn btn-primary" id="saveInvDetailBtn"><i class="fas fa-save"></i> Save Changes</button>
+        <button class="btn btn-success hidden" id="confirmInvSaveBtn"><i class="fas fa-check-circle"></i> Confirm &amp; Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manage Units modal (shared with product/recipe pages via utils.js) -->
+  <div class="modal-overlay hidden" id="manageUnitsModal">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header">
+        <h3><i class="fas fa-sliders-h"></i> Manage Units</h3>
+        <button class="modal-close" onclick="closeModal('manageUnitsModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <div id="manageUnitsList" style="margin-bottom:1rem;max-height:320px;overflow-y:auto"></div>
+        <div style="display:flex;gap:.5rem;align-items:center">
+          <input type="text" id="newUnitName" placeholder="New unit name…" style="flex:1"
+                 onkeydown="if(event.key==='Enter') addUnit()" />
+          <button class="btn btn-primary btn-sm" onclick="addUnit()">
+            <i class="fas fa-plus"></i> Add
+          </button>
+        </div>
+        <div id="manageUnitsError" style="color:#dc2626;font-size:.82rem;margin-top:.35rem;display:none"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('manageUnitsModal')">Close</button>
       </div>
     </div>
   </div>
@@ -351,7 +399,7 @@
   <!-- TOAST -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/static/utils.js?v=20260407-1"></script>
-  <script src="/static/invoices.js?v=20260407-1"></script>
+  <script src="/static/utils.js?v=20260426-1"></script>
+  <script src="/static/invoices.js?v=20260426-1"></script>
 </body>
 </html>

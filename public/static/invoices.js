@@ -12,9 +12,56 @@ let sortDir       = 'desc'; // 'asc' | 'desc'
 let currentInvTotal = 0;   // stored DB total for the open invoice (source of truth)
 let _invImgZoomCleanup = null;
 
+let invoiceUnits = [];
+
+async function loadInvoiceUnits() {
+  try {
+    const data = await apiGet('tables/units?page=1&limit=100');
+    invoiceUnits = (data.data || []).slice().sort((a, b) => a.sort_order - b.sort_order);
+  } catch (_) { invoiceUnits = []; }
+}
+
+function populateInvoiceUnitDropdown(select, selectedValue) {
+  const seen = new Set();
+  const opts = invoiceUnits
+    .filter(u => { const k = (u.name || '').toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })
+    .map(u => `<option value="${esc(u.name)}">${esc(u.name)}</option>`)
+    .join('');
+  select.innerHTML =
+    '<option value=""></option>' +
+    opts +
+    '<option value="__manage_units__" style="color:var(--primary);font-style:italic">+ Manage units</option>';
+  if (selectedValue) {
+    const lower = selectedValue.toLowerCase();
+    const opt = Array.from(select.options).find(o => o.value.toLowerCase() === lower);
+    if (opt) opt.selected = true;
+  }
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
+}
+
+function parsePackaging(str) {
+  const s = (str || '').trim();
+  if (!s) return { pack_qty: '', pack_unit: '' };
+  const m = s.match(/^([\d.,]+)\s*(.*)$/);
+  if (m) return { pack_qty: m[1], pack_unit: m[2].trim() };
+  return { pack_qty: '', pack_unit: s };
+}
+
 // ── Bootstrap ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   if (!document.getElementById('invBody')) return;
+
+  await loadInvoiceUnits();
+
+  registerUnitRefreshCallback(async () => {
+    await loadInvoiceUnits();
+    renderLinesTable();
+  });
 
   await loadInvoices();
 
@@ -62,6 +109,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('closeInvDetailModal').addEventListener('click', () => { _cleanInvImgZoom(); closeModal('invDetailModal'); });
   document.getElementById('closeInvDetailBtn').addEventListener('click',   () => { _cleanInvImgZoom(); closeModal('invDetailModal'); });
   document.getElementById('saveInvDetailBtn').addEventListener('click',    saveInvDetail);
+  document.getElementById('confirmInvSaveBtn').addEventListener('click',   confirmAndSaveInvoice);
   document.getElementById('deleteInvBtn').addEventListener('click',        deleteInvoice);
   document.getElementById('addLineBtn').addEventListener('click',          addLineRow);
 
@@ -139,10 +187,10 @@ function renderInvoices() {
   } else {
     tbody.innerHTML = slice.map(inv => `
       <tr style="cursor:pointer" onclick="openInvDetail('${esc(inv.id)}')">
-        <td>${esc(inv.upload_date   || '—')}</td>
+        <td>${fmtDate(inv.upload_date)}</td>
         <td style="font-weight:500">${esc(inv.vendor || '—')}</td>
         <td>${esc(inv.invoice_number || '—')}</td>
-        <td>${esc(inv.invoice_date  || '—')}</td>
+        <td>${fmtDate(inv.invoice_date)}</td>
         <td>${statusBadge(inv.status)}</td>
         <td style="text-align:right;font-weight:600">${inv.total ? '$' + parseFloat(inv.total).toFixed(2) : '—'}</td>
         <td>${esc(inv.payment_account || 'A/P')}</td>
@@ -199,41 +247,86 @@ function renderInvStats() {
   `;
 }
 
+// ── Working copy of parsed_data (for Action Required invoices) ──
+let currentParsedData = null;
+let isActionRequired  = false;
+
+// Try to JSON-parse a parsed_data field; returns null if missing or invalid.
+function tryParseParsedData(raw) {
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch (_) { return null; }
+}
+
 // ── Detail modal ────────────────────────────────────────────────
 async function openInvDetail(id) {
   const inv = allInvoices.find(i => i.id === id);
   if (!inv) return;
 
-  document.getElementById('detailInvId').value        = id;
-  document.getElementById('detailVendor').textContent  = inv.vendor        || '—';
-  document.getElementById('detailNumber').textContent  = inv.invoice_number || '—';
-  document.getElementById('detailDate').textContent    = inv.invoice_date   || '—';
-  document.getElementById('detailUpload').textContent  = inv.upload_date    || '—';
-  currentInvTotal = parseFloat(inv.total) || 0;
-  document.getElementById('detailTotal').textContent   = inv.total ? '$' + parseFloat(inv.total).toFixed(2) : '—';
+  isActionRequired  = inv.status === 'Action Required';
+  currentParsedData = isActionRequired ? tryParseParsedData(inv.parsed_data) : null;
+
+  // Toggle editable inputs vs read-only labels
+  toggleEditableMeta(isActionRequired);
+
+  // Toggle Action Required banner + footer buttons
+  const banner          = document.getElementById('actionRequiredBanner');
+  const saveChangesBtn  = document.getElementById('saveInvDetailBtn');
+  const confirmBtn      = document.getElementById('confirmInvSaveBtn');
+  if (isActionRequired) {
+    banner.classList.remove('hidden');
+    saveChangesBtn.classList.add('hidden');
+    confirmBtn.classList.remove('hidden');
+    renderParsedWarnings(currentParsedData?.warnings || []);
+  } else {
+    banner.classList.add('hidden');
+    saveChangesBtn.classList.remove('hidden');
+    confirmBtn.classList.add('hidden');
+  }
+
+  // Prefer parsed_data values when reviewing an Action Required invoice
+  const src = (isActionRequired && currentParsedData) ? currentParsedData : inv;
+
+  document.getElementById('detailInvId').value         = id;
+
+  const vendor       = src.vendor          || inv.vendor          || '';
+  const invNum       = src.invoice_number  || inv.invoice_number  || '';
+  const invDate      = src.invoice_date    || inv.invoice_date    || '';
+  const total        = parseFloat(src.total ?? inv.total) || 0;
+
+  document.getElementById('detailVendor').textContent  = vendor || '—';
+  document.getElementById('detailNumber').textContent  = invNum || '—';
+  document.getElementById('detailDate').textContent    = fmtDate(invDate);
+  document.getElementById('detailVendorInput').value   = vendor;
+  document.getElementById('detailNumberInput').value   = invNum;
+  document.getElementById('detailDateInput').value     = invDate;
+  document.getElementById('detailTotalInput').value    = total ? total.toFixed(2) : '';
+
+  document.getElementById('detailUpload').textContent  = fmtDate(inv.upload_date);
+  currentInvTotal = total;
+  document.getElementById('detailTotal').textContent   = total ? '$' + total.toFixed(2) : '—';
   document.getElementById('detailPayment').textContent = inv.payment_account || 'A/P';
   document.getElementById('detailStatus').value        = inv.status          || 'In Processing';
   document.getElementById('detailNotes').value         = inv.notes           || '';
 
-  // Additional cost fields — load from invoice record first
-  const taxPstStored        = parseFloat(inv.tax_pst)        || 0;
-  const taxGstStored        = parseFloat(inv.tax_gst)        || 0;
-  // Combine delivery + fuel_surcharge into one field
-  const deliveryStored      = (parseFloat(inv.delivery) || 0) + (parseFloat(inv.fuel_surcharge) || 0);
-  const depositStored       = parseFloat(inv.deposit)        || 0;
-  const creditStored        = parseFloat(inv.credit)         || 0;
-  const otherCostStored     = parseFloat(inv.other_cost)     || 0;
+  // Additional cost fields — prefer parsed_data when in Action Required, else stored values
+  const taxPstStored    = parseFloat(src.tax_pst    ?? inv.tax_pst)    || 0;
+  const taxGstStored    = parseFloat(src.tax_gst    ?? inv.tax_gst)    || 0;
+  const deliveryStored  = (parseFloat(src.delivery ?? inv.delivery) || 0) + (parseFloat(src.fuel_surcharge ?? inv.fuel_surcharge) || 0);
+  const depositStored   = parseFloat(src.deposit    ?? inv.deposit)    || 0;
+  const creditStored    = parseFloat(src.credit     ?? inv.credit)     || 0;
+  const otherCostStored = parseFloat(src.other_cost ?? inv.other_cost) || 0;
 
-  // If ALL extra-cost fields are zero, try the vendor fee template
   let taxPst = taxPstStored, taxGst = taxGstStored, delivery = deliveryStored;
-  let deposit = depositStored, credit = creditStored, otherCost = otherCostStored, otherDesc = inv.other_desc || '';
+  let deposit = depositStored, credit = creditStored, otherCost = otherCostStored;
+  let otherDesc = src.other_desc || inv.other_desc || '';
+
+  // Auto-fill from vendor fee template only when nothing is set
   const allZero = (taxPstStored + taxGstStored + deliveryStored + depositStored + creditStored + otherCostStored) === 0;
-  if (allZero && inv.vendor) {
+  if (allZero && (vendor || inv.vendor)) {
     try {
-      const tmpl = await apiGet(`vendor-fee-template?vendor=${encodeURIComponent(inv.vendor)}`);
+      const tmpl = await apiGet(`vendor-fee-template?vendor=${encodeURIComponent(vendor || inv.vendor)}`);
       if (tmpl.found && tmpl.template) {
         const t = tmpl.template;
-        // Template stores delivery+fuel_surcharge combined in delivery
         delivery  = (parseFloat(t.delivery) || 0) + (parseFloat(t.fuel_surcharge) || 0);
         taxGst    = parseFloat(t.tax_gst)   || 0;
         taxPst    = parseFloat(t.tax_pst)   || 0;
@@ -255,64 +348,173 @@ async function openInvDetail(id) {
   await loadAndRenderLines(id);
 
   // ── File viewer ──────────────────────────────────────────────
-  const fileBox   = document.getElementById('detailFileBox');
-  const fileKey   = inv.file_key  || '';
-  const fileName  = inv.file_name || '';
-  const fileUrl   = fileKey ? `/api/files/${fileKey}` : (inv.file_url || '');
-  const ext       = fileName.split('.').pop().toLowerCase();
-  const isImage   = ['png','jpg','jpeg','webp','gif'].includes(ext);
-  const isPdf     = ext === 'pdf';
+  const fileKey      = inv.file_key  || '';
+  const fileName     = inv.file_name || '';
+  const fileUrl      = fileKey ? `/api/files/${fileKey}` : (inv.file_url || '');
+  const ext          = fileName.split('.').pop().toLowerCase();
+  const isImage      = ['png','jpg','jpeg','webp','gif'].includes(ext);
+  const isPdf        = ext === 'pdf';
+
+  const fileBoxTop   = document.getElementById('detailFileBoxTop');
+  const fileBox      = document.getElementById('detailFileBox');
+
+  // Review mode: full-width image at top; saved mode: compact card at bottom
+  const activeBox    = isActionRequired ? fileBoxTop : fileBox;
+  const inactiveBox  = isActionRequired ? fileBox    : fileBoxTop;
+  inactiveBox.innerHTML = '';
+  inactiveBox.classList.add('hidden');
 
   if (fileUrl) {
     let preview = '';
     if (isPdf) {
+      const h = isActionRequired ? '55vh' : '420px';
       preview = `
         <div style="margin-top:.5rem">
-          <iframe src="${esc(fileUrl)}" style="width:100%;height:420px;border:1px solid var(--border);border-radius:8px" title="Invoice PDF"></iframe>
+          <iframe src="${esc(fileUrl)}" style="width:100%;height:${h};border:1px solid var(--border);border-radius:8px" title="Invoice PDF"></iframe>
         </div>`;
     } else if (isImage) {
-      preview = `
-        <div id="invImgZoomWrap" style="margin-top:.5rem;overflow:hidden;height:420px;border-radius:8px;border:1px solid var(--border);position:relative;background:#f1f5f9;cursor:zoom-in">
-          <img id="invZoomImg" src="${esc(fileUrl)}" alt="Invoice"
-            style="width:100%;height:420px;object-fit:contain;display:block;transform-origin:0 0;user-select:none"
-            draggable="false" />
-        </div>`;
+      if (isActionRequired) {
+        preview = `
+          <div id="invImgZoomWrap" style="flex:1;min-height:0;position:relative;overflow:hidden;background:#f1f5f9">
+            <img id="invZoomImg" src="${esc(fileUrl)}" alt="Invoice"
+              style="width:100%;height:100%;object-fit:contain;display:block;transform-origin:0 0;user-select:none"
+              draggable="false" />
+          </div>`;
+      } else {
+        preview = `
+          <div id="invImgZoomWrap" style="margin-top:.5rem;overflow:hidden;height:420px;border-radius:8px;border:1px solid var(--border);position:relative;background:#f1f5f9;cursor:zoom-in">
+            <img id="invZoomImg" src="${esc(fileUrl)}" alt="Invoice"
+              style="width:100%;height:420px;object-fit:contain;display:block;transform-origin:0 0;user-select:none"
+              draggable="false" />
+          </div>`;
+      }
     }
     const openBtn = `<a href="${esc(fileUrl)}" target="_blank" class="btn btn-primary btn-sm" style="margin-left:auto"><i class="fas fa-external-link-alt"></i> Open</a>`;
-    fileBox.innerHTML = `
-      <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.35rem">
-        <i class="fas fa-${isPdf ? 'file-pdf' : isImage ? 'file-image' : 'file-alt'}" style="color:var(--primary);font-size:1.1rem"></i>
-        <span style="font-weight:600;font-size:.9rem">${esc(inv.invoice_number || 'N/A')}</span>
-        ${openBtn}
-        <a href="${esc(fileUrl)}" download="${esc(fileName)}" class="btn btn-secondary btn-sm">
-          <i class="fas fa-download"></i> Download
-        </a>
-      </div>
-      ${preview}`;
-    fileBox.classList.remove('hidden');
+    const fileIcon = isPdf ? 'file-pdf' : isImage ? 'file-image' : 'file-alt';
+    const fileMeta = `
+      <i class="fas fa-${fileIcon}" style="color:var(--primary);font-size:1.1rem"></i>
+      <span style="font-weight:600;font-size:.9rem">${esc(inv.invoice_number || 'N/A')}</span>
+      ${openBtn}
+      <a href="${esc(fileUrl)}" download="${esc(fileName)}" class="btn btn-secondary btn-sm">
+        <i class="fas fa-download"></i> Download
+      </a>`;
+    if (isActionRequired && isImage) {
+      // Flex-column layout so the image wrap fills remaining container height
+      activeBox.innerHTML = `
+        <div style="display:flex;flex-direction:column;height:100%">
+          <div style="display:flex;align-items:center;gap:.6rem;padding:.6rem 1.5rem;flex-shrink:0">
+            ${fileMeta}
+          </div>
+          ${preview}
+        </div>`;
+    } else {
+      const hdrPad = isActionRequired ? 'padding:.6rem 1.5rem;' : '';
+      activeBox.innerHTML = `
+        <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.35rem;${hdrPad}">
+          ${fileMeta}
+        </div>
+        ${preview}`;
+    }
+    activeBox.classList.remove('hidden');
     if (isImage) _initInvImgZoom();
   } else {
-    fileBox.innerHTML = `<span style="color:var(--text-muted);font-size:.85rem"><i class="fas fa-paperclip"></i> No file attached</span>`;
-    fileBox.classList.remove('hidden');
+    activeBox.innerHTML = `<span style="color:var(--text-muted);font-size:.85rem"><i class="fas fa-paperclip"></i> No file attached</span>`;
+    activeBox.classList.remove('hidden');
   }
 
   openModal('invDetailModal');
+
+  // Measure the actual rendered header height and apply it as sticky top offset
+  if (isActionRequired) {
+    requestAnimationFrame(() => {
+      const hdr = document.querySelector('#invDetailModal .modal-header');
+      const fbt = document.getElementById('detailFileBoxTop');
+      if (hdr && fbt && !fbt.classList.contains('hidden')) {
+        fbt.style.top = hdr.offsetHeight + 'px';
+      }
+    });
+  }
 }
 
 // ── Line items ───────────────────────────────────────────────────
 let currentLines = [];  // working copy of lines in the editor
 
 async function loadAndRenderLines(invoiceId) {
-  try {
-    const data = await apiGet(`tables/invoice_lines?invoice_id=${invoiceId}&limit=200`);
-    currentLines = (data.data || []).map(l => ({ ...l }));
-  } catch (_) {
-    currentLines = [];
+  if (isActionRequired && currentParsedData?.items?.length) {
+    // Hydrate from parsed_data — line items haven't been written to invoice_lines yet
+    currentLines = currentParsedData.items.map(it => {
+      const { pack_qty, pack_unit } = parsePackaging(it.pack_size);
+      return {
+        product_name: it.name      || '',
+        vendor_item:  it.original_ocr || it.name || '',
+        category:     it.brand     || '',
+        item_code:    it.sku       || '',
+        pack_qty,
+        pack_unit,
+        price:        parseFloat(it.unit_price) || 0,
+        qty:          parseFloat(it.qty)        || 1,
+        line_total:   parseFloat(it.cost)       || 0,
+        _original_ocr: it.original_ocr || '',
+        _auto_mapped:  !!it.auto_mapped,
+      };
+    });
+    // [DEBUG] Cost-bug trace — log currentLines after parsed_data hydration
+    console.log('[COST-DEBUG] 2/5 currentLines (from parsed_data):', currentLines.map(l => ({
+      name: l.product_name, pack_qty: l.pack_qty, pack_unit: l.pack_unit,
+      price: l.price, qty: l.qty, line_total: l.line_total,
+    })));
+  } else {
+    try {
+      const data = await apiGet(`tables/invoice_lines?invoice_id=${invoiceId}&limit=200`);
+      currentLines = (data.data || []).map(l => {
+        const { pack_qty, pack_unit } = parsePackaging(l.packaging);
+        return { ...l, pack_qty, pack_unit };
+      });
+    } catch (_) {
+      currentLines = [];
+    }
   }
   renderLinesTable();
   // autoFill=true: if all extra-cost fields are 0 but there's a gap vs stored total,
   // auto-populate the Delivery field with the difference
   renderCostSummary({ autoFill: true });
+}
+
+// ── Toggle editable meta inputs vs read-only labels ─────────────
+function toggleEditableMeta(editable) {
+  const pairs = [
+    ['detailVendor', 'detailVendorInput'],
+    ['detailNumber', 'detailNumberInput'],
+    ['detailDate',   'detailDateInput'],
+    ['detailTotal',  'detailTotalInput'],
+  ];
+  for (const [labelId, inputId] of pairs) {
+    const label = document.getElementById(labelId);
+    const input = document.getElementById(inputId);
+    if (!label || !input) continue;
+    if (editable) {
+      label.classList.add('hidden');
+      input.classList.remove('hidden');
+    } else {
+      label.classList.remove('hidden');
+      input.classList.add('hidden');
+    }
+  }
+}
+
+function renderParsedWarnings(warnings) {
+  const container = document.getElementById('parsedWarnings');
+  if (!container) return;
+  if (!warnings.length) {
+    container.innerHTML = '<div style="font-size:.82rem;color:#166534"><i class="fas fa-check"></i> No warnings — parser is confident.</div>';
+    return;
+  }
+  container.innerHTML = warnings.map(w => `
+    <div style="display:flex;align-items:flex-start;gap:.45rem;font-size:.82rem;color:#78350f;line-height:1.5">
+      <i class="fas fa-exclamation-triangle" style="color:#f59e0b;margin-top:.18rem;flex-shrink:0"></i>
+      <span>${esc(w.message || '')}</span>
+    </div>
+  `).join('');
 }
 
 function renderLinesTable() {
@@ -327,14 +529,16 @@ function renderLinesTable() {
 
   tbody.innerHTML = currentLines.map((l, i) => `
     <tr data-idx="${i}">
-      <td><input type="text"   class="line-input" data-idx="${i}" data-f="product_name" value="${esc(l.product_name||'')}" placeholder="Product" style="width:110px"/></td>
+      <td><input type="text"   class="line-input" data-idx="${i}" data-f="product_name" value="${esc(l.product_name||'')}" title="${esc(l.product_name||'')}" placeholder="Product" style="width:110px"/></td>
       <td><input type="text"   class="line-input" data-idx="${i}" data-f="vendor_item"  value="${esc(l.vendor_item ||'')}" placeholder="Vendor item" style="width:110px"/></td>
       <td><input type="text"   class="line-input" data-idx="${i}" data-f="item_code"    value="${esc(l.item_code   ||'')}" placeholder="Code" style="width:72px"/></td>
-      <td><input type="text"   class="line-input" data-idx="${i}" data-f="packaging"    value="${esc(l.packaging   ||'')}" placeholder="Pkg" style="width:72px"/></td>
+      <td style="white-space:nowrap">
+        <input type="number" class="line-input" data-idx="${i}" data-f="pack_qty" value="${esc(l.pack_qty||'')}" placeholder="Qty" step="any" style="width:52px"/>
+        <select class="line-input line-unit-sel" data-idx="${i}" data-f="pack_unit" style="width:72px;padding:.25rem .3rem"></select>
+      </td>
       <td><input type="number" class="line-input line-num" data-idx="${i}" data-f="qty"   value="${l.qty  ||''}" placeholder="1" step="any"  style="width:58px;text-align:right"/></td>
       <td><input type="number" class="line-input line-num" data-idx="${i}" data-f="price" value="${l.price||''}" placeholder="0.00" step="0.01" style="width:80px;text-align:right"/></td>
       <td style="text-align:right;font-weight:600;font-size:.85rem;white-space:nowrap">
-
         $${((parseFloat(l.price)||0) * (parseFloat(l.qty)||0)).toFixed(2)}
       </td>
       <td>
@@ -344,13 +548,25 @@ function renderLinesTable() {
       </td>
     </tr>`).join('');
 
-  // Attach input listeners for live line-total + subtotal update
+  // Populate unit dropdowns
+  tbody.querySelectorAll('.line-unit-sel').forEach(sel => {
+    const idx = parseInt(sel.dataset.idx);
+    populateInvoiceUnitDropdown(sel, currentLines[idx].pack_unit || '');
+  });
+
+  // Attach input/change listeners for live line-total + subtotal update
   tbody.querySelectorAll('.line-input').forEach(inp => {
-    inp.addEventListener('input', e => {
+    const eventType = inp.tagName === 'SELECT' ? 'change' : 'input';
+    inp.addEventListener(eventType, e => {
       const idx = parseInt(e.target.dataset.idx);
       const f   = e.target.dataset.f;
+      if (f === 'pack_unit' && e.target.value === '__manage_units__') {
+        e.target.value = currentLines[idx].pack_unit || '';
+        openManageUnitsModal();
+        return;
+      }
       currentLines[idx][f] = e.target.value;
-      // Refresh line total cell
+      // Refresh line total cell (only price/qty affect it)
       const row   = tbody.querySelector(`tr[data-idx="${idx}"]`);
       const price = parseFloat(currentLines[idx].price) || 0;
       const qty   = parseFloat(currentLines[idx].qty)   || 0;
@@ -366,7 +582,7 @@ function renderLinesTable() {
 }
 
 function addLineRow() {
-  currentLines.push({ product_name:'', vendor_item:'', category:'', item_code:'', packaging:'', price:'', qty:'' });
+  currentLines.push({ product_name:'', vendor_item:'', category:'', item_code:'', pack_qty:'', pack_unit:'', price:'', qty:'' });
   renderLinesTable();
   // Scroll to bottom of table
   const scroll = document.querySelector('#linesTable').closest('.table-scroll');
@@ -469,16 +685,21 @@ async function saveInvDetail() {
 
     // 2. Bulk-replace line items
     await apiPost(`invoice-lines/${id}/replace`, {
-      lines: currentLines.map(l => ({
-        product_name: l.product_name || '',
-        vendor_item:  l.vendor_item  || '',
-        category:     l.category     || '',
-        item_code:    l.item_code    || '',
-        packaging:    l.packaging    || '',
-        price:        parseFloat(l.price) || 0,
-        qty:          parseFloat(l.qty)   || 0,
-        line_total:   (parseFloat(l.price)||0) * (parseFloat(l.qty)||0),
-      })),
+      lines: currentLines.map(l => {
+        const qty_str  = (l.pack_qty  || '').toString().trim();
+        const unit_str = (l.pack_unit || '').trim();
+        const packaging = qty_str && unit_str ? `${qty_str} ${unit_str}` : qty_str || unit_str;
+        return {
+          product_name: l.product_name || '',
+          vendor_item:  l.vendor_item  || '',
+          category:     l.category     || '',
+          item_code:    l.item_code    || '',
+          packaging,
+          price:        parseFloat(l.price) || 0,
+          qty:          parseFloat(l.qty)   || 0,
+          line_total:   (parseFloat(l.price)||0) * (parseFloat(l.qty)||0),
+        };
+      }),
       tax_pst:        taxPst,
       tax_gst:        taxGst,
       delivery:       delivery,
@@ -563,24 +784,13 @@ function _initInvImgZoom() {
   if (!wrap || !img) return;
 
   let scale = 1, panX = 0, panY = 0;
-  let zoomActive = false;
   let dragging = false, startX = 0, startY = 0, startPanX = 0, startPanY = 0;
+  let lastPinchDist = null;
 
-  function apply() {
-    img.style.transform = `translate(${panX}px,${panY}px) scale(${scale})`;
-    if (!zoomActive) {
-      wrap.style.cursor  = 'zoom-in';
-      wrap.style.outline = '';
-    } else {
-      wrap.style.cursor  = scale > 1 ? (dragging ? 'grabbing' : 'grab') : 'zoom-in';
-      wrap.style.outline = '2px solid var(--primary)';
-    }
-  }
-
-  function reset() {
-    scale = 1; panX = 0; panY = 0;
-    zoomActive = false; dragging = false;
-    apply();
+  function applyTransform(smooth = false) {
+    img.style.transition = smooth ? 'transform 0.1s ease' : 'none';
+    img.style.transform  = `translate(${panX}px,${panY}px) scale(${scale})`;
+    wrap.style.cursor    = scale > 1 ? (dragging ? 'grabbing' : 'grab') : 'default';
   }
 
   function clampPan() {
@@ -590,35 +800,31 @@ function _initInvImgZoom() {
     panY = Math.min(0, Math.max(panY, H * (1 - scale)));
   }
 
-  function onWrapClick() {
-    if (!zoomActive) { zoomActive = true; apply(); }
-  }
-
-  function onDocClick(e) {
-    if (zoomActive && !wrap.contains(e.target)) reset();
-  }
-
-  function onWheel(e) {
-    if (!zoomActive) return; // let scroll propagate normally when not in zoom mode
-    e.preventDefault();
-    const rect   = wrap.getBoundingClientRect();
-    const mx     = e.clientX - rect.left;
-    const my     = e.clientY - rect.top;
-    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-    const s2     = Math.min(8, Math.max(1, scale * factor));
+  function zoomAt(cx, cy, factor) {
+    const rect = wrap.getBoundingClientRect();
+    const mx   = cx - rect.left;
+    const my   = cy - rect.top;
+    const s2   = Math.min(8, Math.max(1, scale * factor));
     panX  = mx + (panX - mx) * s2 / scale;
     panY  = my + (panY - my) * s2 / scale;
     scale = s2;
     clampPan();
-    apply();
+    applyTransform(true);
+  }
+
+  function onWheel(e) {
+    // Ctrl+wheel zooms; touchpad pinch on Mac also fires wheel with ctrlKey=true
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.15 : 1 / 1.15);
   }
 
   function onMouseDown(e) {
-    if (!zoomActive || scale <= 1) return;
+    if (scale <= 1 || e.button !== 0) return;
     dragging  = true;
     startX    = e.clientX; startY    = e.clientY;
     startPanX = panX;      startPanY = panY;
-    apply();
+    applyTransform(false);
     e.preventDefault();
   }
 
@@ -627,30 +833,293 @@ function _initInvImgZoom() {
     panX = startPanX + (e.clientX - startX);
     panY = startPanY + (e.clientY - startY);
     clampPan();
-    apply();
+    applyTransform(false);
   }
 
   function onMouseUp() {
     if (!dragging) return;
     dragging = false;
-    apply();
+    applyTransform(false);
   }
 
-  wrap.addEventListener('click',     onWrapClick);
-  wrap.addEventListener('wheel',     onWheel,     { passive: false });
-  wrap.addEventListener('mousedown', onMouseDown);
-  document.addEventListener('click',     onDocClick);
+  function getTouchDist(touches) {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.hypot(dx, dy);
+  }
+
+  function onTouchStart(e) {
+    if (e.touches.length === 2) {
+      lastPinchDist = getTouchDist(e.touches);
+      e.preventDefault();
+    }
+  }
+
+  function onTouchMove(e) {
+    if (e.touches.length !== 2 || !lastPinchDist) return;
+    const dist = getTouchDist(e.touches);
+    const cx   = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+    const cy   = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+    zoomAt(cx, cy, dist / lastPinchDist);
+    lastPinchDist = dist;
+    e.preventDefault();
+  }
+
+  function onTouchEnd(e) {
+    if (e.touches.length < 2) lastPinchDist = null;
+  }
+
+  wrap.addEventListener('wheel',      onWheel,      { passive: false });
+  wrap.addEventListener('mousedown',  onMouseDown);
+  wrap.addEventListener('touchstart', onTouchStart, { passive: false });
+  wrap.addEventListener('touchmove',  onTouchMove,  { passive: false });
+  wrap.addEventListener('touchend',   onTouchEnd);
   document.addEventListener('mousemove', onMouseMove);
   document.addEventListener('mouseup',   onMouseUp);
 
   _invImgZoomCleanup = () => {
-    wrap.removeEventListener('click',     onWrapClick);
-    wrap.removeEventListener('wheel',     onWheel);
-    wrap.removeEventListener('mousedown', onMouseDown);
-    document.removeEventListener('click',     onDocClick);
+    wrap.removeEventListener('wheel',      onWheel);
+    wrap.removeEventListener('mousedown',  onMouseDown);
+    wrap.removeEventListener('touchstart', onTouchStart);
+    wrap.removeEventListener('touchmove',  onTouchMove);
+    wrap.removeEventListener('touchend',   onTouchEnd);
     document.removeEventListener('mousemove', onMouseMove);
     document.removeEventListener('mouseup',   onMouseUp);
   };
+
+  applyTransform(false);
+
+  // Auto-fit the image so it fills the container width (portrait invoice
+  // in a landscape container would otherwise be letterboxed).
+  function fitToWidth() {
+    if (!img.naturalWidth || !img.naturalHeight) return;
+    const W = wrap.clientWidth, H = wrap.clientHeight;
+    if (!W || !H) return;
+    const imgAspect       = img.naturalWidth / img.naturalHeight;
+    const containerAspect = W / H;
+    if (containerAspect > imgAspect) {
+      scale = Math.min(8, containerAspect / imgAspect);
+      clampPan();
+      applyTransform(false);
+    }
+  }
+  if (img.complete) fitToWidth();
+  else img.addEventListener('load', fitToWidth, { once: true });
+}
+
+// ══════════════════════════════════════════════════════════════
+// CONFIRM & SAVE — promotes an Action Required invoice to saved.
+// Writes suppliers, generic_products, product_entries, invoice_lines,
+// then flips the invoice status to "Closed" and clears parsed_data.
+// Mirrors the previous upload-page save flow so all the same logic
+// applies (find-or-create supplier, find-or-create generic_product,
+// pack_size parsing, cost_per_unit, product mappings, etc.).
+// ══════════════════════════════════════════════════════════════
+async function confirmAndSaveInvoice() {
+  const id  = document.getElementById('detailInvId').value;
+  const inv = allInvoices.find(i => i.id === id);
+  if (!id || !inv) return;
+  if (inv.status !== 'Action Required') {
+    showToast('This invoice is no longer in Action Required state.', 'warning');
+    return;
+  }
+
+  const btn = document.getElementById('confirmInvSaveBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
+
+  // Read editable meta fields
+  const vendor       = (document.getElementById('detailVendorInput').value || '').trim();
+  const invoiceNum   = (document.getElementById('detailNumberInput').value || '').trim();
+  const invoiceDate  = (document.getElementById('detailDateInput').value   || '').trim();
+  const totalInput   = parseFloat(document.getElementById('detailTotalInput').value) || 0;
+  const notes        = (document.getElementById('detailNotes').value || '').trim();
+
+  const taxPst    = parseFloat(document.getElementById('detailTaxPst').value)    || 0;
+  const taxGst    = parseFloat(document.getElementById('detailTaxGst').value)    || 0;
+  const delivery  = parseFloat(document.getElementById('detailDelivery').value)  || 0;
+  const deposit   = parseFloat(document.getElementById('detailDeposit').value)   || 0;
+  const credit    = parseFloat(document.getElementById('detailCredit').value)    || 0;
+  const otherCost = parseFloat(document.getElementById('detailOtherCost').value) || 0;
+  const otherDesc = (document.getElementById('detailOtherDesc').value || '').trim();
+
+  // Filter out empty rows
+  const validLines = currentLines
+    .map(l => {
+      const qty_str  = (l.pack_qty  || '').toString().trim();
+      const unit_str = (l.pack_unit || '').trim();
+      const packaging = qty_str && unit_str ? `${qty_str} ${unit_str}` : qty_str || unit_str;
+      return {
+        product_name: (l.product_name || '').trim(),
+        vendor_item:  (l.vendor_item  || '').trim(),
+        category:     (l.category     || '').trim(),
+        item_code:    (l.item_code    || '').trim(),
+        packaging,
+        price:        parseFloat(l.price)      || 0,
+        qty:          parseFloat(l.qty)        || 0,
+        line_total:   parseFloat(l.line_total) || 0,
+        _original_ocr: l._original_ocr        || '',
+      };
+    })
+    .filter(l => l.product_name);
+
+  if (!validLines.length) {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-check-circle"></i> Confirm & Save';
+    showToast('Add at least one line item with a product name before confirming.', 'error');
+    return;
+  }
+
+  // [DEBUG] Cost-bug trace — log validLines after the strict map()
+  console.log('[COST-DEBUG] 3/5 validLines (about to send):', validLines.map(l => ({
+    name: l.product_name, packaging: l.packaging,
+    price: l.price, qty: l.qty, line_total: l.line_total,
+  })));
+
+  const subtotal = validLines.reduce((s, l) => s + l.price * l.qty, 0);
+  const computedTotal = subtotal + taxPst + taxGst + delivery + otherCost - credit;
+  // Never silently lower the total — keep the higher of stored vs recomputed
+  const finalTotal = totalInput > 0
+    ? Math.max(totalInput, computedTotal)
+    : computedTotal;
+
+  try {
+    // 1. Update the invoice meta + extra costs + flip status to Closed,
+    //    clear parsed_data so the modal stops hydrating from it next time.
+    await apiPatch(`tables/${INV_LIST_TABLE}/${id}`, {
+      vendor:         vendor,
+      invoice_number: invoiceNum,
+      invoice_date:   invoiceDate,
+      total:          finalTotal,
+      tax_pst:        taxPst,
+      tax_gst:        taxGst,
+      delivery:       delivery,
+      fuel_surcharge: 0,
+      deposit:        deposit,
+      credit:         credit,
+      other_cost:     otherCost,
+      other_desc:     otherDesc,
+      notes:          notes,
+      status:         'Closed',
+      parsed_data:    '',
+    });
+
+    // 2. Write line items to invoice_lines (replaces any existing)
+    await apiPost(`invoice-lines/${id}/replace`, {
+      lines: validLines.map(l => ({
+        product_name: l.product_name,
+        vendor_item:  l.vendor_item,
+        category:     l.category,
+        item_code:    l.item_code,
+        packaging:    l.packaging,
+        price:        l.price,
+        qty:          l.qty,
+        line_total:   l.line_total || (l.price * l.qty),
+      })),
+      tax_pst:        taxPst,
+      tax_gst:        taxGst,
+      delivery:       delivery,
+      fuel_surcharge: 0,
+      deposit:        deposit,
+      credit:         credit,
+      other_cost:     otherCost,
+      other_desc:     otherDesc,
+    });
+
+    // 3. Bulk-create suppliers / generic_products / product_entries
+    //    — same backend route used by the old upload flow.
+    const productsForBulk = validLines.map(l => ({
+      name:        l.product_name,
+      brand:       l.category,           // category column doubles as brand on the line
+      sku:         l.item_code,
+      pack_size:   l.packaging,
+      qty:         l.qty,
+      unit_price:  l.price,
+      cost:        l.line_total || (l.price * l.qty),
+      invoice_ref: invoiceNum,
+      invoice_id:        id,
+      invoice_file_key:  inv.file_key  || '',
+      invoice_file_name: inv.file_name || '',
+      invoice_date:      invoiceDate || '',
+    }));
+
+    // [DEBUG] Cost-bug trace — log productsForBulk POST payload
+    console.log('[COST-DEBUG] 4/5 productsForBulk POST payload:', productsForBulk.map(p => ({
+      name: p.name, pack_size: p.pack_size, qty: p.qty,
+      unit_price: p.unit_price, cost: p.cost,
+    })));
+
+    const bulkResult = await apiPost('bulk/upsert-products', {
+      vendor_name: vendor,
+      products:    productsForBulk,
+    });
+
+    // [DEBUG] Cost-bug trace — log server response (includes saved cost / cost_per_unit)
+    console.log('[COST-DEBUG] 5/5 server response (saved values):', bulkResult);
+
+    // 4. Save product mappings so future uploads benefit from corrections
+    if (vendor) {
+      for (const l of validLines) {
+        const stableKey = (l.item_code && l.item_code.trim())
+          ? l.item_code.trim().toLowerCase()
+          : (l._original_ocr || l.product_name).trim().toLowerCase();
+        if (!stableKey) continue;
+        try {
+          await apiPost('product-mappings', {
+            vendor_name:         vendor,
+            raw_ocr_text:        stableKey,
+            corrected_name:      l.product_name,
+            corrected_brand:     l.category,
+            corrected_sku:       l.item_code,
+            corrected_pack_size: l.packaging,
+          });
+        } catch (e) {
+          console.warn('product-mappings save failed:', e.message);
+        }
+      }
+    }
+
+    // 5. Save the vendor fee template if any non-zero fee field
+    const hasAnyFee = delivery > 0 || taxGst > 0 || taxPst > 0 || otherCost > 0;
+    if (vendor && hasAnyFee) {
+      try {
+        await apiPost('vendor-fee-template', {
+          vendor_name: vendor,
+          delivery:    delivery,
+          tax_gst:     taxGst,
+          tax_pst:     taxPst,
+          other_cost:  otherCost,
+          other_desc:  otherDesc,
+        });
+      } catch (_) { /* non-fatal */ }
+    }
+
+    // 6. Update local cache, refresh list
+    Object.assign(inv, {
+      vendor, invoice_number: invoiceNum, invoice_date: invoiceDate,
+      total: finalTotal, tax_pst: taxPst, tax_gst: taxGst,
+      delivery: delivery, fuel_surcharge: 0, deposit: deposit,
+      credit: credit, other_cost: otherCost, other_desc: otherDesc,
+      notes: notes, status: 'Closed', parsed_data: '',
+    });
+
+    const parts = [];
+    if (bulkResult?.supplier_created) parts.push(`New vendor "${bulkResult.supplier_name}" created`);
+    if (bulkResult?.created_generics) parts.push(`${bulkResult.created_generics} new product(s)`);
+    if (bulkResult?.reused_generics)  parts.push(`${bulkResult.reused_generics} existing product(s) updated`);
+    showToast(parts.join(' · ') || 'Invoice confirmed & saved!', 'success');
+
+    _cleanInvImgZoom();
+    closeModal('invDetailModal');
+    populateVendorFilter();
+    applyFilters();
+  } catch (e) {
+    console.error('Confirm & Save failed:', e);
+    showToast('Confirm failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-check-circle"></i> Confirm & Save';
+  }
 }
 
 // ── Expose helper for invoice.js to call after upload ──────────

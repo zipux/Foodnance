@@ -135,13 +135,18 @@
                 <label>SKU</label>
                 <input type="text" id="eSku" placeholder="e.g. GP-1KG" />
               </div>
-              <div class="form-group">
+              <div class="form-group" style="grid-column:1/-1">
                 <label>Pack Size *</label>
-                <div class="pack-size-row">
-                  <input type="number" id="ePackQty" placeholder="e.g. 1" min="0" step="any" />
+                <div class="pack-size-row" style="align-items:center;flex-wrap:wrap">
+                  <input type="number" id="ePackQty" placeholder="e.g. 5" min="0" step="any" style="max-width:80px;flex:none" />
                   <select id="ePackUnit">
                     <option value="">Loading…</option>
                   </select>
+                  <span style="color:var(--text-muted);padding:0 .2rem;font-size:1rem;font-weight:500">×</span>
+                  <span style="font-size:.82rem;color:var(--text-muted);white-space:nowrap">Qty Ordered</span>
+                  <input type="number" id="eQtyOrdered" placeholder="1" min="1" step="1" style="max-width:70px;flex:none" />
+                  <span style="color:var(--text-muted);padding:0 .2rem;font-size:1rem;font-weight:500">=</span>
+                  <span style="font-size:.85rem;color:var(--text-muted);white-space:nowrap">Total: <strong id="ePackTotal" style="color:var(--text)">—</strong></span>
                 </div>
               </div>
               <div class="form-group">
@@ -282,6 +287,63 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeModal('manageUnitsModal')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MERGE PRODUCT MODAL -->
+  <div class="modal-overlay hidden" id="mergeProductModal">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header">
+        <h3><i class="fas fa-code-merge"></i> Merge Product</h3>
+        <button class="modal-close" onclick="closeMergeModal()"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="mergeSourceId" />
+        <div class="form-group" style="margin-bottom:1rem">
+          <label style="font-size:.82rem;color:var(--text-muted)">Merging (will be removed)</label>
+          <div id="mergeSourceName" style="font-weight:600;font-size:1rem;padding:.5rem .75rem;background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;color:#dc2626"></div>
+        </div>
+        <div class="form-group" style="margin-bottom:.4rem">
+          <label style="font-size:.82rem;color:var(--text-muted)">Surviving product <span style="color:#dc2626">*</span></label>
+          <div style="position:relative">
+            <input type="text" id="mergeSurvivingSearch" placeholder="Type to search products…"
+                   autocomplete="off" oninput="onMergeSearchInput()"
+                   style="width:100%;box-sizing:border-box" />
+            <div id="mergeSurvivingDropdown"
+                 style="display:none;position:absolute;top:100%;left:0;right:0;z-index:9999;
+                        background:#fff;border:1px solid #cbd5e1;border-radius:0 0 6px 6px;
+                        max-height:220px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.12)"></div>
+          </div>
+        </div>
+        <div id="mergeSurvivingChosen" style="display:none;padding:.45rem .75rem;background:#f0fdf4;border:1px solid #86efac;border-radius:6px;font-size:.88rem;color:#16a34a;margin-top:.35rem"></div>
+        <p style="font-size:.78rem;color:var(--text-muted);margin-top:.9rem;line-height:1.5">
+          All purchase history, inventory stock, and recipe references will be transferred to the surviving product.
+          The merged product will be hidden from the products list.
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeMergeModal()">Cancel</button>
+        <button class="btn btn-danger" id="confirmMergeBtn" disabled onclick="confirmMerge()">
+          <i class="fas fa-code-merge"></i> Confirm Merge
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MERGE ALIAS CONFIRMATION MODAL -->
+  <div class="modal-overlay hidden" id="mergeAliasModal">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-header">
+        <h3><i class="fas fa-tag"></i> Remember this name?</h3>
+        <button class="modal-close" onclick="closeModal('mergeAliasModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <p id="mergeAliasMsg" style="line-height:1.6;font-size:.93rem"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('mergeAliasModal')">No thanks</button>
+        <button class="btn btn-primary" id="mergeAliasYesBtn"><i class="fas fa-check"></i> Yes, remember it</button>
       </div>
     </div>
   </div>

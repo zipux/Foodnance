@@ -301,31 +301,18 @@ function addIngredientLine(prefill = null) {
   div.className = 'ingredient-line';
   div.id = `ing-${idx}`;
 
-  // Build product options using generic names + FIFO cost
-  const opts = allProducts.map(p => {
-    const cpu = p._cpu !== undefined ? p._cpu : costPerUnit(p);
-    const pu  = p._packUnit || packUnit(p);
-    return `<option value="${esc(p.id)}"
-      data-cost="${cpu}"
-      data-packunit="${esc(pu)}"
-      data-subunitname="${esc(p.sub_unit_name || '')}"
-      data-subunitqty="${p.sub_unit_qty || ''}"
-      ${p.id === row.product_id ? 'selected' : ''}>
-      ${esc(p.name)} (${fmt(cpu)}/${pu}) [FIFO]
-    </option>`;
-  }).join('');
-
   // Build unit options — standard list + sub-unit appended if defined for selected product
   const selectedProduct = row.product_id ? allProducts.find(p => p.id === row.product_id) : null;
   const unitOpts = buildUnitOptions(row.unit, selectedProduct);
+  const prefillName = selectedProduct ? esc(selectedProduct.name) : '';
 
   div.innerHTML = `
-    <div class="form-group">
+    <div class="form-group" style="position:relative">
       ${idx === 0 ? '<label>Product</label>' : '<label>&nbsp;</label>'}
-      <select id="ing-prod-${idx}" onchange="onProductChange(${idx})">
-        <option value="">— Select product —</option>
-        ${opts}
-      </select>
+      <input type="text" id="ing-prod-input-${idx}" value="${prefillName}" placeholder="Type to search…" autocomplete="off"
+             oninput="onProductSearch(${idx})" onblur="hideProductSuggestions(${idx})" />
+      <input type="hidden" id="ing-prod-${idx}" value="${esc(row.product_id || '')}" />
+      <div id="ing-prod-suggestions-${idx}" class="product-suggestions"></div>
     </div>
     <div class="form-group">
       ${idx === 0 ? '<label>Qty</label>' : '<label>&nbsp;</label>'}
@@ -354,15 +341,17 @@ function addIngredientLine(prefill = null) {
 }
 
 function onProductChange(idx) {
-  const sel  = document.getElementById(`ing-prod-${idx}`);
-  const opt  = sel.options[sel.selectedIndex];
-  const cpu  = parseFloat(opt?.dataset?.cost || 0);   // cost per pack unit
-  const pu   = opt?.dataset?.packunit || 'kg';         // pack unit (kg, g, L…)
-  const subUnitName = opt?.dataset?.subunitname || '';
-  const subUnitQty  = parseFloat(opt?.dataset?.subunitqty || 0);
+  const hidden    = document.getElementById(`ing-prod-${idx}`);
+  const productId = hidden?.value || '';
+  const product   = allProducts.find(p => p.id === productId);
 
-  ingredientRows[idx].product_id    = sel.value;
-  ingredientRows[idx].product_name  = opt?.text?.split('(')[0]?.trim() || '';
+  const cpu         = product ? (product._cpu !== undefined ? product._cpu : costPerUnit(product)) : 0;
+  const pu          = product ? (product._packUnit || packUnit(product)) : 'kg';
+  const subUnitName = product?.sub_unit_name || '';
+  const subUnitQty  = parseFloat(product?.sub_unit_qty || 0);
+
+  ingredientRows[idx].product_id    = productId;
+  ingredientRows[idx].product_name  = product?.name || '';
   ingredientRows[idx].unit_cost     = cpu;
   ingredientRows[idx].pack_unit     = pu;
   ingredientRows[idx].sub_unit_name = subUnitName;
@@ -370,7 +359,6 @@ function onProductChange(idx) {
 
   // Determine the smart default unit for this product:
   // → sub-unit if defined (e.g. 'Egg'), otherwise pack unit (e.g. 'L', 'Each', 'kg')
-  const product     = allProducts.find(p => p.id === sel.value);
   const defaultUnit = subUnitName ? subUnitName : (pu || 'kg');
 
   // Always auto-set unit when product changes (unless user already manually picked one)
@@ -441,6 +429,53 @@ function onUnitChange(idx) {
   _updateIngCostDisplay(idx);
   recalcCosts();
 }
+function onProductSearch(idx) {
+  const input          = document.getElementById(`ing-prod-input-${idx}`);
+  const hidden         = document.getElementById(`ing-prod-${idx}`);
+  const suggestionsDiv = document.getElementById(`ing-prod-suggestions-${idx}`);
+  const query          = input.value.trim().toLowerCase();
+
+  hidden.value = '';
+
+  if (query.length < 3) {
+    suggestionsDiv.style.display = 'none';
+    return;
+  }
+
+  const matches = allProducts.filter(p => p.name.toLowerCase().includes(query));
+
+  if (!matches.length) {
+    suggestionsDiv.innerHTML = '<div class="product-suggestion-empty">No products found</div>';
+    suggestionsDiv.style.display = 'block';
+    return;
+  }
+
+  suggestionsDiv.innerHTML = matches.map(p =>
+    `<div class="product-suggestion-item" onmousedown="selectProduct(${idx}, '${esc(p.id)}')">${esc(p.name)}</div>`
+  ).join('');
+  suggestionsDiv.style.display = 'block';
+}
+
+function selectProduct(idx, productId) {
+  const product        = allProducts.find(p => p.id === productId);
+  if (!product) return;
+
+  const input          = document.getElementById(`ing-prod-input-${idx}`);
+  const hidden         = document.getElementById(`ing-prod-${idx}`);
+  const suggestionsDiv = document.getElementById(`ing-prod-suggestions-${idx}`);
+
+  input.value           = product.name;
+  hidden.value          = productId;
+  suggestionsDiv.style.display = 'none';
+
+  onProductChange(idx);
+}
+
+function hideProductSuggestions(idx) {
+  const suggestionsDiv = document.getElementById(`ing-prod-suggestions-${idx}`);
+  if (suggestionsDiv) suggestionsDiv.style.display = 'none';
+}
+
 function removeIngredientLine(idx) {
   const div = document.getElementById(`ing-${idx}`);
   if (div) div.remove();

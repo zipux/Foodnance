@@ -5,6 +5,33 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Recipe Builder</title>
   <link rel="stylesheet" href="/static/style.css?v=20260407-1" />
+  <style>
+    .product-suggestions {
+      display: none;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: #fff;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0,0,0,.1);
+      max-height: 220px;
+      overflow-y: auto;
+      z-index: 100;
+    }
+    .product-suggestion-item {
+      padding: .45rem .75rem;
+      font-size: .875rem;
+      cursor: pointer;
+    }
+    .product-suggestion-item:hover { background: #f3f4f6; }
+    .product-suggestion-empty {
+      padding: .45rem .75rem;
+      font-size: .875rem;
+      color: var(--text-muted);
+    }
+  </style>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 </head>

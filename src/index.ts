@@ -95,7 +95,7 @@ const ALLOWED_TABLES = [
   'recipes', 'recipe_items', 'finished_products', 'finished_product_items',
   'inventory', 'stock_log', 'invoices', 'invoice_lines',
   'staff', 'certification_types', 'staff_certifications',
-  'product_mappings', 'units'
+  'product_mappings', 'units', 'product_aliases'
 ]
 
 // ── List / query
@@ -173,6 +173,19 @@ app.patch('/api/tables/:table/:id', async (c) => {
   const setCols = keys.map(k => `${k} = ?`).join(', ')
   await c.env.DB.prepare(`UPDATE ${table} SET ${setCols} WHERE id = ?`).bind(...Object.values(body), id).run()
   return c.json({ id, ...body })
+})
+
+// ── Delete generic_product (cascades related data correctly)
+app.delete('/api/tables/generic_products/:id', async (c) => {
+  const { id } = c.req.param()
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE product_entries SET generic_product_id = NULL WHERE generic_product_id = ?').bind(id),
+    c.env.DB.prepare('DELETE FROM product_aliases WHERE generic_product_id = ?').bind(id),
+    c.env.DB.prepare('DELETE FROM inventory WHERE item_id = ?').bind(id),
+    c.env.DB.prepare('DELETE FROM recipe_items WHERE product_id = ?').bind(id),
+    c.env.DB.prepare('DELETE FROM generic_products WHERE id = ?').bind(id),
+  ])
+  return c.body(null, 204)
 })
 
 // ── Delete
@@ -465,15 +478,27 @@ app.post('/api/bulk/upsert-products', async (c) => {
   }
 
   let saved = 0, createdGenerics = 0, reusedGenerics = 0
+  // [DEBUG] Cost-bug trace — per-row record of received vs saved values.
+  const debugRows: Array<Record<string, unknown>> = []
 
   for (const p of body.products) {
     const name = (p.name as string || '').trim()
     if (!name) continue
 
-    // 1. Find existing generic_product by name (case-insensitive)
-    const existing = await c.env.DB.prepare(
-      `SELECT id FROM generic_products WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))`
+    // 1. Find existing generic_product by name (case-insensitive, skip soft-deleted)
+    let existing = await c.env.DB.prepare(
+      `SELECT id FROM generic_products WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND deleted_at IS NULL`
     ).bind(name).first<{ id: string }>()
+
+    // 1b. If not found by name, check product_aliases (merges leave old names here)
+    if (!existing) {
+      const aliasMatch = await c.env.DB.prepare(
+        `SELECT pa.generic_product_id AS id FROM product_aliases pa
+         JOIN generic_products gp ON gp.id = pa.generic_product_id
+         WHERE LOWER(TRIM(pa.alias_name)) = LOWER(TRIM(?)) AND gp.deleted_at IS NULL`
+      ).bind(name).first<{ id: string }>()
+      if (aliasMatch) existing = aliasMatch
+    }
 
     let genericId: string
     if (existing) {
@@ -501,8 +526,8 @@ app.post('/api/bulk/upsert-products', async (c) => {
     // 2. Always add a new product_entry for this purchase
     const entryId = uid()
     const today   = new Date().toISOString().slice(0, 10)
-    const cost      = parseFloat(p.cost as string) || 0
-    const unitPrice = parseFloat(p.unit_price as string) || cost
+    const cost        = parseFloat(p.cost as string) || 0
+    const qtyOrdered  = parseFloat(p.qty  as string) || 1
     // Split pack_size string into pack_qty + pack_unit, handling complex formats:
     //   "500g"        → 500, "g"
     //   "2 kg"        → 2, "kg"
@@ -513,14 +538,14 @@ app.post('/api/bulk/upsert-products', async (c) => {
     //   "12 Each"     → 12, "Each"
     const { packQty, packUnit } = parsePackSize((p.pack_size as string) || '')
 
-    // cost_per_unit: divide unit_price by pack_qty for standard weight/volume units
-    // e.g. Potato Fingerling 12LB at $29.96 → $29.96 ÷ 12 = $2.50/lb
-    // For "Each" or non-standard units, unit_price IS the cost per unit already
-    const STANDARD_UNITS = ['kg','g','lb','lbs','l','ml','oz','fl oz','gal']
-    const isStandardUnit = STANDARD_UNITS.includes(packUnit.toLowerCase().replace(/\.$/, ''))
-    const costPerUnit = isStandardUnit && packQty > 1
-      ? Math.round((unitPrice / packQty) * 100) / 100
-      : unitPrice
+    // cost_per_unit: line_total ÷ (pack_qty × qty_ordered) gives price per standard unit.
+    // e.g. 3 bags × 5 LB/bag at $53.28 total → $53.28 ÷ 15 lb = $3.55/lb
+    // e.g. 4 bags × 12 LB/bag at $111.84 total → $111.84 ÷ 48 lb = $2.33/lb
+    // For "Each" or non-standard units, cost per each = cost / qty_ordered
+    const totalUnits = packQty * qtyOrdered
+    const costPerUnit = totalUnits > 0
+      ? Math.round((cost / totalUnits) * 100) / 100
+      : cost
 
     // Calculate days_left from expiry_date
     let daysLeftVal: number | null = null
@@ -539,8 +564,8 @@ app.post('/api/bulk/upsert-products', async (c) => {
          (id, generic_product_id, generic_product_name, supplier_id, supplier_name,
           vendor_item_name, sku, pack_qty, pack_unit, cost, cost_per_unit,
           purchase_date, expiry_date, days_left, invoice_ref,
-          invoice_id, invoice_file_key, invoice_file_name)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          invoice_id, invoice_file_key, invoice_file_name, qty_ordered)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       entryId, genericId, name,
       rowSupplierId, rowSupplierName,
@@ -554,8 +579,22 @@ app.post('/api/bulk/upsert-products', async (c) => {
       (p.invoice_ref as string) || '',
       (p.invoice_id as string) || '',
       (p.invoice_file_key as string) || '',
-      (p.invoice_file_name as string) || ''
+      (p.invoice_file_name as string) || '',
+      qtyOrdered
     ).run()
+
+    // [DEBUG] Cost-bug trace — record what arrived and what was saved.
+    debugRows.push({
+      name,
+      received_cost:       p.cost,
+      received_unit_price: p.unit_price,
+      received_qty:        p.qty,
+      received_pack_size:  p.pack_size,
+      parsed_pack_qty:     packQty,
+      parsed_pack_unit:    packUnit,
+      saved_cost:          cost,
+      saved_cost_per_unit: costPerUnit,
+    })
 
     saved++
   }
@@ -567,7 +606,72 @@ app.post('/api/bulk/upsert-products', async (c) => {
     supplier_id:       supplierId,
     supplier_name:     supplierName,
     supplier_created:  supplierCreated,
+    debug:             debugRows,
   })
+})
+
+// ─── Product Merge ────────────────────────────────────────────
+// POST /api/products/merge
+// Body: { merged_id, surviving_id }
+// 1. Re-links product_entries to the surviving product
+// 2. Sums inventory quantities (deletes merged row)
+// 3. Re-links recipe_items to the surviving product
+// 4. Soft-deletes the merged generic_product (sets deleted_at)
+app.post('/api/products/merge', async (c) => {
+  const body = await c.req.json() as { merged_id: string; surviving_id: string }
+  const { merged_id, surviving_id } = body
+  if (!merged_id || !surviving_id)
+    return c.json({ error: 'merged_id and surviving_id required' }, 400)
+  if (merged_id === surviving_id)
+    return c.json({ error: 'Cannot merge a product with itself' }, 400)
+
+  const merged   = await c.env.DB.prepare(
+    'SELECT id, name FROM generic_products WHERE id = ? AND deleted_at IS NULL'
+  ).bind(merged_id).first<{ id: string; name: string }>()
+  const surviving = await c.env.DB.prepare(
+    'SELECT id, name FROM generic_products WHERE id = ? AND deleted_at IS NULL'
+  ).bind(surviving_id).first<{ id: string; name: string }>()
+
+  if (!merged)   return c.json({ error: 'Merged product not found' }, 404)
+  if (!surviving) return c.json({ error: 'Surviving product not found' }, 404)
+
+  // 1. Re-link product_entries
+  await c.env.DB.prepare(
+    'UPDATE product_entries SET generic_product_id = ?, generic_product_name = ? WHERE generic_product_id = ?'
+  ).bind(surviving_id, surviving.name, merged_id).run()
+
+  // 2. Merge inventory rows
+  const mergedInv = await c.env.DB.prepare(
+    'SELECT id, quantity FROM inventory WHERE item_id = ?'
+  ).bind(merged_id).first<{ id: string; quantity: number }>()
+  if (mergedInv) {
+    const survivingInv = await c.env.DB.prepare(
+      'SELECT id FROM inventory WHERE item_id = ?'
+    ).bind(surviving_id).first<{ id: string }>()
+    if (survivingInv) {
+      await c.env.DB.prepare(
+        'UPDATE inventory SET quantity = quantity + ? WHERE item_id = ?'
+      ).bind(mergedInv.quantity, surviving_id).run()
+      await c.env.DB.prepare('DELETE FROM inventory WHERE item_id = ?').bind(merged_id).run()
+    } else {
+      // No surviving inventory row — reassign the merged row
+      await c.env.DB.prepare(
+        'UPDATE inventory SET item_id = ?, item_name = ? WHERE item_id = ?'
+      ).bind(surviving_id, surviving.name, merged_id).run()
+    }
+  }
+
+  // 3. Re-link recipe_items
+  await c.env.DB.prepare(
+    'UPDATE recipe_items SET product_id = ?, product_name = ? WHERE product_id = ?'
+  ).bind(surviving_id, surviving.name, merged_id).run()
+
+  // 4. Soft-delete the merged product
+  await c.env.DB.prepare(
+    "UPDATE generic_products SET deleted_at = datetime('now') WHERE id = ?"
+  ).bind(merged_id).run()
+
+  return c.json({ ok: true, merged_name: merged.name, surviving_name: surviving.name })
 })
 
 // ─── Stats endpoints ──────────────────────────────────────────
