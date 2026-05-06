@@ -271,6 +271,10 @@ async function openInvDetail(id) {
   isActionRequired  = inv.status === 'Action Required';
   currentParsedData = isActionRequired ? tryParseParsedData(inv.parsed_data) : null;
 
+  // Resize modal and line items height for Action Required only
+  document.querySelector('#invDetailModal .modal').classList.toggle('modal--action-required', isActionRequired);
+  document.getElementById('linesScroll').style.maxHeight = isActionRequired ? '35vh' : '280px';
+
   // Toggle editable inputs vs read-only labels
   toggleEditableMeta(isActionRequired);
 
@@ -606,26 +610,28 @@ function renderCostSummary({ autoFill = false } = {}) {
   const taxPstEl  = document.getElementById('detailTaxPst');
   const taxGstEl  = document.getElementById('detailTaxGst');
   const delivEl   = document.getElementById('detailDelivery');
+  const depositEl = document.getElementById('detailDeposit');
   const creditEl  = document.getElementById('detailCredit');
   const otherEl   = document.getElementById('detailOtherCost');
 
-  let taxPst   = parseFloat(taxPstEl?.value)  || 0;
-  let taxGst   = parseFloat(taxGstEl?.value)  || 0;
-  let delivery = parseFloat(delivEl?.value)   || 0;
-  let credit   = parseFloat(creditEl?.value)  || 0;
-  let other    = parseFloat(otherEl?.value)   || 0;
+  let taxPst   = parseFloat(taxPstEl?.value)   || 0;
+  let taxGst   = parseFloat(taxGstEl?.value)   || 0;
+  let delivery = parseFloat(delivEl?.value)    || 0;
+  let deposit  = parseFloat(depositEl?.value)  || 0;
+  let credit   = parseFloat(creditEl?.value)   || 0;
+  let other    = parseFloat(otherEl?.value)    || 0;
 
   // Use the stored DB total as authoritative; fall back to computed if not set
-  const displayTotal = currentInvTotal > 0 ? currentInvTotal : (subtotal + taxPst + taxGst + delivery + other - credit);
+  const displayTotal = currentInvTotal > 0 ? currentInvTotal : (subtotal + taxPst + taxGst + delivery + deposit + other - credit);
 
   // Auto-fill: if all extra-cost fields are zero but there is a gap,
   // put the difference into Delivery (most common cause on food invoices)
-  const gap = Math.round((displayTotal - subtotal - taxPst - taxGst - delivery - other + credit) * 100) / 100;
-  if (autoFill && gap >= 0.01 && taxPst === 0 && taxGst === 0 && delivery === 0 && other === 0 && credit === 0) {
+  const gap = Math.round((displayTotal - subtotal - taxPst - taxGst - delivery - deposit - other + credit) * 100) / 100;
+  if (autoFill && gap >= 0.01 && taxPst === 0 && taxGst === 0 && delivery === 0 && deposit === 0 && other === 0 && credit === 0) {
     if (delivEl) { delivEl.value = gap.toFixed(2); delivery = gap; }
   }
 
-  const computed = subtotal + taxPst + taxGst + delivery + other - credit;
+  const computed = subtotal + taxPst + taxGst + delivery + deposit + other - credit;
   const diff     = Math.round((displayTotal - computed) * 100) / 100;
 
   const el = document.getElementById('detailCostSummary');
@@ -636,6 +642,7 @@ function renderCostSummary({ autoFill = false } = {}) {
   if (taxPst)   parts.push(row('PST', taxPst));
   if (taxGst)   parts.push(row('GST/HST', taxGst));
   if (delivery) parts.push(row('Delivery + Fuel Surcharge', delivery));
+  if (deposit)  parts.push(row('Deposits', deposit));
   if (credit)   parts.push(`<span style="white-space:nowrap">Credit: <strong style="color:#16a34a">−$${credit.toFixed(2)}</strong></span>`);
   if (other)    parts.push(row('Other', other));
   // Show warning only if gap remains after auto-fill
@@ -669,7 +676,7 @@ async function saveInvDetail() {
     const otherCost = parseFloat(document.getElementById('detailOtherCost').value) || 0;
     const otherDesc = document.getElementById('detailOtherDesc').value.trim();
     const subtotal  = currentLines.reduce((s, l) => s + (parseFloat(l.price)||0) * (parseFloat(l.qty)||0), 0);
-    const newTotal  = subtotal + taxPst + taxGst + delivery + otherCost - credit;
+    const newTotal  = subtotal + taxPst + taxGst + delivery + deposit + otherCost - credit;
     // Keep the higher of: recomputed total vs stored DB total (never silently lower it)
     const savedTotal = currentInvTotal > 0
       ? Math.max(currentInvTotal, newTotal)
@@ -789,6 +796,7 @@ function _initInvImgZoom() {
   const img  = document.getElementById('invZoomImg');
   if (!wrap || !img) return;
 
+  const inReviewMode = !!wrap.closest('#detailFileBoxTop');
   let scale = 1, panX = 0, panY = 0;
   let dragging = false, startX = 0, startY = 0, startPanX = 0, startPanY = 0;
   let lastPinchDist = null;
@@ -905,6 +913,10 @@ function _initInvImgZoom() {
     const containerAspect = W / H;
     if (containerAspect > imgAspect) {
       scale = Math.min(8, containerAspect / imgAspect);
+      if (inReviewMode) {
+        panX = W * (1 - scale) / 2;
+        panY = H * (1 - scale) / 2;
+      }
       clampPan();
       applyTransform(false);
     }
@@ -983,7 +995,7 @@ async function confirmAndSaveInvoice() {
   })));
 
   const subtotal = validLines.reduce((s, l) => s + l.price * l.qty, 0);
-  const computedTotal = subtotal + taxPst + taxGst + delivery + otherCost - credit;
+  const computedTotal = subtotal + taxPst + taxGst + delivery + deposit + otherCost - credit;
   // Never silently lower the total — keep the higher of stored vs recomputed
   const finalTotal = totalInput > 0
     ? Math.max(totalInput, computedTotal)

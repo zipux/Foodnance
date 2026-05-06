@@ -90,6 +90,14 @@
       display: inline-block;
     }
 
+    /* Action Required modal: 95% of viewport */
+    .modal--action-required {
+      width: 95vw !important;
+      max-width: 95vw !important;
+      height: 95vh !important;
+      max-height: 95vh !important;
+    }
+
     /* Detail modal extras */
     .inv-detail-grid {
       display: grid;
@@ -274,7 +282,7 @@
             </span>
             <button class="btn btn-secondary btn-sm" id="addLineBtn"><i class="fas fa-plus"></i> Add Row</button>
           </div>
-          <div class="table-scroll" style="max-height:280px;overflow-y:auto">
+          <div id="linesScroll" class="table-scroll" style="max-height:280px;overflow-y:auto">
             <table class="data-table" style="font-size:.82rem" id="linesTable">
                            <thead>
                 <tr>
