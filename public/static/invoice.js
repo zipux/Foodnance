@@ -972,6 +972,7 @@ async function saveQuickInvoice() {
     file_name: currentFileName || '',
   };
 
+  let savedInvoiceId = null;
   try {
     const payload = {
       vendor:          currentVendor          || '',
@@ -995,7 +996,8 @@ async function saveQuickInvoice() {
       other_desc:      currentOtherDesc     || '',
       parsed_data:     JSON.stringify(parsedData),
     };
-    await apiPost('tables/invoices', payload);
+    const saved = await apiPost('tables/invoices', payload);
+    savedInvoiceId = saved.id || null;
   } catch (e) {
     hideProgress();
     showToast('Save failed: ' + e.message, 'error');
@@ -1005,7 +1007,7 @@ async function saveQuickInvoice() {
 
   showProgress(100, 'Saved!');
   hideProgress();
-  showSavedBanner(parsedData);
+  showSavedBanner(parsedData, savedInvoiceId);
 
   // Reset the staging area so the user can upload another invoice
   stagedFiles = [];
@@ -1015,7 +1017,7 @@ async function saveQuickInvoice() {
   resetSubmitButton();
 }
 
-function showSavedBanner(parsedData) {
+function showSavedBanner(parsedData, invoiceId) {
   const banner = savedBanner();
   if (!banner) return;
   const titleEl = document.getElementById('savedTitleText');
@@ -1030,6 +1032,10 @@ function showSavedBanner(parsedData) {
   if (warns) msg += ` ${warns} warning${warns === 1 ? '' : 's'} flagged for review.`;
   msg += ' Open the invoice from the Invoices page to review and confirm.';
   msgEl.textContent = msg;
+
+  const viewLink = banner.querySelector('a[href*="invoices"]');
+  if (viewLink && invoiceId) viewLink.href = `/invoices.html?open=${encodeURIComponent(invoiceId)}`;
+
   banner.style.display = 'block';
 }
 

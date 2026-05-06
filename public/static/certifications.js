@@ -173,8 +173,8 @@ function renderCertTable() {
         <td style="font-weight:600">${esc(c.staff_name)}</td>
         <td><span class="cert-type-chip">${esc(c.cert_type_name)}</span></td>
         <td>${esc(c.cert_number || '—')}</td>
-        <td>${esc(c.issue_date || '—')}</td>
-        <td>${esc(c.expiry_date || '—')}${days !== null ? `<br><small style="color:var(--text-muted)">${days < 0 ? Math.abs(days) + 'd overdue' : days + 'd left'}</small>` : ''}</td>
+        <td>${fmtDate(c.issue_date)}</td>
+        <td>${fmtDate(c.expiry_date)}${days !== null ? `<br><small style="color:var(--text-muted)">${days < 0 ? Math.abs(days) + 'd overdue' : days + 'd left'}</small>` : ''}</td>
         <td><span class="cert-status-badge ${statusCls}">${statusTxt}</span></td>
         <td>${esc(c.issuer || '—')}</td>
         <td>${fileLink}</td>

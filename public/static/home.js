@@ -150,7 +150,7 @@ function renderDetail(product) {
   const bodyEl    = document.getElementById('pmDetailBody');
   const placeholderEl = document.getElementById('pmChartPlaceholder');
 
-  titleEl.textContent = product.product_name;
+  titleEl.innerHTML = `<a href="/products.html#${esc(product.product_id)}" style="color:inherit;text-decoration:none" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${esc(product.product_name)}</a>`;
 
   if (!product.purchases.length) {
     warningEl.classList.remove('hidden');
@@ -219,7 +219,7 @@ function renderChart(chrono, unit) {
         legend: { display: false },
         tooltip: {
           callbacks: {
-            title: (items) => items[0] ? chrono[items[0].dataIndex].date : '',
+            title: (items) => items[0] ? fmtDate(chrono[items[0].dataIndex].date) : '',
             label: (item) => {
               const p = chrono[item.dataIndex];
               return [
@@ -251,14 +251,26 @@ function renderLegend(chrono) {
 
 function renderDetailTable(purchases, unit) {
   const bodyEl = document.getElementById('pmDetailBody');
-  bodyEl.innerHTML = purchases.map(p => `
-    <tr>
-      <td>${esc(p.vendor || '—')}</td>
-      <td>${formatDate(p.date)}</td>
-      <td>${Number(p.pack_qty || 0)} ${esc(p.pack_unit || unit)}</td>
-      <td>${fmt(p.cost_per_unit)} / ${esc(unit)}</td>
-    </tr>
-  `).join('');
+  bodyEl.innerHTML = purchases.map(p => {
+    if (p.invoice_id) {
+      return `
+        <tr style="cursor:pointer" onclick="window.location.href='/invoices.html#${esc(p.invoice_id)}'" title="Open invoice">
+          <td>${esc(p.vendor || '—')}</td>
+          <td>${fmtDate(p.date)}</td>
+          <td>${Number(p.pack_qty || 0)} ${esc(p.pack_unit || unit)}</td>
+          <td>${fmt(p.cost_per_unit)} / ${esc(unit)}</td>
+        </tr>
+      `;
+    }
+    return `
+      <tr>
+        <td>${esc(p.vendor || '—')}</td>
+        <td>${fmtDate(p.date)}</td>
+        <td>${Number(p.pack_qty || 0)} ${esc(p.pack_unit || unit)}</td>
+        <td>${fmt(p.cost_per_unit)} / ${esc(unit)}</td>
+      </tr>
+    `;
+  }).join('');
 }
 
 // ── Search + suggestions ─────────────────────────────────────

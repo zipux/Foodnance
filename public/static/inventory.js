@@ -195,7 +195,7 @@ function renderInventory() {
   tbody.innerHTML = list.map(r => {
     const qty      = parseFloat(r.quantity) || 0;
     const qtyClass = qty <= 0 ? 'inv-qty-zero' : 'inv-qty-ok';
-    const updated  = r.updated_at ? new Date(r.updated_at).toLocaleString() : '—';
+    const updated  = fmtDateTime(r.updated_at);
     const priceCell = buildPriceCell(r);
 
     return `
@@ -416,7 +416,7 @@ function renderLogTable() {
     const sign      = change >= 0 ? '+' : '';
     const chipClass = change >= 0 ? 'inv-change-in' : 'inv-change-out';
     const typeLabel = filterLabel(l.item_type);
-    const date      = l.moved_at ? new Date(l.moved_at).toLocaleString() : '—';
+    const date      = fmtDateTime(l.moved_at);
     return `
       <tr>
         <td style="font-size:.8rem;color:var(--text-muted)">${date}</td>

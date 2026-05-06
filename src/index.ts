@@ -713,7 +713,8 @@ app.get('/api/price-movers', async (c) => {
            pe.pack_unit,
            pe.cost,
            pe.cost_per_unit,
-           pe.invoice_ref
+           pe.invoice_ref,
+           pe.invoice_id
     FROM product_entries pe
     WHERE pe.purchase_date IS NOT NULL AND pe.purchase_date != ''
       AND pe.generic_product_id IS NOT NULL AND pe.generic_product_id != ''
@@ -733,6 +734,7 @@ app.get('/api/price-movers', async (c) => {
     cost: number
     cost_per_unit: number
     invoice_ref: string
+    invoice_id: string
   }
   type Group = {
     product_id: string
@@ -763,6 +765,7 @@ app.get('/api/price-movers', async (c) => {
       cost:          Number(r.cost || 0),
       cost_per_unit: Number(r.cost_per_unit || 0),
       invoice_ref:   String(r.invoice_ref || ''),
+      invoice_id:    String(r.invoice_id || ''),
     })
   }
 

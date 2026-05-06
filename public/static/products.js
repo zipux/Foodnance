@@ -46,6 +46,13 @@ document.getElementById('saveProductBtn').addEventListener('click', saveGenericP
   document.getElementById('closeEntryInvModal').addEventListener('click', () => closeModal('entryInvModal'));
   document.getElementById('skipEntryInvBtn').addEventListener('click',    () => closeModal('entryInvModal'));
   document.getElementById('confirmEntryInvBtn').addEventListener('click', confirmEntryInventory);
+
+  if (location.hash && location.hash.length > 1) {
+    const hashId = location.hash.slice(1);
+    if (allGeneric.find(g => g.id === hashId)) {
+      openEditProduct(hashId);
+    }
+  }
 });
 
 // ── Load everything ────────────────────────────────────────────
@@ -461,7 +468,7 @@ function renderEntriesTable(genericId) {
         <td>${e.pack_qty ? esc(e.pack_qty + ' ' + (e.pack_unit || '')) : '—'}</td>
         <td>${fmt(e.cost)}</td>
         <td><strong>${fmt(cpu)} / ${esc(entryPackUnit(e))}</strong></td>
-        <td style="font-size:.8rem">${e.purchase_date || '—'}</td>
+        <td style="font-size:.8rem">${fmtDate(e.purchase_date)}</td>
         <td style="font-size:.8rem">${e.expiry_date ? daysBadge(daysLeft) : '—'}</td>
         <td style="font-size:.8rem">
           ${e.invoice_id

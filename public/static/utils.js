@@ -77,6 +77,26 @@ function daysBadge(days) {
   return `<span class="badge badge-green"><i class="fas fa-check"></i> ${days}d left</span>`;
 }
 
+// Format a YYYY-MM-DD string as DD/MM/YYYY
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
+}
+
+// Format an ISO datetime string as DD/MM/YYYY, HH:mm
+function fmtDateTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${dd}/${mm}/${yyyy}, ${hh}:${min}`;
+}
+
 // Currency format
 function fmt(n) {
   const num = parseFloat(n);

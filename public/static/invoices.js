@@ -65,8 +65,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   await loadInvoices();
 
+  // If URL has ?open=ID, open that invoice's detail modal
+  const openParam = new URLSearchParams(location.search).get('open');
+  if (openParam && allInvoices.find(i => i.id === openParam)) {
+    openInvDetail(openParam);
+  }
+
   // If URL hash is an invoice ID (e.g. from product page link), open its detail
-  if (location.hash && location.hash.length > 1) {
+  if (!openParam && location.hash && location.hash.length > 1) {
     const hashId = location.hash.slice(1);
     if (allInvoices.find(i => i.id === hashId)) {
       openInvDetail(hashId);

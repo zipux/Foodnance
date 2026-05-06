@@ -134,7 +134,7 @@ function renderTable() {
         <td>${esc(s.department || '—')}</td>
         <td><a href="mailto:${esc(s.email)}" style="color:var(--primary)">${esc(s.email || '—')}</a></td>
         <td>${esc(s.phone || '—')}</td>
-        <td>${esc(s.hire_date || '—')}</td>
+        <td>${fmtDate(s.hire_date)}</td>
         <td>${statusBadge}</td>
         <td>
           <button class="btn btn-icon btn-secondary btn-sm" onclick="viewStaffCerts('${esc(s.id)}','${esc(s.full_name)}')" title="View Certifications">
@@ -281,7 +281,7 @@ function viewStaffCerts(staffId, staffName) {
         return `<tr>
           <td><span class="cert-type-chip">${esc(c.cert_type_name)}</span></td>
           <td>${esc(c.cert_number || '—')}</td>
-          <td>${esc(c.expiry_date || '—')} ${days !== null ? `<small style="color:var(--text-muted)">(${days < 0 ? Math.abs(days) + 'd ago' : days + 'd left'})</small>` : ''}</td>
+          <td>${fmtDate(c.expiry_date)} ${days !== null ? `<small style="color:var(--text-muted)">(${days < 0 ? Math.abs(days) + 'd ago' : days + 'd left'})</small>` : ''}</td>
           <td>${statusBadge}</td>
           <td>${fileLink}</td>
         </tr>`;
