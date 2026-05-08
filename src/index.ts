@@ -1224,4 +1224,105 @@ app.delete('/api/units/:id', async (c) => {
   return c.body(null, 204)
 })
 
+// ─── Spending Breakdown ───────────────────────────────────────
+// GET /api/spending-breakdown?from=YYYY-MM-DD&to=YYYY-MM-DD
+// Only includes invoices with status = 'Closed' (approved).
+// Defaults: from = first day of current month, to = today.
+app.get('/api/spending-breakdown', async (c) => {
+  const now = new Date()
+  const todayStr = now.toISOString().split('T')[0]
+  const firstOfMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-01`
+
+  const isoDateRe = /^\d{4}-\d{2}-\d{2}$/
+  const isValidIsoDate = (s: string) => isoDateRe.test(s) && !isNaN(Date.parse(s))
+
+  const fromRaw = (c.req.query('from') || '').trim()
+  const toRaw   = (c.req.query('to')   || '').trim()
+
+  if (fromRaw && !isValidIsoDate(fromRaw))
+    return c.json({ error: `Invalid 'from' date: "${fromRaw}". Use YYYY-MM-DD.` }, 400)
+  if (toRaw && !isValidIsoDate(toRaw))
+    return c.json({ error: `Invalid 'to' date: "${toRaw}". Use YYYY-MM-DD.` }, 400)
+
+  const from = fromRaw || firstOfMonth
+  const to   = toRaw   || todayStr
+
+  // Aggregate invoice-level totals and other charges
+  const totalsRow = await c.env.DB.prepare(`
+    SELECT
+      COUNT(*)                                              AS invoice_count,
+      SUM(COALESCE(total, 0))                              AS grand_total,
+      SUM(COALESCE(tax_gst, 0) + COALESCE(tax_pst, 0))    AS taxes,
+      SUM(COALESCE(deposit, 0))                            AS deposits,
+      SUM(COALESCE(delivery, 0))                           AS delivery,
+      SUM(COALESCE(fuel_surcharge, 0))                     AS fuel_surcharge
+    FROM invoices
+    WHERE status = 'Closed'
+      AND invoice_date >= ?
+      AND invoice_date <= ?
+  `).bind(from, to).first<{
+    invoice_count: number
+    grand_total:   number
+    taxes:         number
+    deposits:      number
+    delivery:      number
+    fuel_surcharge: number
+  }>()
+
+  const total         = totalsRow?.grand_total    ?? 0
+  const invoice_count = totalsRow?.invoice_count  ?? 0
+
+  // By vendor: sum each invoice's total (line items + all charges) per vendor
+  const vendorRows = await c.env.DB.prepare(`
+    SELECT vendor, SUM(COALESCE(total, 0)) AS amount
+    FROM invoices
+    WHERE status = 'Closed'
+      AND invoice_date >= ?
+      AND invoice_date <= ?
+    GROUP BY vendor
+    ORDER BY amount DESC
+  `).bind(from, to).all<{ vendor: string; amount: number }>()
+
+  // By category: sum line_total from invoice_lines for invoices in range
+  const categoryRows = await c.env.DB.prepare(`
+    SELECT il.category, SUM(COALESCE(il.line_total, 0)) AS amount
+    FROM invoice_lines il
+    JOIN invoices i ON il.invoice_id = i.id
+    WHERE i.status = 'Closed'
+      AND i.invoice_date >= ?
+      AND i.invoice_date <= ?
+    GROUP BY il.category
+    ORDER BY amount DESC
+  `).bind(from, to).all<{ category: string; amount: number }>()
+
+  const round2 = (n: number) => Math.round(n * 100) / 100
+  const pct    = (n: number) => total > 0 ? Math.round((n / total) * 1000) / 10 : 0
+
+  const by_vendor = (vendorRows.results ?? []).map((r: { vendor: string; amount: number }) => ({
+    vendor:     r.vendor ?? '',
+    amount:     round2(r.amount ?? 0),
+    percentage: pct(r.amount ?? 0),
+  }))
+
+  const by_category = (categoryRows.results ?? []).map((r: { category: string; amount: number }) => ({
+    category:   r.category ?? '',
+    amount:     round2(r.amount ?? 0),
+    percentage: pct(r.amount ?? 0),
+  }))
+
+  return c.json({
+    date_range: { from, to },
+    total:         round2(total),
+    invoice_count,
+    by_category,
+    by_vendor,
+    other_charges_breakdown: {
+      taxes:          round2(totalsRow?.taxes          ?? 0),
+      deposits:       round2(totalsRow?.deposits       ?? 0),
+      delivery:       round2(totalsRow?.delivery       ?? 0),
+      fuel_surcharge: round2(totalsRow?.fuel_surcharge ?? 0),
+    },
+  })
+})
+
 export default app
