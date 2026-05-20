@@ -52,6 +52,14 @@ function parsePackaging(str) {
   return { pack_qty: '', pack_unit: s };
 }
 
+// Returns total base units: qty_ordered × the numeric size in pack_size string.
+// e.g. 3 packs × "12 LB" → 36; falls back to qty_ordered when no numeric pack size.
+function calcInventoryQty(packaging, qtyOrdered) {
+  const { pack_qty } = parsePackaging(packaging);
+  const packSize = parseFloat(pack_qty) || 1;
+  return (parseFloat(qtyOrdered) || 1) * packSize;
+}
+
 // ── Bootstrap ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   if (!document.getElementById('invBody')) return;
@@ -64,6 +72,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   await loadInvoices();
+
+  const vendorParam = new URLSearchParams(location.search).get('vendor');
+  if (vendorParam) {
+    document.getElementById('vendorFilter').value = vendorParam;
+    applyFilters();
+  }
 
   // If URL has ?open=ID, open that invoice's detail modal
   const openParam = new URLSearchParams(location.search).get('open');
@@ -1131,6 +1145,9 @@ async function confirmAndSaveInvoice() {
     closeModal('invDetailModal');
     populateVendorFilter();
     applyFilters();
+
+    // Offer to add items to inventory
+    openInvPrompt(validLines, invoiceNum);
   } catch (e) {
     console.error('Confirm & Save failed:', e);
     showToast('Confirm failed: ' + e.message, 'error');
@@ -1138,6 +1155,87 @@ async function confirmAndSaveInvoice() {
     btn.disabled = false;
     btn.innerHTML = '<i class="fas fa-check-circle"></i> Confirm & Save';
   }
+}
+
+// ── Add-to-Inventory prompt (shown after confirming an invoice) ──
+let _invPromptRows = [];
+
+function openInvPrompt(lines, invoiceRef) {
+  if (!lines || !lines.length) return;
+  if (!document.getElementById('invPromptModal')) return;
+
+  _invPromptRows = lines.filter(l => l.product_name);
+  const listEl = document.getElementById('invPromptList');
+  listEl.innerHTML = _invPromptRows.map((r, i) => {
+    const packaging = r.packaging || '';
+    const unitMatch = packaging.match(/[\d.]+\s*(.+)$/);
+    const unit = unitMatch ? unitMatch[1].trim() : 'unit';
+    const defaultQty = calcInventoryQty(packaging, r.qty);
+    return `
+      <div style="display:flex;align-items:center;gap:.75rem;padding:.5rem 0;border-bottom:1px solid var(--border)">
+        <input type="checkbox" id="inv-chk-${i}" checked style="width:16px;height:16px;cursor:pointer" />
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:.9rem">${esc(r.product_name)}</div>
+          <div style="font-size:.78rem;color:var(--text-muted)">${esc(packaging)}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:.4rem">
+          <input type="number" id="inv-qty-${i}" value="${defaultQty}" min="0.001" step="0.001"
+            style="width:80px;padding:.3rem .5rem;border:1px solid var(--border);border-radius:6px;font-size:.85rem;text-align:right" />
+          <span style="font-size:.82rem;color:var(--text-muted)">${esc(unit)}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  document.getElementById('skipInvPromptBtn').onclick    = () => closeModal('invPromptModal');
+  document.getElementById('closeInvPromptModal').onclick = () => closeModal('invPromptModal');
+  document.getElementById('confirmInvPromptBtn').onclick = () => confirmInvPrompt(invoiceRef);
+  openModal('invPromptModal');
+}
+
+async function confirmInvPrompt(invoiceRef) {
+  const btn = document.getElementById('confirmInvPromptBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Adding…';
+
+  let savedProducts = [];
+  try {
+    const data = await apiGet('tables/generic_products?page=1&limit=1000');
+    savedProducts = data.data || [];
+  } catch (_) {}
+
+  let added = 0;
+  for (let i = 0; i < _invPromptRows.length; i++) {
+    const chk = document.getElementById(`inv-chk-${i}`);
+    if (!chk?.checked) continue;
+    const qty = parseFloat(document.getElementById(`inv-qty-${i}`)?.value) || 1;
+    const row = _invPromptRows[i];
+    const match = savedProducts
+      .filter(p => p.name === row.product_name)
+      .sort((a, b) => (b.created_at || 0) - (a.created_at || 0))[0];
+    const packaging = row.packaging || '';
+    const unitMatch = packaging.match(/[\d.]+\s*(.+)$/);
+    const unit = unitMatch ? unitMatch[1].trim() : 'unit';
+    if (match && window.invHelpers) {
+      try {
+        await window.invHelpers.upsertInventory({
+          itemId:   match.id,
+          itemType: 'raw_material',
+          itemName: match.name,
+          category: match.category || 'Ingredients',
+          unit,
+          change:   qty,
+          reason:   `Invoice stock-in: ${invoiceRef || 'manual'}`,
+        });
+        added++;
+      } catch (_) {}
+    }
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '<i class="fas fa-warehouse"></i> Add to Inventory';
+  closeModal('invPromptModal');
+  showToast(`${added} item(s) added to inventory!`, 'success');
 }
 
 // ── Expose helper for invoice.js to call after upload ──────────

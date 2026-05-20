@@ -4,6 +4,10 @@ let pmData = [];           // full products array from /api/price-movers
 let pmSelectedId = null;   // currently selected product id
 let pmChart = null;        // Chart.js instance
 let pmSuggestBlur;         // timer id for suggestion dismissal
+let sbChart = null;
+let sbActivePreset = null;
+let sbView = 'category';
+let sbData = null;
 
 // ── Date helpers ──────────────────────────────────────────────
 function toISODate(d) {
@@ -318,6 +322,217 @@ function renderSuggestions() {
   });
 }
 
+// ── Spending Breakdown ────────────────────────────────────────
+function sbPresetRange(preset) {
+  const today = new Date();
+  const y = today.getFullYear();
+  const m = today.getMonth();
+  switch (preset) {
+    case 'this-month':
+      return { from: toISODate(new Date(y, m, 1)),     to: toISODate(today) };
+    case 'last-month':
+      return { from: toISODate(new Date(y, m - 1, 1)), to: toISODate(new Date(y, m, 0)) };
+    case 'this-quarter': {
+      const qStart = Math.floor(m / 3) * 3;
+      return { from: toISODate(new Date(y, qStart, 1)), to: toISODate(today) };
+    }
+    case 'ytd':
+      return { from: toISODate(new Date(y, 0, 1)),     to: toISODate(today) };
+  }
+}
+
+function sbSetActivePreset(preset) {
+  sbActivePreset = preset;
+  document.querySelectorAll('.sb-preset-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.preset === preset);
+  });
+}
+
+const SB_PALETTE = [
+  '#4f46e5', '#059669', '#dc2626', '#d97706', '#0891b2',
+  '#7c3aed', '#db2777', '#2563eb', '#65a30d', '#ea580c',
+  '#0d9488', '#9333ea', '#be123c', '#78716c'
+];
+
+function toDDMMYYYY(isoDate) {
+  if (!isoDate) return '—';
+  const [y, m, d] = isoDate.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function fmtAmt(n) {
+  const num = parseFloat(n) || 0;
+  return '$' + num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+async function loadSpendingBreakdown() {
+  const totalEl = document.getElementById('sbTotal');
+  const listEl  = document.getElementById('sbList');
+  totalEl.innerHTML = '';
+  listEl.innerHTML = '<div class="sb-empty"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
+
+  const from = document.getElementById('sbFrom').value;
+  const to   = document.getElementById('sbTo').value;
+
+  try {
+    const data = await apiGet(`spending-breakdown?from=${from}&to=${to}`);
+    renderSpendingBreakdown(data);
+  } catch (e) {
+    listEl.innerHTML = `<div class="sb-empty" style="color:var(--danger)">Failed to load: ${esc(e.message || e)}</div>`;
+  }
+}
+
+function sbNavigate(label) {
+  if (sbView === 'vendor') {
+    window.location.href = `/invoices.html?vendor=${encodeURIComponent(label)}`;
+  } else {
+    window.location.href = `/index.html?category=${encodeURIComponent(label)}`;
+  }
+}
+
+function renderSBChart(labels, amounts, pcts) {
+  const colors = labels.map((label, i) =>
+    label === 'Other Charges' ? '#94a3b8' : SB_PALETTE[i % SB_PALETTE.length]
+  );
+  const pieLabels = {
+    id: 'sbPieLabels',
+    afterDatasetsDraw(chart) {
+      const { ctx } = chart;
+      chart.getDatasetMeta(0).data.forEach((arc, i) => {
+        if (pcts[i] < 4) return;
+        const angle = (arc.startAngle + arc.endAngle) / 2;
+        const r = arc.outerRadius * 0.65;
+        const x = arc.x + Math.cos(angle) * r;
+        const y = arc.y + Math.sin(angle) * r;
+        ctx.save();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 11px ui-sans-serif, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`${Math.round(pcts[i])}%`, x, y);
+        ctx.restore();
+      });
+    }
+  };
+  if (sbChart) sbChart.destroy();
+  sbChart = new Chart(document.getElementById('sbChart'), {
+    type: 'pie',
+    data: {
+      labels,
+      datasets: [{
+        data: amounts,
+        backgroundColor: colors,
+        borderColor: '#fff',
+        borderWidth: 2,
+        hoverBorderWidth: 3,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      onClick: (_evt, elements) => {
+        if (!elements.length) return;
+        const label = labels[elements[0].index];
+        if (label !== 'Other Charges') sbNavigate(label);
+      },
+      onHover: (evt, elements) => {
+        const active = elements.length && labels[elements[0].index] !== 'Other Charges';
+        evt.native.target.style.cursor = active ? 'pointer' : 'default';
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => labels[items[0].dataIndex],
+            label: (item) => {
+              const i = item.dataIndex;
+              return [`  ${fmtAmt(amounts[i])}  ·  ${pcts[i].toFixed(1)}%`];
+            }
+          }
+        }
+      }
+    },
+    plugins: [pieLabels]
+  });
+}
+
+function renderSpendingBreakdown(data) {
+  sbData = data;
+  const totalEl = document.getElementById('sbTotal');
+  const listEl  = document.getElementById('sbList');
+
+  const total = data.total ?? 0;
+  const count = data.invoice_count ?? 0;
+  const drFrom = toDDMMYYYY(data.date_range?.from);
+  const drTo   = toDDMMYYYY(data.date_range?.to);
+  totalEl.innerHTML =
+    `<div class="sb-total-row">Total spent: <span class="sb-total-amount">${fmtAmt(total)}</span>` +
+    `<span class="sb-total-sep">·</span>` +
+    `<span class="sb-total-count">${count} invoice${count === 1 ? '' : 's'}</span></div>` +
+    `<div class="sb-date-range">Showing: ${drFrom} – ${drTo}</div>`;
+
+  const isVendor = sbView === 'vendor';
+  const nameKey  = isVendor ? 'vendor' : 'category';
+  const fallback = isVendor ? 'Unknown' : 'Uncategorized';
+  const items    = (isVendor ? (data.by_vendor || []) : (data.by_category || []))
+                     .filter(r => (parseFloat(r.amount) || 0) > 0);
+
+  // Other Charges — category view only
+  const ocRaw   = !isVendor ? (data.other_charges_breakdown || null) : null;
+  const ocTotal = ocRaw
+    ? (parseFloat(ocRaw.taxes) || 0) + (parseFloat(ocRaw.deposits) || 0)
+      + (parseFloat(ocRaw.delivery) || 0) + (parseFloat(ocRaw.fuel_surcharge) || 0)
+    : 0;
+  const ocPct = total > 0 ? Math.round((ocTotal / total) * 1000) / 10 : 0;
+
+  if (!items.length && !ocTotal) {
+    listEl.innerHTML = '<div class="sb-empty">No spending data for this period.</div>';
+    if (sbChart) { sbChart.destroy(); sbChart = null; }
+    return;
+  }
+
+  const labels  = items.map(r => r[nameKey] || fallback);
+  const amounts = items.map(r => parseFloat(r.amount) || 0);
+  const pcts    = items.map(r => parseFloat(r.percentage) || 0);
+
+  if (ocTotal > 0) {
+    labels.push('Other Charges');
+    amounts.push(ocTotal);
+    pcts.push(ocPct);
+  }
+
+  listEl.innerHTML = items.map(r =>
+    `<div class="sb-row" data-label="${esc(r[nameKey] || fallback)}">` +
+      `<span class="sb-cat">${esc(r[nameKey] || fallback)}</span>` +
+      `<span class="sb-cat-amount">${fmtAmt(r.amount)}</span>` +
+    `</div>`
+  ).join('');
+
+  listEl.querySelectorAll('.sb-row').forEach(row =>
+    row.addEventListener('click', () => sbNavigate(row.dataset.label))
+  );
+
+  if (ocTotal > 0) {
+    const ocEl = document.createElement('div');
+    ocEl.className = 'sb-row sb-oc-row';
+    ocEl.innerHTML =
+      `<div class="sb-oc-header">` +
+        `<span class="sb-cat">Other Charges <i class="fas fa-chevron-down sb-oc-chevron"></i></span>` +
+        `<span class="sb-cat-amount">${fmtAmt(ocTotal)}</span>` +
+      `</div>` +
+      `<div class="sb-oc-detail">` +
+        (parseFloat(ocRaw.taxes)          > 0 ? `<div class="sb-oc-sub"><span>Taxes</span><span class="sb-oc-sub-amount">${fmtAmt(ocRaw.taxes)}</span></div>` : '') +
+        (parseFloat(ocRaw.deposits)       > 0 ? `<div class="sb-oc-sub"><span>Deposits</span><span class="sb-oc-sub-amount">${fmtAmt(ocRaw.deposits)}</span></div>` : '') +
+        (parseFloat(ocRaw.delivery)       > 0 ? `<div class="sb-oc-sub"><span>Delivery</span><span class="sb-oc-sub-amount">${fmtAmt(ocRaw.delivery)}</span></div>` : '') +
+        (parseFloat(ocRaw.fuel_surcharge) > 0 ? `<div class="sb-oc-sub"><span>Fuel Surcharge</span><span class="sb-oc-sub-amount">${fmtAmt(ocRaw.fuel_surcharge)}</span></div>` : '') +
+      `</div>`;
+    ocEl.addEventListener('click', () => ocEl.classList.toggle('sb-expanded'));
+    listEl.appendChild(ocEl);
+  }
+
+  renderSBChart(labels, amounts, pcts);
+}
+
 // ── Init ─────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   const today = new Date();
@@ -339,4 +554,36 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   loadMovers();
+
+  // Spending Breakdown init
+  const sbRange = sbPresetRange('this-month');
+  document.getElementById('sbFrom').value = sbRange.from;
+  document.getElementById('sbTo').value   = sbRange.to;
+  sbSetActivePreset('this-month');
+
+  document.querySelectorAll('.sb-preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const range = sbPresetRange(btn.dataset.preset);
+      document.getElementById('sbFrom').value = range.from;
+      document.getElementById('sbTo').value   = range.to;
+      sbSetActivePreset(btn.dataset.preset);
+      loadSpendingBreakdown();
+    });
+  });
+
+  document.getElementById('sbFrom').addEventListener('change', () => sbSetActivePreset(null));
+  document.getElementById('sbTo').addEventListener('change',   () => sbSetActivePreset(null));
+  document.getElementById('sbApply').addEventListener('click', loadSpendingBreakdown);
+
+  document.querySelectorAll('.sb-view-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      sbView = btn.dataset.view;
+      document.querySelectorAll('.sb-view-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.view === sbView)
+      );
+      if (sbData) renderSpendingBreakdown(sbData);
+    });
+  });
+
+  loadSpendingBreakdown();
 });

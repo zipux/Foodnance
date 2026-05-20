@@ -166,6 +166,195 @@
       border-radius: 50%;
       display: inline-block;
     }
+
+    /* ── Spending Breakdown ── */
+    .sb-total {
+      margin-bottom: 1.25rem;
+      padding-bottom: .9rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .sb-total-row {
+      font-size: .9rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: .3rem;
+    }
+    .sb-date-range {
+      font-size: .78rem;
+      color: var(--text-muted);
+      margin-top: .35rem;
+    }
+    .sb-total-amount {
+      font-size: 1.5rem;
+      font-weight: 700;
+      font-family: ui-monospace, monospace;
+      color: var(--text);
+      margin-left: .25rem;
+    }
+    .sb-total-sep { color: var(--text-muted); margin: 0 .1rem; }
+    .sb-total-count { font-size: .88rem; color: var(--text-muted); }
+    .sb-list { display: flex; flex-direction: column; gap: .3rem; }
+    .sb-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: .55rem .75rem;
+      border-radius: var(--radius-sm);
+      background: #f8fafc;
+      cursor: pointer;
+      transition: var(--transition);
+    }
+    .sb-row:hover { background: #eef2ff; }
+    .sb-cat { font-size: .88rem; color: var(--text); }
+    .sb-cat-amount {
+      font-size: .88rem;
+      font-weight: 600;
+      font-family: ui-monospace, monospace;
+      color: var(--text);
+    }
+    .sb-empty {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: .9rem;
+      padding: 2rem 1rem;
+    }
+    .sb-body {
+      display: grid;
+      grid-template-columns: 1fr 260px;
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (max-width: 700px) {
+      .sb-body { grid-template-columns: 1fr; }
+    }
+    .sb-chart-wrap {
+      position: relative;
+      height: 260px;
+    }
+    .sb-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .5rem .75rem;
+      align-items: flex-end;
+      margin-bottom: 1.1rem;
+    }
+    .sb-presets {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .35rem;
+      align-items: center;
+    }
+    .sb-preset-btn {
+      padding: .28rem .65rem;
+      font-size: .8rem;
+      font-family: inherit;
+      font-weight: 500;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: #fff;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: var(--transition);
+      white-space: nowrap;
+    }
+    .sb-preset-btn:hover { border-color: var(--primary); color: var(--primary); }
+    .sb-preset-btn.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .sb-custom {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .4rem;
+      align-items: flex-end;
+      margin-left: auto;
+    }
+    .sb-custom .form-group { gap: .15rem; min-width: 0; }
+    .sb-custom .form-group label { font-size: .72rem; color: var(--text-muted); }
+    .sb-custom input[type="date"] {
+      padding: .28rem .55rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-family: inherit;
+      font-size: .8rem;
+      color: var(--text);
+      background: #fff;
+    }
+    .sb-custom input[type="date"]:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(79,70,229,.1);
+    }
+    .sb-apply-btn {
+      padding: .28rem .75rem;
+      font-size: .8rem;
+      font-family: inherit;
+      font-weight: 500;
+      border: 1px solid var(--primary);
+      border-radius: var(--radius-sm);
+      background: var(--primary);
+      color: #fff;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: var(--transition);
+    }
+    .sb-apply-btn:hover { opacity: .85; }
+    .sb-view-toggle {
+      display: flex;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      width: fit-content;
+      margin-bottom: .9rem;
+    }
+    .sb-view-btn {
+      padding: .28rem .85rem;
+      font-size: .82rem;
+      font-family: inherit;
+      font-weight: 500;
+      border: none;
+      background: #fff;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: var(--transition);
+      white-space: nowrap;
+    }
+    .sb-view-btn + .sb-view-btn { border-left: 1px solid var(--border); }
+    .sb-view-btn.active { background: var(--primary); color: #fff; }
+    .sb-view-btn:hover:not(.active) { background: #f1f5f9; color: var(--text); }
+    .sb-oc-row {
+      flex-direction: column;
+      align-items: stretch;
+      padding: 0;
+    }
+    .sb-oc-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: .55rem .75rem;
+    }
+    .sb-oc-chevron {
+      font-size: .68rem;
+      color: var(--text-muted);
+      margin-left: .35rem;
+      transition: transform .2s;
+    }
+    .sb-oc-row.sb-expanded .sb-oc-chevron { transform: rotate(180deg); }
+    .sb-oc-detail {
+      display: none;
+      flex-direction: column;
+      gap: .05rem;
+      border-top: 1px solid var(--border);
+      padding: .3rem .75rem .4rem;
+    }
+    .sb-oc-row.sb-expanded .sb-oc-detail { display: flex; }
+    .sb-oc-sub {
+      display: flex;
+      justify-content: space-between;
+      font-size: .81rem;
+      color: var(--text-muted);
+      padding: .12rem 0;
+    }
+    .sb-oc-sub-amount { font-family: ui-monospace, monospace; }
   </style>
 </head>
 <body>
@@ -259,6 +448,47 @@
         </div>
       </section>
     </div>
+
+    <!-- Spending Breakdown -->
+    <section class="card" style="margin-top: 1.5rem;">
+      <div class="card-header">
+        <h2><i class="fas fa-tags"></i> Spending Breakdown</h2>
+      </div>
+      <div class="card-body">
+        <div class="sb-controls">
+          <div class="sb-presets">
+            <button class="sb-preset-btn" data-preset="this-month">This Month</button>
+            <button class="sb-preset-btn" data-preset="last-month">Last Month</button>
+            <button class="sb-preset-btn" data-preset="this-quarter">This Quarter</button>
+            <button class="sb-preset-btn" data-preset="ytd">Year to Date</button>
+          </div>
+          <div class="sb-custom">
+            <div class="form-group">
+              <label>From</label>
+              <input type="date" id="sbFrom" />
+            </div>
+            <div class="form-group">
+              <label>To</label>
+              <input type="date" id="sbTo" />
+            </div>
+            <button class="sb-apply-btn" id="sbApply">Apply</button>
+          </div>
+        </div>
+        <div id="sbTotal" class="sb-total"></div>
+        <div class="sb-view-toggle">
+          <button class="sb-view-btn active" data-view="category">By Category</button>
+          <button class="sb-view-btn" data-view="vendor">By Vendor</button>
+        </div>
+        <div class="sb-body">
+          <div id="sbList" class="sb-list">
+            <div class="sb-empty"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
+          </div>
+          <div class="sb-chart-wrap">
+            <canvas id="sbChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
   </div>
 
   <div id="toast" class="toast hidden"></div>

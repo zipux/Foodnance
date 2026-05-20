@@ -180,7 +180,7 @@ function renderInventory() {
   // Update price column header label to match the active tab
   const priceHeader = document.getElementById('invPriceHeader');
   if (priceHeader) {
-    if (activeFilter === 'raw_material')      priceHeader.textContent = 'Cost / Unit (FIFO)';
+    if (activeFilter === 'raw_material')      priceHeader.textContent = 'Stock Value';
     else if (activeFilter === 'batch')        priceHeader.textContent = 'Batch Cost';
     else if (activeFilter === 'finished_product') priceHeader.textContent = 'Cost / Unit  |  Selling';
   }
@@ -224,8 +224,7 @@ function buildPriceCell(r) {
   if (!info) return '<span style="color:var(--text-muted);font-size:.8rem">—</span>';
 
   if (info.type === 'raw') {
-    return `<span style="font-weight:600;color:#0f172a">${fmt(info.cpu)}</span>
-            <span style="color:var(--text-muted);font-size:.78rem"> / ${esc(info.unit)}</span>`;
+    return `<span style="font-weight:600;color:#0f172a">${fmt(info.cpu)}</span>`;
   }
 
   if (info.type === 'batch') {

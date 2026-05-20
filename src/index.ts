@@ -1283,15 +1283,33 @@ app.get('/api/spending-breakdown', async (c) => {
     ORDER BY amount DESC
   `).bind(from, to).all<{ vendor: string; amount: number }>()
 
-  // By category: sum line_total from invoice_lines for invoices in range
+  // By category: resolve from generic_products (real category) via product_entries,
+  // falling back to invoice_lines.category (brand field) if no match found.
   const categoryRows = await c.env.DB.prepare(`
-    SELECT il.category, SUM(COALESCE(il.line_total, 0)) AS amount
-    FROM invoice_lines il
-    JOIN invoices i ON il.invoice_id = i.id
-    WHERE i.status = 'Closed'
-      AND i.invoice_date >= ?
-      AND i.invoice_date <= ?
-    GROUP BY il.category
+    WITH line_cats AS (
+      SELECT
+        il.line_total,
+        COALESCE(
+          (SELECT gp.category
+           FROM product_entries pe
+           JOIN generic_products gp ON gp.id = pe.generic_product_id
+           WHERE LOWER(TRIM(pe.generic_product_name)) = LOWER(TRIM(il.product_name))
+           LIMIT 1),
+          (SELECT gp.category
+           FROM generic_products gp
+           WHERE LOWER(TRIM(gp.name)) = LOWER(TRIM(il.product_name))
+           LIMIT 1),
+          'Uncategorized'
+        ) AS category
+      FROM invoice_lines il
+      JOIN invoices i ON il.invoice_id = i.id
+      WHERE i.status = 'Closed'
+        AND i.invoice_date >= ?
+        AND i.invoice_date <= ?
+    )
+    SELECT category, SUM(COALESCE(line_total, 0)) AS amount
+    FROM line_cats
+    GROUP BY category
     ORDER BY amount DESC
   `).bind(from, to).all<{ category: string; amount: number }>()
 

@@ -22,6 +22,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (!document.getElementById('productBody')) return;
   await loadAll();
 
+  const catParam = new URLSearchParams(location.search).get('category');
+  if (catParam) setCategoryFilter(catParam);
+
   document.getElementById('searchInput').addEventListener('input', e => {
     searchQuery = e.target.value.trim();
     currentPage = 1;
