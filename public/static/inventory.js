@@ -7,6 +7,7 @@ let allInventory   = [];   // full inventory rows
 let activeFilter   = 'raw_material';
 let invSearchQuery = '';
 let priceMap       = {};   // keyed by item_id → price info object
+let stockTakeStatusMap = {}; // keyed by inventory.id → 'counted' | 'not_counted'
 
 // ── Bootstrap ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -77,6 +78,15 @@ async function loadInventory() {
       recData.data || [],
       fpData.data  || []
     );
+
+    // Fetch stock-take statuses (fire-and-forget — render even if it fails)
+    try {
+      const st = await apiGet('stock-take/latest-statuses');
+      stockTakeStatusMap = st.statuses || {};
+    } catch (_) {
+      stockTakeStatusMap = {};
+    }
+
     renderInventory();
     renderInvStats();
   } catch (e) {
@@ -198,9 +208,14 @@ function renderInventory() {
     const updated  = fmtDateTime(r.updated_at);
     const priceCell = buildPriceCell(r);
 
+    const notCounted = stockTakeStatusMap[r.id] === 'not_counted';
+    const badge = notCounted
+      ? `<span class="inv-not-counted-dot" title="Not counted in the last stock take"></span>`
+      : '';
+
     return `
       <tr>
-        <td><strong>${esc(r.item_name)}</strong></td>
+        <td><strong>${esc(r.item_name)}</strong>${badge}</td>
         <td>${r.category ? `<span class="category-badge cat-${slugify(r.category)}">${esc(r.category)}</span>` : '—'}</td>
         <td><span class="inv-qty ${qtyClass}">${qty % 1 === 0 ? qty : qty.toFixed(3)}</span></td>
         <td>${esc(r.unit || '—')}</td>
@@ -376,7 +391,7 @@ async function fetchLogEntries() {
   const tbody = document.getElementById('logBody');
   tbody.innerHTML = '<tr><td colspan="6" class="empty-row"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>';
   try {
-    const data   = await apiGet(`tables/${LOG_TABLE}?page=1&limit=1000&sort=created_at`);
+    const data   = await apiGet(`tables/${LOG_TABLE}?page=1&limit=1000`);
     allLogEntries = (data.data || []).slice().reverse(); // newest first
   } catch (e) {
     allLogEntries = [];

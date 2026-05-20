@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stock Take — InvoiceDB</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260520-1" />
+  <link rel="stylesheet" href="/static/stock-take.css?v=20260520-1" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav class="navbar">
+    <div class="nav-brand"><i class="fas fa-receipt"></i> InvoiceDB</div>
+    <div class="nav-links">
+      <a href="/home.html"><i class="fas fa-home"></i> Home</a>
+      <a href="/upload-invoice.html"><i class="fas fa-file-invoice"></i> Upload Invoice</a>
+      <a href="/invoices.html"><i class="fas fa-list-alt"></i> Invoices</a>
+      <a href="/index.html"><i class="fas fa-boxes"></i> Products</a>
+      <a href="/recipes.html"><i class="fas fa-utensils"></i> Recipes</a>
+      <a href="/finished-products.html"><i class="fas fa-tag"></i> Finished Products</a>
+      <a href="/inventory.html" class="active"><i class="fas fa-warehouse"></i> Inventory</a>
+      <a href="/suppliers.html"><i class="fas fa-truck"></i> Suppliers</a>
+      <a href="/staff.html"><i class="fas fa-users"></i> Staff</a>
+      <a href="/certifications.html"><i class="fas fa-certificate"></i> Certifications</a>
+    </div>
+  </nav>
+
+  <div class="container st-container">
+
+    <!-- HEADER -->
+    <div class="st-header">
+      <div>
+        <h1><i class="fas fa-clipboard-check"></i> Stock Take</h1>
+        <div class="st-header-meta">
+          <span id="stDate" class="st-date">—</span>
+          <span class="st-dot">•</span>
+          <span id="stProgress" class="st-progress">0 of 0 counted</span>
+        </div>
+      </div>
+      <button class="btn btn-secondary" id="stCancelBtn">
+        <i class="fas fa-times"></i> Cancel
+      </button>
+    </div>
+
+    <!-- LOADING / EMPTY -->
+    <div id="stLoading" class="st-loading">
+      <i class="fas fa-spinner fa-spin"></i> Loading stock take…
+    </div>
+
+    <!-- BODY: rendered groups go here -->
+    <div id="stBody" class="st-body" style="display:none"></div>
+
+  </div><!-- /container -->
+
+  <!-- STICKY FOOTER -->
+  <div class="st-footer" id="stFooter" style="display:none">
+    <div class="st-footer-inner">
+      <div class="st-footer-progress">
+        <span id="stFooterProgress">0 of 0 counted</span>
+      </div>
+      <button class="btn btn-success" id="stSubmitBtn">
+        <i class="fas fa-check"></i> Submit Stock Take
+      </button>
+    </div>
+  </div>
+
+  <!-- TOAST -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/static/utils.js?v=20260520-1"></script>
+  <script src="/static/stock-take.js?v=20260520-1"></script>
+</body>
+</html>

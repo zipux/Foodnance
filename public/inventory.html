@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Inventory — InvoiceDB</title>
   <link rel="stylesheet" href="/static/style.css?v=20260407-1" />
+  <link rel="stylesheet" href="/static/stock-take.css?v=20260520-1" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 </head>
@@ -50,6 +51,9 @@
       </div>
       <div class="header-actions">
         <input type="text" id="invSearch" class="search-input" placeholder="Search…" />
+        <a href="/stock-take.html" class="btn btn-success" id="startStockTakeBtn">
+          <i class="fas fa-clipboard-check"></i> Start Stock Take
+        </a>
         <button class="btn btn-secondary" id="showLogBtn">
           <i class="fas fa-history"></i> Stock Log
         </button>

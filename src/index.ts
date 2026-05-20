@@ -95,7 +95,8 @@ const ALLOWED_TABLES = [
   'recipes', 'recipe_items', 'finished_products', 'finished_product_items',
   'inventory', 'stock_log', 'invoices', 'invoice_lines',
   'staff', 'certification_types', 'staff_certifications',
-  'product_mappings', 'units', 'product_aliases'
+  'product_mappings', 'units', 'product_aliases',
+  'stock_takes', 'stock_take_items'
 ]
 
 // ── List / query
@@ -797,6 +798,208 @@ app.get('/api/price-movers', async (c) => {
   })
 
   return c.json({ data: products })
+})
+
+// ─── Stock Take ───────────────────────────────────────────────
+// GET /api/stock-take/active
+// Returns the in-progress stock take (if any), with its items.
+// If none exists, returns { active: null }.
+app.get('/api/stock-take/active', async (c) => {
+  const take = await c.env.DB.prepare(
+    `SELECT * FROM stock_takes WHERE status = 'in_progress' ORDER BY started_at DESC LIMIT 1`
+  ).first<Record<string, unknown>>()
+
+  if (!take) return c.json({ active: null })
+
+  const items = await c.env.DB.prepare(
+    `SELECT * FROM stock_take_items WHERE stock_take_id = ?`
+  ).bind(take.id).all()
+
+  return c.json({ active: take, items: items.results })
+})
+
+// POST /api/stock-take/start
+// Creates a new in-progress stock take and snapshots every inventory item
+// as a stock_take_items row with counted_qty = NULL.
+// If an in-progress stock take already exists, returns it instead.
+app.post('/api/stock-take/start', async (c) => {
+  const existing = await c.env.DB.prepare(
+    `SELECT * FROM stock_takes WHERE status = 'in_progress' ORDER BY started_at DESC LIMIT 1`
+  ).first<Record<string, unknown>>()
+
+  if (existing) {
+    const items = await c.env.DB.prepare(
+      `SELECT * FROM stock_take_items WHERE stock_take_id = ?`
+    ).bind(existing.id).all()
+    return c.json({ stock_take: existing, items: items.results, resumed: true })
+  }
+
+  const stockTakeId = uid()
+  const inv = await c.env.DB.prepare(
+    `SELECT id, item_id, item_type, item_name, category, quantity, unit FROM inventory`
+  ).all<{ id: string; item_id: string; item_type: string; item_name: string; category: string; quantity: number; unit: string }>()
+
+  const items = inv.results || []
+
+  await c.env.DB.prepare(
+    `INSERT INTO stock_takes (id, status, total_items, counted_items) VALUES (?, 'in_progress', ?, 0)`
+  ).bind(stockTakeId, items.length).run()
+
+  // Bulk-insert snapshot rows
+  const statements = items.map(r =>
+    c.env.DB.prepare(
+      `INSERT INTO stock_take_items
+         (id, stock_take_id, inventory_id, item_id, item_type, item_name, category, unit, expected_qty)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(uid(), stockTakeId, r.id, r.item_id, r.item_type, r.item_name, r.category || '', r.unit || '', r.quantity || 0)
+  )
+  if (statements.length) await c.env.DB.batch(statements)
+
+  const created = await c.env.DB.prepare(
+    `SELECT * FROM stock_takes WHERE id = ?`
+  ).bind(stockTakeId).first()
+  const itemRows = await c.env.DB.prepare(
+    `SELECT * FROM stock_take_items WHERE stock_take_id = ?`
+  ).bind(stockTakeId).all()
+
+  return c.json({ stock_take: created, items: itemRows.results, resumed: false }, 201)
+})
+
+// POST /api/stock-take/:id/submit
+// Body: { items: [{ stock_take_item_id, counted_qty (number|null), reason (string) }] }
+// For each item with counted_qty != null:
+//   - Update inventory.quantity to counted_qty
+//   - Insert stock_log row with change = counted - expected, reason, stock_take_id
+//   - Update stock_take_items row (counted_qty, variance, reason, counted_at)
+// For each item with counted_qty == null: leave stock_take_items.counted_qty NULL.
+// Finally mark the stock_takes row submitted.
+app.post('/api/stock-take/:id/submit', async (c) => {
+  const stockTakeId = c.req.param('id')
+  const body = await c.req.json() as {
+    items: Array<{ stock_take_item_id: string; counted_qty: number | null; reason?: string }>
+  }
+
+  const take = await c.env.DB.prepare(`SELECT * FROM stock_takes WHERE id = ?`).bind(stockTakeId).first<Record<string, unknown>>()
+  if (!take) return c.json({ error: 'Stock take not found' }, 404)
+  if (take.status !== 'in_progress') return c.json({ error: 'Stock take is not in progress' }, 400)
+
+  // Load all snapshot rows for this take, keyed by id
+  const snapshotRows = await c.env.DB.prepare(
+    `SELECT * FROM stock_take_items WHERE stock_take_id = ?`
+  ).bind(stockTakeId).all<{
+    id: string; inventory_id: string; item_id: string; item_type: string
+    item_name: string; expected_qty: number; unit: string
+  }>()
+  const snapshotById = new Map((snapshotRows.results || []).map(r => [r.id, r]))
+
+  const now = new Date().toISOString()
+  let countedCount = 0
+  const statements: D1PreparedStatement[] = []
+
+  for (const it of (body.items || [])) {
+    const snap = snapshotById.get(it.stock_take_item_id)
+    if (!snap) continue
+    if (it.counted_qty === null || it.counted_qty === undefined) continue
+
+    const counted  = Number(it.counted_qty)
+    const expected = Number(snap.expected_qty) || 0
+    const variance = counted - expected
+    const reason   = (it.reason || '').trim()
+    countedCount++
+
+    // 1. Update inventory quantity
+    statements.push(
+      c.env.DB.prepare(`UPDATE inventory SET quantity = ? WHERE id = ?`).bind(counted, snap.inventory_id)
+    )
+
+    // 2. Update stock_take_items snapshot
+    statements.push(
+      c.env.DB.prepare(
+        `UPDATE stock_take_items
+           SET counted_qty = ?, variance = ?, reason = ?, counted_at = ?
+         WHERE id = ?`
+      ).bind(counted, variance, reason, now, snap.id)
+    )
+
+    // 3. Log a stock movement (only if variance != 0)
+    if (variance !== 0) {
+      statements.push(
+        c.env.DB.prepare(
+          `INSERT INTO stock_log
+             (id, inventory_id, item_id, item_type, item_name, change, reason, note, lot_number, moved_at, stock_take_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)`
+        ).bind(
+          uid(), snap.inventory_id, snap.item_id, snap.item_type, snap.item_name,
+          variance, reason || 'Stock take', `Stock take: expected ${expected}, counted ${counted}`,
+          now, stockTakeId
+        )
+      )
+    }
+  }
+
+  // 4. Mark the stock take submitted
+  statements.push(
+    c.env.DB.prepare(
+      `UPDATE stock_takes SET status = 'submitted', submitted_at = ?, counted_items = ? WHERE id = ?`
+    ).bind(now, countedCount, stockTakeId)
+  )
+
+  if (statements.length) await c.env.DB.batch(statements)
+
+  return c.json({ ok: true, counted: countedCount })
+})
+
+// PATCH /api/stock-take/items/:id
+// Body: { counted_qty: number | null, reason: string }
+// Persists partial counts during an in-progress session so resume works.
+app.patch('/api/stock-take/items/:id', async (c) => {
+  const itemId = c.req.param('id')
+  const body = await c.req.json() as { counted_qty: number | null; reason?: string }
+  await c.env.DB.prepare(
+    `UPDATE stock_take_items
+        SET counted_qty = ?, reason = ?, counted_at = CASE WHEN ? IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END
+      WHERE id = ?`
+  ).bind(
+    body.counted_qty ?? null,
+    body.reason ?? '',
+    body.counted_qty ?? null,
+    itemId
+  ).run()
+  return c.json({ ok: true })
+})
+
+// POST /api/stock-take/:id/cancel
+app.post('/api/stock-take/:id/cancel', async (c) => {
+  const stockTakeId = c.req.param('id')
+  // Hard delete so the next "Start Stock Take" creates a fresh session.
+  // stock_take_items cascade-deletes via the FK ON DELETE CASCADE.
+  await c.env.DB.prepare(
+    `DELETE FROM stock_takes WHERE id = ? AND status = 'in_progress'`
+  ).bind(stockTakeId).run()
+  return c.json({ ok: true })
+})
+
+// GET /api/stock-take/latest-statuses
+// Returns a map of { inventory_id: 'counted' | 'not_counted' } based on the
+// MOST RECENTLY SUBMITTED stock take. Inventory rows with no record in that
+// take (e.g. created after the take was submitted) are omitted.
+app.get('/api/stock-take/latest-statuses', async (c) => {
+  const latest = await c.env.DB.prepare(
+    `SELECT id, submitted_at FROM stock_takes WHERE status = 'submitted' ORDER BY submitted_at DESC LIMIT 1`
+  ).first<{ id: string; submitted_at: string }>()
+
+  if (!latest) return c.json({ stock_take_id: null, statuses: {} })
+
+  const rows = await c.env.DB.prepare(
+    `SELECT inventory_id, counted_qty FROM stock_take_items WHERE stock_take_id = ?`
+  ).bind(latest.id).all<{ inventory_id: string; counted_qty: number | null }>()
+
+  const statuses: Record<string, 'counted' | 'not_counted'> = {}
+  for (const r of (rows.results || [])) {
+    statuses[r.inventory_id] = (r.counted_qty === null || r.counted_qty === undefined) ? 'not_counted' : 'counted'
+  }
+
+  return c.json({ stock_take_id: latest.id, submitted_at: latest.submitted_at, statuses })
 })
 
 // Static HTML + assets are served by Cloudflare Pages directly from the dist/ folder.
