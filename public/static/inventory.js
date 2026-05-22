@@ -11,7 +11,7 @@ let stockTakeStatusMap = {}; // keyed by inventory.id → 'counted' | 'not_count
 
 // ── Bootstrap ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
-  if (!document.getElementById('invBody')) return;
+  if (!document.getElementById('inventory-page-marker')) return;
 
   await loadInventory();
 
@@ -118,14 +118,10 @@ function buildPriceMap(inventory, generics, entries, recipes, finishedProducts) 
 
     const invQty  = parseFloat(r.quantity) || 0;
     const active  = invFifoActiveEntry(myEntries, invQty);
-    const packSz  = active.pack_size || '';
-    const pqMatch = packSz.match(/^([\d.]+)/);
-    const puMatch = packSz.match(/[\d.]+\s*(.+)$/);
-    const pQty    = pqMatch ? parseFloat(pqMatch[1]) : 1;
-    const pUnit   = puMatch ? puMatch[1].trim() : 'unit';
-    const cpu     = pQty > 0 ? active.cost / pQty : 0;
+    const cpu     = parseFloat(active.cost_per_unit) || 0;
+    const pUnit   = active.pack_unit || 'unit';
 
-    map[r.item_id] = { type: 'raw', cpu, unit: pUnit };
+    map[r.item_id] = { type: 'raw', cpu, unit: pUnit, invQty };
   });
 
   // ── Batches: recipe total cost + cost per yield unit ────────
@@ -159,14 +155,12 @@ function invFifoActiveEntry(sortedEntries, invQty) {
   if (!sortedEntries.length) return sortedEntries[0];
   let totalPurchased = 0;
   for (const e of sortedEntries) {
-    const m = (e.pack_size || '').match(/^([\d.]+)/);
-    totalPurchased += m ? parseFloat(m[1]) : 1;
+    totalPurchased += parseFloat(e.pack_qty) || 1;
   }
   const consumed = Math.max(0, totalPurchased - Math.max(0, invQty));
   let cumulative = 0;
   for (const e of sortedEntries) {
-    const m    = (e.pack_size || '').match(/^([\d.]+)/);
-    const pQty = m ? parseFloat(m[1]) : 1;
+    const pQty = parseFloat(e.pack_qty) || 1;
     cumulative += pQty;
     if (cumulative > consumed) return e;
   }
@@ -239,7 +233,8 @@ function buildPriceCell(r) {
   if (!info) return '<span style="color:var(--text-muted);font-size:.8rem">—</span>';
 
   if (info.type === 'raw') {
-    return `<span style="font-weight:600;color:#0f172a">${fmt(info.cpu)}</span>`;
+    const stockValue = info.cpu * info.invQty;
+    return `<span style="font-weight:600;color:#0f172a">${fmt(stockValue)}</span>`;
   }
 
   if (info.type === 'batch') {

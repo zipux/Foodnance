@@ -1040,6 +1040,7 @@ app.post('/api/ai/parse-invoice', async (c) => {
   "tax_gst": 0.00,
   "tax_pst": 0.00,
   "delivery": 0.00,
+  "deposit": 0.00,  // total of all deposit charges (bottle deposits, can deposits, container deposits)
   "credit": 0.00,
   "other_cost": 0.00,
   "other_desc": "",
@@ -1060,6 +1061,7 @@ app.post('/api/ai/parse-invoice', async (c) => {
 
   const rules = `Rules:
 - Extract EVERY product line item in the text — do not skip any
+- Ignore all handwritten text, annotations, or markings on the invoice (e.g. 'Short', 'Void', circled items, arrows, written notes). These are not invoice data. Do not let them affect column alignment, row parsing, or any extracted values. This applies to handwriting only — printed text on the invoice is always valid data.
 - For 'original_ocr': copy the exact original OCR text for each product line item, character-for-character, without cleaning or modifying it. This is used for product matching.
 - Do NOT include delivery fees, fuel surcharges, or taxes as items[] entries — put them in the dedicated fields (delivery, tax_gst, tax_pst) instead
 - For 'name': use the generic product name, not the vendor-specific SKU description
@@ -1070,6 +1072,8 @@ app.post('/api/ai/parse-invoice', async (c) => {
 - For 'tax_gst': GST, HST, or any federal/harmonized sales tax amount (dollar value, not %)
 - For 'tax_pst': PST, QST, or any provincial sales tax amount (dollar value, not %)
 - For 'delivery': the combined total of any delivery fee, freight charge, shipping cost, fuel surcharge, energy surcharge, or environmental fee that are actual charges applied to this specific invoice's total. Add them together into this single field. Do NOT extract amounts mentioned only in general policy text, terms and conditions, fine print, or minimum order notices (e.g. "Free delivery on orders over $X"). Only extract actual line item charges that affect the invoice total
+- For 'deposit': sum the total dollar amount of all deposit charges on the invoice (lines with descriptions containing 'Deposit-', 'bottle deposit', 'can deposit', or product codes starting with 'DEP'). Do not include these lines in items[].
+- For 'other_cost': also include the total of any ecology fee lines (descriptions containing 'Eco' or product codes starting with 'ECO'). Do not include these lines in items[].
 - - For 'credit': only extract a credit/discount if the line item prices are at FULL (undiscounted) price and the discount is applied separately at the bottom of the invoice. If the line item prices already reflect the discounted price (i.e. the discounted unit price × qty = the line total shown), set credit to 0.00
 - For 'other_cost': any other fee not covered above (handling fee, etc.)
 - For 'other_desc': description of the other_cost if applicable
