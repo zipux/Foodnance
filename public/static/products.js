@@ -573,14 +573,6 @@ function closeEntryForm() {
   document.getElementById('entryForm').classList.add('hidden');
 }
 
-function _getStoredCpu(e) {
-  const cpu = parseFloat(e.cost_per_unit);
-  if (!isNaN(cpu) && cpu > 0) return cpu;
-  const qty = entryPackQty(e);
-  const cost = parseFloat(e.cost) || 0;
-  return qty > 0 ? cost / qty : cost;
-}
-
 function updateEntryCostPerUnit() {
   const cost       = parseFloat(document.getElementById('eCost').value);
   const packQty    = parseFloat(document.getElementById('ePackQty').value);

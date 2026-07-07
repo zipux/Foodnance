@@ -85,11 +85,6 @@ POST /api/upload                   → upload file to R2, returns { key, url, na
 GET  /api/files/:key               → download/view file from R2
 ```
 
-### Stats
-```
-GET  /api/stats/certifications     → { total, valid, expiring, expired, staffCount }
-```
-
 ---
 
 ## 🗄️ Data Architecture

@@ -1160,14 +1160,6 @@ function mapOpenAIResult(result, fileName) {
   const items = result.items || [];
   originalGptNames = items.map(it => it.name || '');
 
-  // [DEBUG] Cost-bug trace — log raw GPT line items
-  console.log('[COST-DEBUG] 1/5 GPT raw items:', items.map(it => ({
-    name: it.name,
-    pack_size: it.pack_size,
-    qty: it.qty,
-    unit_price: it.unit_price,
-    cost: it.cost,
-  })));
 
   return items.map(it => ({
     name:           it.name           || '',

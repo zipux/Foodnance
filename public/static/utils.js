@@ -103,11 +103,6 @@ function fmt(n) {
   return isNaN(num) ? '$0.00' : '$' + num.toFixed(2);
 }
 
-// Generate simple readable ID
-function uid() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-}
-
 // Escape HTML to prevent XSS
 function esc(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');

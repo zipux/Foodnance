@@ -21,7 +21,9 @@ function copyDir(src: string, dest: string) {
 
 export default defineConfig({
   plugins: [
-    build(),
+    build({
+      entry: 'src/index.ts'
+    }),
     devServer({
       adapter,
       entry: 'src/index.ts'

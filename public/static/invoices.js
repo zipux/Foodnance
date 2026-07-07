@@ -482,11 +482,6 @@ async function loadAndRenderLines(invoiceId) {
         _auto_mapped:  !!it.auto_mapped,
       };
     });
-    // [DEBUG] Cost-bug trace — log currentLines after parsed_data hydration
-    console.log('[COST-DEBUG] 2/5 currentLines (from parsed_data):', currentLines.map(l => ({
-      name: l.product_name, pack_qty: l.pack_qty, pack_unit: l.pack_unit,
-      price: l.price, qty: l.qty, line_total: l.line_total,
-    })));
   } else {
     try {
       const data = await apiGet(`tables/invoice_lines?invoice_id=${invoiceId}&limit=200`);
@@ -1002,11 +997,6 @@ async function confirmAndSaveInvoice() {
     return;
   }
 
-  // [DEBUG] Cost-bug trace — log validLines after the strict map()
-  console.log('[COST-DEBUG] 3/5 validLines (about to send):', validLines.map(l => ({
-    name: l.product_name, packaging: l.packaging,
-    price: l.price, qty: l.qty, line_total: l.line_total,
-  })));
 
   const subtotal = validLines.reduce((s, l) => s + l.price * l.qty, 0);
   const computedTotal = subtotal + taxPst + taxGst + delivery + deposit + otherCost - credit;
@@ -1075,19 +1065,12 @@ async function confirmAndSaveInvoice() {
       invoice_date:      invoiceDate || '',
     }));
 
-    // [DEBUG] Cost-bug trace — log productsForBulk POST payload
-    console.log('[COST-DEBUG] 4/5 productsForBulk POST payload:', productsForBulk.map(p => ({
-      name: p.name, pack_size: p.pack_size, qty: p.qty,
-      unit_price: p.unit_price, cost: p.cost,
-    })));
 
     const bulkResult = await apiPost('bulk/upsert-products', {
       vendor_name: vendor,
       products:    productsForBulk,
     });
 
-    // [DEBUG] Cost-bug trace — log server response (includes saved cost / cost_per_unit)
-    console.log('[COST-DEBUG] 5/5 server response (saved values):', bulkResult);
 
     // 4. Save product mappings so future uploads benefit from corrections
     if (vendor) {

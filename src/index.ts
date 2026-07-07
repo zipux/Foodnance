@@ -420,24 +420,6 @@ app.post('/api/ensure-invoice', async (c) => {
 })
 
 
-// POST /api/bulk/products  – save multiple product_entries at once
-app.post('/api/bulk/products', async (c) => {
-  const { products } = await c.req.json() as { products: Record<string, unknown>[] }
-  if (!Array.isArray(products)) return c.json({ error: 'products array required' }, 400)
-
-  const saved: string[] = []
-  for (const p of products) {
-    if (!p.id) p.id = uid()
-    const keys = Object.keys(p)
-    const vals = Object.values(p)
-    await c.env.DB.prepare(
-      `INSERT OR REPLACE INTO product_entries (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`
-    ).bind(...vals).run()
-    saved.push(p.id as string)
-  }
-  return c.json({ saved })
-})
-
 // POST /api/bulk/upsert-products
 // Smart upsert: find-or-create supplier by name, find-or-create generic_product by name,
 // then ALWAYS create a new product_entry (each purchase is its own record).
@@ -479,8 +461,6 @@ app.post('/api/bulk/upsert-products', async (c) => {
   }
 
   let saved = 0, createdGenerics = 0, reusedGenerics = 0
-  // [DEBUG] Cost-bug trace — per-row record of received vs saved values.
-  const debugRows: Array<Record<string, unknown>> = []
 
   for (const p of body.products) {
     const name = (p.name as string || '').trim()
@@ -584,19 +564,6 @@ app.post('/api/bulk/upsert-products', async (c) => {
       qtyOrdered
     ).run()
 
-    // [DEBUG] Cost-bug trace — record what arrived and what was saved.
-    debugRows.push({
-      name,
-      received_cost:       p.cost,
-      received_unit_price: p.unit_price,
-      received_qty:        p.qty,
-      received_pack_size:  p.pack_size,
-      parsed_pack_qty:     packQty,
-      parsed_pack_unit:    packUnit,
-      saved_cost:          cost,
-      saved_cost_per_unit: costPerUnit,
-    })
-
     saved++
   }
 
@@ -607,7 +574,6 @@ app.post('/api/bulk/upsert-products', async (c) => {
     supplier_id:       supplierId,
     supplier_name:     supplierName,
     supplier_created:  supplierCreated,
-    debug:             debugRows,
   })
 })
 
@@ -673,26 +639,6 @@ app.post('/api/products/merge', async (c) => {
   ).bind(merged_id).run()
 
   return c.json({ ok: true, merged_name: merged.name, surviving_name: surviving.name })
-})
-
-// ─── Stats endpoints ──────────────────────────────────────────
-app.get('/api/stats/certifications', async (c) => {
-  const today = new Date().toISOString().slice(0, 10)
-  const soon = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)
-
-  const total   = await c.env.DB.prepare('SELECT COUNT(*) as n FROM staff_certifications').first<{ n: number }>()
-  const valid   = await c.env.DB.prepare("SELECT COUNT(*) as n FROM staff_certifications WHERE expiry_date > ?").bind(today).first<{ n: number }>()
-  const expiring = await c.env.DB.prepare("SELECT COUNT(*) as n FROM staff_certifications WHERE expiry_date > ? AND expiry_date <= ?").bind(today, soon).first<{ n: number }>()
-  const expired = await c.env.DB.prepare("SELECT COUNT(*) as n FROM staff_certifications WHERE expiry_date <= ?").bind(today).first<{ n: number }>()
-  const staffCount = await c.env.DB.prepare('SELECT COUNT(*) as n FROM staff').first<{ n: number }>()
-
-  return c.json({
-    total: total?.n || 0,
-    valid: valid?.n || 0,
-    expiring: expiring?.n || 0,
-    expired: expired?.n || 0,
-    staffCount: staffCount?.n || 0
-  })
 })
 
 // ─── Price Movers ─────────────────────────────────────────────
