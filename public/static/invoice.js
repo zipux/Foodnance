@@ -2,13 +2,12 @@
 // Pipeline per upload:
 //   1. Preprocess images (quality check + enhance)  — reject if any fail
 //   2. Upload first file to R2
-//   3. Azure OCR every page (required)
-//   4. GPT-4o parses the OCR text (or PDF text + OCR for PDFs)
-//   5. Run validation → collect warnings (totals, missing pages, GPT "needs review", unknown units)
-//   6. Apply known product-name mappings for the vendor
-//   7. Cross-page invoice-number consistency check
-//   8. Duplicate invoice-number check  → blocked if hit; confirm-modal if missing
-//   9. Save the invoice as status="Action Required" with parsed_data JSON
+//   3. Claude reads the document(s) directly and returns structured JSON
+//   4. Run validation → collect warnings (totals, missing pages, "needs review", unknown units)
+//   5. Apply known product-name mappings for the vendor
+//   6. Cross-page invoice-number consistency check
+//   7. Duplicate invoice-number check  → blocked if hit; confirm-modal if missing
+//   8. Save the invoice as status="Action Required" with parsed_data JSON
 //      — products, suppliers, line items are NOT written here; that happens in the
 //      review modal on the Invoices page (Confirm & Save).
 
@@ -48,11 +47,7 @@ let dragSrcIndex  = null;
 // Cross-page consistency
 let pageInvoiceNumbers = [];
 
-// Azure OCR per-page results
-let azureOcrPages = [];   // { pageNumber, fileName, text }
-let _azureConfigured = null;
-
-// GPT-4o raw response (for diagnostics)
+// Claude raw response (for diagnostics)
 let gptRawPages = [];
 
 // Validation warnings collected during processing — saved with parsed_data
@@ -77,7 +72,6 @@ document.addEventListener('DOMContentLoaded', () => {
   if (!document.getElementById('dropZone')) return;
 
   checkAiStatus();
-  checkAzureStatus();
 
   const dz = dropZone();
   dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('dragging'); });
@@ -172,7 +166,6 @@ function clearBatch() {
   document.getElementById('typeMismatchWarn').style.display = 'none';
   document.getElementById('submitBar').style.display = 'none';
   extractedRows = [];
-  azureOcrPages = [];
   gptRawPages   = [];
   invoiceWarnings = [];
   currentTaxGst = 0; currentTaxPst = 0; currentDelivery = 0;
@@ -181,7 +174,7 @@ function clearBatch() {
   currentVendor = ''; currentInvoiceNumber = ''; currentInvoiceDate = '';
   currentInvoiceTotal = 0;
   currentFileName = ''; currentFileKey = ''; currentFileUrl = '';
-  removeBlocker('azureBlocker');
+  removeBlocker('parseBlocker');
   removeBlocker('qualityBlocker');
 }
 
@@ -281,7 +274,7 @@ function renderStagedList() {
 
 // ══════════════════════════════════════════════════════════════
 // IMAGE PREPROCESSING PIPELINE
-// Runs automatically on every image before Azure OCR.
+// Runs automatically on every image before it is read.
 // PDFs are skipped here.
 // ══════════════════════════════════════════════════════════════
 const PREPROC = {
@@ -521,7 +514,7 @@ async function preprocessImage(file) {
     outFile = await canvasToFile(canvas, file.name, quality);
   }
   if (outFile.size > PREPROC.MAX_FILE_BYTES) {
-    warnings.push(`Compressed file is still ${(outFile.size / 1024 / 1024).toFixed(1)} MB — Azure may reject it.`);
+    warnings.push(`Compressed file is still ${(outFile.size / 1024 / 1024).toFixed(1)} MB — may be rejected (30 MB max per file).`);
   }
 
   return { file: outFile, rejected: false, reason: '', warnings, metrics };
@@ -628,7 +621,6 @@ async function submitBatch() {
 
   // Reset per-run state
   extractedRows = [];
-  azureOcrPages = [];
   gptRawPages   = [];
   invoiceWarnings = [];
   originalGptNames = [];
@@ -639,7 +631,7 @@ async function submitBatch() {
   currentFuelSurcharge = 0; currentDeposit = 0;
   currentCredit = 0; currentOtherCost = 0; currentOtherDesc = '';
   currentFileName = ''; currentFileKey = ''; currentFileUrl = '';
-  removeBlocker('azureBlocker');
+  removeBlocker('parseBlocker');
   removeBlocker('qualityBlocker');
   hideSavedBanner();
 
@@ -682,42 +674,13 @@ async function processPDFBatch() {
     currentFileName = files[0].name;
   }
 
-  if (!_azureConfigured) {
+  if (!_aiConfigured) {
     hideProgress();
-    showAzureBlocker('Azure Document Intelligence is not configured on this server. All invoices must go through Azure OCR. Please add AZURE_DOC_INTEL_KEY and AZURE_DOC_INTEL_ENDPOINT to the server environment.');
+    showParseBlocker('Claude is not configured on this server. Please add ANTHROPIC_API_KEY to the server environment.');
     return;
   }
 
-  let azureFullText = '';
-  for (let fi = 0; fi < files.length; fi++) {
-    showProgress(30 + Math.round((fi / total) * 25), `Azure OCR: page ${fi + 1}/${total}…`);
-    try {
-      const ocrResult = await callAzureOcr(files[fi]);
-      const offset = azureOcrPages.length;
-      (ocrResult.pageTexts || []).forEach((pt, i) => {
-        azureOcrPages.push({
-          pageNumber: offset + i + 1,
-          fileName:   files[fi].name,
-          text:       pt.text || '',
-        });
-      });
-      if (!(ocrResult.pageTexts || []).length && ocrResult.fullText) {
-        azureOcrPages.push({
-          pageNumber: azureOcrPages.length + 1,
-          fileName:   files[fi].name,
-          text:       ocrResult.fullText,
-        });
-      }
-      azureFullText += (ocrResult.fullText || '') + '\n';
-    } catch (azErr) {
-      hideProgress();
-      showAzureBlocker(`Azure OCR failed for "${files[fi].name}":\n${azErr.message}\n\nProcessing has been stopped.`);
-      return;
-    }
-  }
-
   // Per-file invoice-number detection from PDF.js text (used for cross-page consistency)
-  let pageOffset = 0;
   for (let fi = 0; fi < files.length; fi++) {
     const ab  = await files[fi].arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
@@ -727,37 +690,21 @@ async function processPDFBatch() {
       const tc   = await page.getTextContent();
       tc.items.forEach(it => { if (it.str.trim()) allText += it.str + ' '; });
     }
-    const textForCheck = azureFullText || allText;
-    const invNumMatch = textForCheck.match(/(?:invoice\s*(?:no|num|number|#)?[:.\s]*)([\w\-\/]{3,20})/i);
+    const invNumMatch = allText.match(/(?:invoice\s*(?:no|num|number|#)?[:.\s]*)([\w\-\/]{3,20})/i);
     pageInvoiceNumbers.push(invNumMatch ? invNumMatch[1].trim() : '');
-    pageOffset += pdf.numPages;
   }
 
-  if (!_aiConfigured) {
-    hideProgress();
-    showToast('OpenAI key is not configured — cannot parse the invoice. Add OPENAI_API_KEY and try again.', 'error');
-    resetSubmitButton();
-    return;
-  }
-
-  showProgress(72, 'Sending OCR text to GPT-4o…');
-  const textForAI = (azureFullText || '').trim();
-  if (!textForAI) {
-    hideProgress();
-    showToast('Azure OCR returned no text. Cannot parse this invoice.', 'error');
-    resetSubmitButton();
-    return;
-  }
+  showProgress(72, 'Reading invoice with Claude…');
 
   let aiResult = null;
   try {
-    const { result, rawText } = await callOpenAIText(textForAI);
+    const { result, rawText } = await callClaudeParse(files);
     gptRawPages.push({ pageNumber: 1, fileName: files[0].name, rawText: rawText || '' });
     aiResult = result;
-    extractedRows = mapOpenAIResult(result, files[0].name);
+    extractedRows = mapAiResult(result, files[0].name);
   } catch (aiErr) {
     hideProgress();
-    showToast('GPT-4o parsing failed: ' + aiErr.message, 'error');
+    showToast('Claude parsing failed: ' + aiErr.message, 'error');
     resetSubmitButton();
     return;
   }
@@ -766,7 +713,7 @@ async function processPDFBatch() {
   if (currentVendor) {
     try { await applyProductMappings(currentVendor); } catch (_) {}
   }
-  runValidation(aiResult, azureFullText, files.length);
+  runValidation(aiResult, aiResult.page_note || '', files.length);
   await collectUnknownUnitWarnings();
 
   showProgress(94, 'Checking for duplicates…');
@@ -778,15 +725,9 @@ async function processImageBatch() {
   const files = stagedFiles.map(s => s.file);
   const total = files.length;
 
-  if (!_azureConfigured) {
-    hideProgress();
-    showAzureBlocker('Azure Document Intelligence is not configured on this server. Please add AZURE_DOC_INTEL_KEY and AZURE_DOC_INTEL_ENDPOINT to the server environment.');
-    return;
-  }
   if (!_aiConfigured) {
     hideProgress();
-    showToast('OpenAI key is not configured — cannot parse the invoice. Add OPENAI_API_KEY and try again.', 'error');
-    resetSubmitButton();
+    showParseBlocker('Claude is not configured on this server. Please add ANTHROPIC_API_KEY to the server environment.');
     return;
   }
 
@@ -801,53 +742,18 @@ async function processImageBatch() {
     currentFileName = files[0].name;
   }
 
-  // Azure OCR
-  for (let fi = 0; fi < files.length; fi++) {
-    showProgress(35 + Math.round((fi / total) * 25), `Azure OCR: page ${fi + 1}/${total}…`);
-    try {
-      const ocrResult = await callAzureOcr(files[fi]);
-      const offset = azureOcrPages.length;
-      (ocrResult.pageTexts || []).forEach((pt, i) => {
-        azureOcrPages.push({
-          pageNumber: offset + i + 1,
-          fileName:   files[fi].name,
-          text:       pt.text || '',
-        });
-      });
-      if (!(ocrResult.pageTexts || []).length && ocrResult.fullText) {
-        azureOcrPages.push({
-          pageNumber: azureOcrPages.length + 1,
-          fileName:   files[fi].name,
-          text:       ocrResult.fullText,
-        });
-      }
-      if (!azureOcrPages.find(p => p.fileName === files[fi].name && p.text.trim())) {
-        hideProgress();
-        showAzureBlocker(`Azure returned no text for "${files[fi].name}". The image may be blank or unsupported.`);
-        return;
-      }
-    } catch (azErr) {
-      hideProgress();
-      showAzureBlocker(`Azure OCR failed for "${files[fi].name}":\n${azErr.message}\n\nProcessing has been stopped.`);
-      return;
-    }
-  }
-
-  showProgress(70, 'Sending OCR text to GPT-4o…');
-  const combinedOcrText = azureOcrPages.map(p =>
-    azureOcrPages.length > 1 ? `--- Page ${p.pageNumber} (${p.fileName}) ---\n${p.text}` : p.text
-  ).join('\n\n').trim();
+  showProgress(70, 'Reading invoice with Claude…');
 
   let aiResult = null;
   try {
-    const { result, rawText } = await callOpenAIText(combinedOcrText);
+    const { result, rawText } = await callClaudeParse(files);
     gptRawPages.push({ pageNumber: 1, fileName: files[0].name, rawText: rawText || '' });
     pageInvoiceNumbers.push(result.invoice_number || '');
     aiResult = result;
-    extractedRows = mapOpenAIResult(result, files[0].name);
+    extractedRows = mapAiResult(result, files[0].name);
   } catch (aiErr) {
     hideProgress();
-    showToast('GPT-4o parsing failed: ' + aiErr.message, 'error');
+    showToast('Claude parsing failed: ' + aiErr.message, 'error');
     resetSubmitButton();
     return;
   }
@@ -855,7 +761,7 @@ async function processImageBatch() {
   if (currentVendor) {
     try { await applyProductMappings(currentVendor); } catch (_) {}
   }
-  runValidation(aiResult, combinedOcrText, files.length);
+  runValidation(aiResult, aiResult.page_note || '', files.length);
   await collectUnknownUnitWarnings();
 
   showProgress(94, 'Checking for duplicates…');
@@ -1045,7 +951,7 @@ function hideSavedBanner() {
 }
 
 // ══════════════════════════════════════════════════════════════
-// AI / AZURE STATUS
+// AI STATUS
 // ══════════════════════════════════════════════════════════════
 async function checkAiStatus() {
   try {
@@ -1060,43 +966,15 @@ async function checkAiStatus() {
     el.innerHTML = '<i class="fas fa-check-circle" style="color:#16a34a"></i> AI ready';
     el.style.color = '#16a34a';
   } else {
-    el.innerHTML = '<i class="fas fa-exclamation-circle" style="color:#d97706"></i> No OpenAI key on server';
+    el.innerHTML = '<i class="fas fa-exclamation-circle" style="color:#d97706"></i> No Claude key on server';
     el.style.color = '#d97706';
   }
 }
 
-async function checkAzureStatus() {
-  try {
-    const data = await apiGet('ai/azure-status');
-    _azureConfigured = !!data.configured;
-  } catch (_) {
-    _azureConfigured = false;
-  }
-  const el = document.getElementById('azureKeyStatus');
-  if (!el) return;
-  if (_azureConfigured) {
-    el.innerHTML = '<i class="fas fa-check-circle" style="color:#16a34a"></i> Azure OCR ready';
-    el.style.color = '#16a34a';
-  } else {
-    el.innerHTML = '<i class="fas fa-times-circle" style="color:#94a3b8"></i> Not configured';
-    el.style.color = '#94a3b8';
-  }
-}
-
-// ── Send a file to Azure OCR
-async function callAzureOcr(file) {
-  const formData = new FormData();
-  formData.append('file', file);
-  const response = await fetch('/api/ai/azure-analyze', { method: 'POST', body: formData });
-  const data = await response.json();
-  if (!response.ok || data.error) throw new Error(data.error || `Azure error ${response.status}`);
-  return data;
-}
-
-function showAzureBlocker(message) {
-  removeBlocker('azureBlocker');
+function showParseBlocker(message) {
+  removeBlocker('parseBlocker');
   const blocker = document.createElement('div');
-  blocker.id = 'azureBlocker';
+  blocker.id = 'parseBlocker';
   blocker.style.cssText = `
     margin-top: 1.25rem;
     padding: 1.1rem 1.25rem;
@@ -1111,36 +989,34 @@ function showAzureBlocker(message) {
     <div style="display:flex;align-items:flex-start;gap:.75rem">
       <i class="fas fa-exclamation-circle" style="font-size:1.3rem;margin-top:.1rem;flex-shrink:0"></i>
       <div>
-        <strong style="display:block;font-size:1rem;margin-bottom:.4rem">Azure OCR Failed — Processing Stopped</strong>
+        <strong style="display:block;font-size:1rem;margin-bottom:.4rem">Invoice Reading Failed — Processing Stopped</strong>
         <pre style="white-space:pre-wrap;font-family:inherit;margin:0">${esc(message)}</pre>
       </div>
     </div>
   `;
   const uploadCard = document.querySelector('.upload-card');
   if (uploadCard?.parentNode) uploadCard.parentNode.insertBefore(blocker, uploadCard.nextSibling);
-  showToast('Azure OCR failed — see details on screen.', 'error');
+  showToast('Invoice reading failed — see details on screen.', 'error');
   resetSubmitButton();
 }
 
 // ══════════════════════════════════════════════════════════════
-// GPT-4o CALL
+// CLAUDE CALL — send the raw document(s) for direct reading
 // ══════════════════════════════════════════════════════════════
-async function callOpenAIText(ocrText) {
-  if (!_aiConfigured) throw new Error('OpenAI API key is not configured on the server.');
-  const response = await fetch('/api/ai/parse-invoice', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ocrText })
-  });
+async function callClaudeParse(files) {
+  if (!_aiConfigured) throw new Error('Claude API key is not configured on the server.');
+  const formData = new FormData();
+  for (const file of files) formData.append('file', file);
+  const response = await fetch('/api/ai/parse-invoice', { method: 'POST', body: formData });
   const data = await response.json();
   if (!response.ok || data.error) throw new Error(data.error || `Server error ${response.status}`);
   return { result: data.result, rawText: data.rawText || JSON.stringify(data.result, null, 2) };
 }
 
 // ══════════════════════════════════════════════════════════════
-// MAP GPT-4o RESULT → state + extractedRows
+// MAP CLAUDE RESULT → state + extractedRows
 // ══════════════════════════════════════════════════════════════
-function mapOpenAIResult(result, fileName) {
+function mapAiResult(result, fileName) {
   const ref = baseName(fileName);
 
   currentVendor          = result.vendor          || '';
@@ -1176,7 +1052,7 @@ function mapOpenAIResult(result, fileName) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// PRODUCT MAPPING — auto-replace GPT-4o names with learned corrections
+// PRODUCT MAPPING — auto-replace extracted names with learned corrections
 // ══════════════════════════════════════════════════════════════
 function extractMappingKey(sku, description) {
   if (sku && sku.trim()) return sku.trim().toLowerCase();
@@ -1264,7 +1140,7 @@ function runValidation(gptResult, ocrFullText, uploadedPageCount) {
       invoiceWarnings.push({
         id: 'gpt_needs_review_' + path,
         severity: 'warning',
-        message: `GPT-4o flagged field "${path}" as needing review: "${obj}"`,
+        message: `Claude flagged field "${path}" as needing review: "${obj}"`,
       });
     } else if (Array.isArray(obj)) {
       obj.forEach((v, i) => deepSearch(v, path + '[' + i + ']'));

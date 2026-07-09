@@ -4,9 +4,7 @@ import { cors } from 'hono/cors'
 type Bindings = {
   DB: D1Database
   FILES: R2Bucket
-  OPENAI_API_KEY: string        // secret set via wrangler / .dev.vars
-  AZURE_DOC_INTEL_KEY: string   // Azure Document Intelligence API key
-  AZURE_DOC_INTEL_ENDPOINT: string // e.g. https://xxx.cognitiveservices.azure.com
+  ANTHROPIC_API_KEY: string     // secret set via wrangler / .dev.vars
 }
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -951,36 +949,39 @@ app.get('/api/stock-take/latest-statuses', async (c) => {
 // Static HTML + assets are served by Cloudflare Pages directly from the dist/ folder.
 // The worker only needs to handle /api/* routes.
 
-// ─── AI: Check if key is configured ──────────────────────────
+// ─── AI: Check if Claude key is configured ───────────────────
 app.get('/api/ai/status', async (c) => {
-  const hasKey = !!(c.env.OPENAI_API_KEY)
-  return c.json({ configured: hasKey })
+  return c.json({ configured: !!c.env.ANTHROPIC_API_KEY })
 })
 
-// ─── Azure Document Intelligence status check ─────────────────
-app.get('/api/ai/azure-status', async (c) => {
-  const hasKey      = !!(c.env.AZURE_DOC_INTEL_KEY)
-  const hasEndpoint = !!(c.env.AZURE_DOC_INTEL_ENDPOINT)
-  return c.json({ configured: hasKey && hasEndpoint })
-})
+// ─── Helper: base64-encode an ArrayBuffer (chunked, stack-safe) ─
+function bufToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf)
+  let binary = ''
+  const CHUNK = 0x8000
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+  }
+  return btoa(binary)
+}
 
-// ─── AI: Parse invoice via GPT-4o ────────────────────────────
+// ─── AI: Parse invoice via Claude ────────────────────────────
 // POST /api/ai/parse-invoice
-// Accepts one of three body formats:
-//   1. JSON { ocrText: string }          ← preferred: Azure OCR text as input
-//   2. JSON { base64: string, mimeType } ← fallback: raw image
-//   3. multipart/form-data with "file"   ← legacy fallback
+// Accepts multipart/form-data with one or more "file" fields (PDF or image).
+// Claude reads the document(s) directly (native PDF + vision) and returns
+// structured JSON in a single pass — no separate OCR step.
 app.post('/api/ai/parse-invoice', async (c) => {
-  const apiKey = c.env.OPENAI_API_KEY
+  const apiKey = c.env.ANTHROPIC_API_KEY
   if (!apiKey) {
-    return c.json({ error: 'OpenAI API key is not configured on the server. Please add it in Settings.' }, 400)
+    return c.json({ error: 'Claude API key is not configured on the server. Add ANTHROPIC_API_KEY and try again.' }, 400)
   }
 
-  // Shared JSON schema + rules used in all prompt variants
+  // Shared JSON schema + extraction rules
   const jsonSchema = `{
   "vendor": "supplier/company name from the invoice header",
   "invoice_number": "invoice number or empty string",
   "invoice_date": "YYYY-MM-DD or empty string",
+  "page_note": "any 'Page X of Y' text visible on the invoice, copied verbatim, or empty string",
   "total": 0.00,
   "payment_account": "A/P",
   "tax_gst": 0.00,
@@ -1024,6 +1025,7 @@ app.post('/api/ai/parse-invoice', async (c) => {
 - For 'other_cost': any other fee not covered above (handling fee, etc.)
 - For 'other_desc': description of the other_cost if applicable
 - For dates: convert any format to YYYY-MM-DD
+- For 'page_note': if the invoice shows pagination like 'Page 1 of 3', copy that text verbatim; otherwise use empty string
 - Use 0.00 for numeric fields you cannot find
 - Use empty string '' for text fields you cannot find
 - If any field is unclear or ambiguous, mark it as 'needs review' instead of guessing
@@ -1031,114 +1033,69 @@ app.post('/api/ai/parse-invoice', async (c) => {
 - When a tax, fee, or charge seems unusually high or low, cross-check it against the invoice total. For example, if the subtotal is $814.51 and the total is $814.66, the tax should be $0.15 not $15.00. Use the total as the source of truth to validate individual charges. If you correct a decimal error, add '(decimal corrected)' next to the field value
 - Return ONLY the JSON object, nothing else`
 
-  let messages: Array<{ role: string; content: unknown }>
-
   const contentType = c.req.header('content-type') || ''
-
   if (!contentType.includes('multipart/form-data')) {
-    const body = await c.req.json() as {
-      ocrText?: string
-      base64?: string
-      mimeType?: string
-      base64Images?: Array<{ base64: string; mimeType?: string }>
-    }
-
-    if (body.ocrText) {
-      // ── Mode 1: Azure OCR text → GPT-4o ──────────────────────
-      // If base64Images are also provided, send both text + images
-      // so GPT can use the image to verify the totals/charges section
-      // that OCR often mangles.
-      const prompt = `You are an expert invoice parser. Below is the raw text extracted from an invoice by OCR. The OCR text is accurate for product line items, but the totals/charges section (taxes, fees, deposits, surcharges) may have broken formatting where labels and values appear on separate lines or are misassociated.${body.base64Images?.length ? ' You also have the original invoice image(s) — use them to VISUALLY VERIFY all charges in the totals section. When the OCR text is ambiguous about which value belongs to which label, trust the image layout over the OCR text.' : ' Always cross-check individual amounts against the invoice total to catch these errors.'}
-
-Parse this text carefully and extract ALL line items AND all additional charges. Return ONLY a valid JSON object in this exact format (no markdown, no explanation, no code fences):
-${jsonSchema}
-${rules}
-
---- INVOICE OCR TEXT START ---
-${body.ocrText}
---- INVOICE OCR TEXT END ---`
-
-      if (body.base64Images?.length) {
-        // Dual mode: text + images
-        const content: Array<{ type: string; text?: string; image_url?: { url: string; detail: string } }> = [
-          { type: 'text', text: prompt }
-        ]
-        for (const img of body.base64Images) {
-          const mime = img.mimeType || 'image/jpeg'
-          content.push({
-            type: 'image_url',
-            image_url: { url: `data:${mime};base64,${img.base64}`, detail: 'high' }
-          })
-        }
-        messages = [{ role: 'user', content }]
-      } else {
-        // Text-only mode (PDFs or when images not available)
-        messages = [{ role: 'user', content: prompt }]
-      }
-
-    } else if (body.base64) {
-      // ── Mode 2: raw image (fallback when Azure not configured) ──
-      const mimeType = body.mimeType || 'image/jpeg'
-      const prompt = `You are an expert invoice parser. Analyse this invoice image carefully and extract ALL line items AND all additional charges. If any value looks like a decimal error (e.g. a tax that is far too large relative to the total), correct it and add '(decimal corrected)' next to the value. If any field is unclear or ambiguous, mark it as 'needs review'.
-Return ONLY a valid JSON object in this exact format (no markdown, no explanation, no code fences):
-${jsonSchema}
-${rules}`
-
-      messages = [{
-        role: 'user',
-        content: [
-          { type: 'text', text: prompt },
-          { type: 'image_url', image_url: { url: `data:${mimeType};base64,${body.base64}`, detail: 'high' } }
-        ]
-      }]
-
-    } else {
-      return c.json({ error: 'Provide either ocrText or base64 in the request body.' }, 400)
-    }
-
-  } else {
-    // ── Mode 3: multipart file upload (legacy) ──────────────
-    const formData = await c.req.formData()
-    const file = formData.get('file') as File | null
-    if (!file) return c.json({ error: 'No file provided' }, 400)
-    const mimeType = file.type || 'image/jpeg'
-    const ab = await file.arrayBuffer()
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(ab)))
-    const prompt = `You are an expert invoice parser. Analyse this invoice image carefully and extract ALL line items AND all additional charges. If any value looks like a decimal error (e.g. a tax that is far too large relative to the total), correct it and add '(decimal corrected)' next to the value. If any field is unclear or ambiguous, mark it as 'needs review'.
-Return ONLY a valid JSON object in this exact format (no markdown, no explanation, no code fences):
-${jsonSchema}
-${rules}`
-
-    messages = [{
-      role: 'user',
-      content: [
-        { type: 'text', text: prompt },
-        { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}`, detail: 'high' } }
-      ]
-    }]
+    return c.json({ error: 'Send the invoice as multipart/form-data with one or more "file" fields.' }, 400)
   }
 
+  const formData = await c.req.formData()
+  const files = formData.getAll('file').filter((f): f is File => f instanceof File)
+  if (!files.length) return c.json({ error: 'No file provided.' }, 400)
+
+  // ── Build Claude content blocks: one per file (PDF → document, image → image) ──
+  const fileBlocks: Array<Record<string, unknown>> = []
+  for (const file of files) {
+    const ab = await file.arrayBuffer()
+    const sizeMB = ab.byteLength / (1024 * 1024)
+    if (sizeMB > 30) {
+      return c.json({ error: `File "${file.name}" is too large (${sizeMB.toFixed(1)} MB). Maximum is 30 MB per file.` }, 413)
+    }
+    const data = bufToBase64(ab)
+    const mime = file.type || ''
+    if (mime === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+      fileBlocks.push({
+        type: 'document',
+        source: { type: 'base64', media_type: 'application/pdf', data },
+      })
+    } else {
+      const imgMime = mime.startsWith('image/') ? mime : 'image/jpeg'
+      fileBlocks.push({
+        type: 'image',
+        source: { type: 'base64', media_type: imgMime, data },
+      })
+    }
+  }
+
+  const prompt = `You are an expert invoice parser. Read the attached invoice document(s) carefully — including the totals/charges section — and extract ALL line items AND all additional charges. Use the visual layout to correctly associate each amount with its label. If any value looks like a decimal error (e.g. a tax that is far too large relative to the total), correct it and add '(decimal corrected)' next to the value. If any field is unclear or ambiguous, mark it as 'needs review'.
+Return ONLY a valid JSON object in this exact format (no markdown, no explanation, no code fences):
+${jsonSchema}
+${rules}`
+
+  const content = [{ type: 'text', text: prompt }, ...fileBlocks]
+
   try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'gpt-4o',
-        max_tokens: 3000,
-        messages
-      })
+        model: 'claude-opus-4-8',
+        max_tokens: 16000,
+        thinking: { type: 'adaptive' },
+        messages: [{ role: 'user', content }],
+      }),
     })
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({})) as { error?: { message?: string } }
-      return c.json({ error: err?.error?.message || `OpenAI API error ${response.status}` }, 502)
+      return c.json({ error: err?.error?.message || `Claude API error ${response.status}` }, 502)
     }
 
-    const data = await response.json() as { choices: Array<{ message: { content: string } }> }
-    const text = data.choices?.[0]?.message?.content || ''
+    const data = await response.json() as { content: Array<{ type: string; text?: string }> }
+    const text = (data.content || []).find(b => b.type === 'text')?.text || ''
 
     // Strip markdown code fences if present
     const cleaned = text
@@ -1155,136 +1112,128 @@ ${rules}`
   }
 })
 
-// ─── Azure Document Intelligence: Analyze invoice ─────────────
-// POST /api/ai/azure-analyze
-// Accepts multipart/form-data with a 'file' field (PDF or image).
-// Submits to Azure prebuilt-invoice model, polls until done,
-// returns the raw analyzeResult JSON from Azure.
-app.post('/api/ai/azure-analyze', async (c) => {
-  const endpoint = (c.env.AZURE_DOC_INTEL_ENDPOINT || '').replace(/\/$/, '')
-  const apiKey   = c.env.AZURE_DOC_INTEL_KEY
-
-  if (!endpoint || !apiKey) {
-    return c.json({ error: 'Azure Document Intelligence is not configured on the server.' }, 503)
+// ─── AI: Parse a plain-English ingredient list into recipe lines ───
+// POST /api/ai/parse-recipe   body: { text, products: [{ id, name, category }] }
+// Claude reads the free text and matches each ingredient to one of the caller's
+// products, returning quantity + unit + a match status (matched/ambiguous/not_found).
+app.post('/api/ai/parse-recipe', async (c) => {
+  const apiKey = c.env.ANTHROPIC_API_KEY
+  if (!apiKey) {
+    return c.json({ error: 'Claude API key is not configured on the server. Add ANTHROPIC_API_KEY and try again.' }, 400)
   }
 
-  // ── 1. Read uploaded file ────────────────────────────────────
-  const contentType = c.req.header('content-type') || ''
-  if (!contentType.includes('multipart/form-data')) {
-    return c.json({ error: 'Send the invoice as multipart/form-data with field name "file".' }, 400)
-  }
+  const body = await c.req.json().catch(() => null) as
+    { text?: string; products?: Array<{ id: string; name: string; category?: string }> } | null
+  const text = (body?.text || '').trim()
+  const products = Array.isArray(body?.products) ? body!.products : []
+  if (!text) return c.json({ error: 'No recipe text provided.' }, 400)
+  if (!products.length) return c.json({ error: 'You have no products to match against yet.' }, 400)
 
-  const formData = await c.req.formData()
-  const file = formData.get('file') as File | null
-  if (!file) return c.json({ error: 'No file provided.' }, 400)
+  // Compact catalogue for the prompt: "id<TAB>name (category)"
+  const catalogue = products
+    .map(p => `${p.id}\t${p.name}${p.category ? ` (${p.category})` : ''}`)
+    .join('\n')
 
-  const fileBuffer  = await file.arrayBuffer()
-  const mimeType    = file.type || 'application/octet-stream'
+  const prompt = `You convert a chef's plain-English ingredient list into structured recipe lines, matching each ingredient to a product from the catalogue below.
 
-  // ── 1b. File-size guard (Azure limit is 500 MB; practical limit ~50 MB) ─
-  const fileSizeMB = fileBuffer.byteLength / (1024 * 1024)
-  if (fileSizeMB > 50) {
-    return c.json({
-      error: `File is too large for Azure OCR (${fileSizeMB.toFixed(1)} MB). Maximum supported size is 50 MB. Please reduce the file size and try again.`
-    }, 413)
-  }
+CATALOGUE (each line is: id<TAB>name (category)):
+${catalogue}
 
-  // ── 2. Submit to Azure: POST → get operation-location URL ───
-  const submitUrl = `${endpoint}/documentintelligence/documentModels/prebuilt-invoice:analyze?api-version=2024-11-30`
+INGREDIENT TEXT:
+"""
+${text}
+"""
 
-  const submitRes = await fetch(submitUrl, {
-    method: 'POST',
-    headers: {
-      'Ocp-Apim-Subscription-Key': apiKey,
-      'Content-Type': mimeType,
-    },
-    body: fileBuffer,
-  })
+For EACH ingredient the chef listed, output one item object with:
+- "input": the original text fragment for this ingredient, copied verbatim (e.g. "30 kg tomatoes")
+- "ingredient": just the ingredient name, without the quantity or unit (e.g. "tomatoes")
+- "quantity": the numeric amount as a number, or null if none was given
+- "unit": the unit of measure, normalised to lowercase (e.g. "kg", "g", "lb", "l", "ml", "each"). Use "" if none was given
+- "status": exactly one of "matched", "ambiguous", "not_found"
+- "product_id": the matching catalogue id when status is "matched"; otherwise ""
+- "candidate_ids": an array of catalogue ids when status is "ambiguous" (2 or more plausible products, most likely first); otherwise []
 
-  if (!submitRes.ok) {
-    const errText = await submitRes.text()
-    return c.json({
-      error: `Azure submission failed (${submitRes.status}): ${errText}`
-    }, 502)
-  }
+Matching rules:
+- "matched": exactly one catalogue product clearly corresponds. Allow plurals, synonyms, word order and brand/pack differences (e.g. "tomatoes" matches a single "Tomato" product; "ground beef" matches "Beef, Ground").
+- "ambiguous": two or more catalogue products plausibly match and you cannot confidently choose one (e.g. "tomatoes" when BOTH "Roma Tomato" and "Cherry Tomato" exist). Put those ids in candidate_ids.
+- "not_found": no catalogue product reasonably corresponds.
+- Only ever use ids that appear verbatim in the catalogue above. Never invent ids, names, or products.
+- Preserve the chef's original order.
 
-  // Azure returns the polling URL in the operation-location header
-  const operationUrl = submitRes.headers.get('operation-location')
-  if (!operationUrl) {
-    return c.json({ error: 'Azure did not return an operation-location header.' }, 502)
-  }
+Return ONLY a JSON object of this exact shape (no markdown, no commentary, no code fences):
+{"items":[{"input":"","ingredient":"","quantity":0,"unit":"","status":"","product_id":"","candidate_ids":[]}]}`
 
-  // ── 3. Poll until succeeded (max ~60s, 1s intervals) ────────
-  const MAX_POLLS = 60
-  for (let i = 0; i < MAX_POLLS; i++) {
-    // Wait 1 second between polls
-    await new Promise(r => setTimeout(r, 1000))
-
-    const pollRes = await fetch(operationUrl, {
-      headers: { 'Ocp-Apim-Subscription-Key': apiKey },
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-opus-4-8',
+        max_tokens: 4000,
+        thinking: { type: 'adaptive' },
+        messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+      }),
     })
 
-    if (!pollRes.ok) {
-      const errText = await pollRes.text()
-      return c.json({
-        error: `Azure polling failed (${pollRes.status}): ${errText}`
-      }, 502)
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({})) as { error?: { message?: string } }
+      return c.json({ error: err?.error?.message || `Claude API error ${response.status}` }, 502)
     }
 
-    const pollData = await pollRes.json() as {
-      status: string
-      analyzeResult?: unknown
-      error?: { message?: string }
-    }
+    const data = await response.json() as { content: Array<{ type: string; text?: string }> }
+    const raw = (data.content || []).find(b => b.type === 'text')?.text || ''
+    const cleaned = raw
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/```\s*$/i, '')
+      .trim()
 
-    if (pollData.status === 'succeeded') {
-      const ar = pollData.analyzeResult as {
-        content?: string
-        pages?: Array<{
-          pageNumber?: number
-          lines?: Array<{ content?: string }>
-          words?: Array<{ content?: string }>
-        }>
-        documents?: Array<{
-          fields?: Record<string, { valueString?: string; content?: string; valueCurrency?: { amount?: number; currencyCode?: string }; valueDate?: string; valueArray?: Array<{ valueObject?: Record<string, { content?: string; valueString?: string; valueCurrency?: { amount?: number } }> }> }>
-        }>
-      } | undefined
+    const parsed = JSON.parse(cleaned) as { items?: Array<Record<string, unknown>> }
 
-      // ── Build per-page OCR text for the Raw OCR Output panel ──
-      // Each entry: { pageNumber, text } — text is all lines joined
-      const pageTexts: Array<{ pageNumber: number; text: string }> = []
-      if (ar?.pages && ar.pages.length > 0) {
-        for (const pg of ar.pages) {
-          const num = pg.pageNumber ?? (pageTexts.length + 1)
-          const lines = (pg.lines || []).map(l => l.content || '').filter(Boolean)
-          pageTexts.push({ pageNumber: num, text: lines.join('\n') })
-        }
-      } else if (ar?.content) {
-        // Fallback: single-page, use full content string
-        pageTexts.push({ pageNumber: 1, text: ar.content })
+    // Validate every id against the real catalogue and coerce inconsistent states —
+    // never trust the model to have kept status/ids self-consistent.
+    const validIds = new Set(products.map(p => p.id))
+    const nameById = new Map(products.map(p => [p.id, p.name]))
+
+    const items = (Array.isArray(parsed.items) ? parsed.items : []).map((it) => {
+      const candidate_ids = (Array.isArray(it.candidate_ids) ? it.candidate_ids : [])
+        .filter((id): id is string => typeof id === 'string' && validIds.has(id))
+      let status = String(it.status || '')
+      let product_id = (typeof it.product_id === 'string' && validIds.has(it.product_id)) ? it.product_id : ''
+
+      if (status === 'matched' && !product_id) status = candidate_ids.length ? 'ambiguous' : 'not_found'
+      if (status === 'ambiguous') {
+        if (candidate_ids.length === 1) { status = 'matched'; product_id = candidate_ids[0] }
+        else if (candidate_ids.length === 0) status = 'not_found'
+      }
+      if (status !== 'matched' && status !== 'ambiguous' && status !== 'not_found') {
+        status = product_id ? 'matched' : (candidate_ids.length ? 'ambiguous' : 'not_found')
       }
 
-      return c.json({
-        success:      true,
-        analyzeResult: pollData.analyzeResult,
-        // Convenience: per-page text ready for display / GPT prompt
-        pageTexts,
-        // Convenience: full document text (all pages concatenated)
-        fullText: ar?.content || pageTexts.map(p => p.text).join('\n\n--- Page break ---\n\n'),
-      })
-    }
+      const qtyNum = Number(it.quantity)
+      return {
+        input: String(it.input || ''),
+        ingredient: String(it.ingredient || ''),
+        quantity: (it.quantity === null || it.quantity === undefined || isNaN(qtyNum)) ? null : qtyNum,
+        unit: String(it.unit || '').toLowerCase(),
+        status,
+        product_id,
+        product_name: product_id ? (nameById.get(product_id) || '') : '',
+        candidate_ids,
+      }
+    })
 
-    if (pollData.status === 'failed') {
-      return c.json({
-        error: 'Azure analysis failed: ' + (pollData.error?.message || 'unknown error')
-      }, 502)
-    }
-
-    // status is 'running' or 'notStarted' — keep polling
+    return c.json({ success: true, items })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    return c.json({ error: 'Recipe parsing failed: ' + message }, 500)
   }
-
-  return c.json({ error: 'Azure analysis timed out after 60 seconds. The file may be too complex or Azure may be under load. Please try again.' }, 504)
 })
+
 
 // ─── Product Mappings: lookup by vendor + raw text ─────────────
 app.get('/api/product-mappings', async (c) => {

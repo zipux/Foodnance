@@ -16,7 +16,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   await Promise.all([loadProductCatalogue(), loadRecipes(), loadUnits()]);
 
-  document.getElementById('addIngredientBtn').addEventListener('click', addIngredientLine);
+  document.getElementById('addIngredientBtn').addEventListener('click', () => addIngredientLine());
+  document.getElementById('quickAddToggle').addEventListener('click', toggleQuickAdd);
+  document.getElementById('quickAddParseBtn').addEventListener('click', quickAddParse);
   document.getElementById('saveRecipeBtn').addEventListener('click', saveRecipe);
   document.getElementById('clearRecipeBtn').addEventListener('click', clearRecipeForm);
   document.getElementById('recipeYieldQty').addEventListener('input',  recalcCosts);
@@ -292,6 +294,8 @@ function fifoActiveEntry(sortedEntries, invQty) {
 
 // ── Ingredient Lines ───────────────────────────────────────────
 function addIngredientLine(prefill = null) {
+  // Guard against being called as an event handler (click passes an Event, not a prefill).
+  if (prefill instanceof Event) prefill = null;
   const idx = ingredientRows.length;
   const row = prefill || { product_id: '', product_name: '', quantity: 1, unit: '', unit_cost: 0 };
   ingredientRows.push(row);
@@ -304,15 +308,22 @@ function addIngredientLine(prefill = null) {
   // Build unit options — standard list + sub-unit appended if defined for selected product
   const selectedProduct = row.product_id ? allProducts.find(p => p.id === row.product_id) : null;
   const unitOpts = buildUnitOptions(row.unit, selectedProduct);
-  const prefillName = selectedProduct ? esc(selectedProduct.name) : '';
+
+  // A flagged (ambiguous / not-found) row shows the chef's original text so they can
+  // search from it, plus a resolution flag below the input.
+  const isFlagged   = !!row._status && !row.product_id;
+  const prefillName = selectedProduct ? esc(selectedProduct.name)
+                    : (isFlagged ? esc(row._ingredientName || row._rawInput || '') : '');
 
   div.innerHTML = `
     <div class="form-group" style="position:relative">
       ${idx === 0 ? '<label>Product</label>' : '<label>&nbsp;</label>'}
       <input type="text" id="ing-prod-input-${idx}" value="${prefillName}" placeholder="Type to search…" autocomplete="off"
+             class="${isFlagged ? 'ing-input-flagged' : ''}"
              oninput="onProductSearch(${idx})" onblur="hideProductSuggestions(${idx})" />
       <input type="hidden" id="ing-prod-${idx}" value="${esc(row.product_id || '')}" />
       <div id="ing-prod-suggestions-${idx}" class="product-suggestions"></div>
+      ${ingFlagHtml(idx, row)}
     </div>
     <div class="form-group">
       ${idx === 0 ? '<label>Qty</label>' : '<label>&nbsp;</label>'}
@@ -373,6 +384,10 @@ function onProductChange(idx) {
     unitSel.innerHTML = buildUnitOptions(ingredientRows[idx].unit, product);
     unitSel.dataset.prevUnit = unitSel.value;
   }
+
+  // Selecting a real product resolves any ambiguous/not-found flag on this row.
+  if (productId) clearRowFlag(idx);
+  else updateUnresolvedState();
 
   _updateIngCostDisplay(idx);
   recalcCosts();
@@ -481,6 +496,158 @@ function removeIngredientLine(idx) {
   if (div) div.remove();
   ingredientRows[idx] = null; // mark removed
   recalcCosts();
+  updateUnresolvedState();
+}
+
+// ── Quick add from plain-English text ──────────────────────────
+function toggleQuickAdd() {
+  const body = document.getElementById('quickAddBody');
+  const chev = document.querySelector('.quick-add-chevron');
+  const isOpen = body.classList.toggle('hidden') === false;
+  if (chev) chev.style.transform = isOpen ? 'rotate(180deg)' : '';
+  if (isOpen) document.getElementById('quickAddText').focus();
+}
+
+async function quickAddParse() {
+  const textEl = document.getElementById('quickAddText');
+  const text   = textEl.value.trim();
+  if (!text) { showToast('Type some ingredients first.', 'error'); return; }
+  if (!allProducts.length) { showToast('No products loaded to match against.', 'error'); return; }
+
+  const btn  = document.getElementById('quickAddParseBtn');
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Matching…';
+
+  try {
+    const res = await apiPost('ai/parse-recipe', {
+      text,
+      products: allProducts.map(p => ({ id: p.id, name: p.name, category: p.category || '' })),
+    });
+    const items = res.items || [];
+    if (!items.length) { showToast('No ingredients recognised in that text.', 'warning'); return; }
+
+    let matched = 0, flagged = 0;
+    for (const it of items) {
+      const unit = it.unit || '';
+      const qty  = (it.quantity != null && !isNaN(it.quantity)) ? it.quantity : 1;
+
+      // The chef typed the unit explicitly, so treat it as a manual choice and
+      // don't let onProductChange overwrite it with the product's pack unit.
+      const manualUnit = !!unit;
+
+      if (it.status === 'matched' && it.product_id) {
+        addIngredientLine({ product_id: it.product_id, product_name: it.product_name, quantity: qty, unit, _manualUnit: manualUnit });
+        matched++;
+      } else {
+        addIngredientLine({
+          product_id: '', product_name: '', quantity: qty, unit, unit_cost: 0, _manualUnit: manualUnit,
+          _status:        it.status === 'ambiguous' ? 'ambiguous' : 'not_found',
+          _rawInput:      it.input || it.ingredient || '',
+          _ingredientName: it.ingredient || it.input || '',
+          _candidateIds:  it.candidate_ids || [],
+        });
+        flagged++;
+      }
+    }
+
+    textEl.value = '';
+    recalcCosts();
+    updateUnresolvedState();
+
+    if (flagged) {
+      showToast(`Added ${matched} ingredient${matched === 1 ? '' : 's'}; ${flagged} need${flagged === 1 ? 's' : ''} your attention.`, 'warning');
+    } else {
+      showToast(`Added ${matched} ingredient${matched === 1 ? '' : 's'}.`, 'success');
+    }
+  } catch (e) {
+    showToast(e.message || 'Matching failed.', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+
+// Build the inline resolution flag shown under a flagged ingredient's product input.
+function ingFlagHtml(idx, row) {
+  if (!row._status || row.product_id) return '';
+
+  if (row._status === 'ambiguous') {
+    const chips = (row._candidateIds || [])
+      .map(id => allProducts.find(p => p.id === id))
+      .filter(Boolean)
+      .map(p => `<button type="button" class="ing-chip" onmousedown="resolveCandidate(${idx}, '${esc(p.id)}')">${esc(p.name)}</button>`)
+      .join('');
+    const label = esc(row._ingredientName || row._rawInput || 'this ingredient');
+    return `<div class="ing-flag ambiguous">
+      <span class="ing-flag-label"><i class="fas fa-triangle-exclamation"></i> Which "${label}"?</span>
+      ${chips || '<span class="ing-flag-muted">search above to pick one</span>'}
+    </div>`;
+  }
+
+  // not_found
+  const label = esc(row._ingredientName || row._rawInput || 'ingredient');
+  return `<div class="ing-flag notfound">
+    <span class="ing-flag-label"><i class="fas fa-circle-xmark"></i> "${label}" not in your products</span>
+    <button type="button" class="ing-chip add" onmousedown="addMissingProduct(${idx})"><i class="fas fa-plus"></i> Add as new product</button>
+    <span class="ing-flag-muted">or search above</span>
+  </div>`;
+}
+
+// User clicked one of the ambiguous candidate chips.
+function resolveCandidate(idx, productId) {
+  selectProduct(idx, productId); // fills input + hidden, runs onProductChange → clears the flag
+}
+
+// User chose to add a not-found ingredient as a brand-new product.
+async function addMissingProduct(idx) {
+  const row = ingredientRows[idx];
+  if (!row) return;
+  const name = (row._ingredientName || row._rawInput || '').trim();
+  if (!name) { showToast('No ingredient name to add.', 'error'); return; }
+
+  try {
+    const created = await apiPost(`tables/${PRODUCTS_TABLE_R}`, { name, category: 'Ingredients' });
+    allProducts.push(created); // so it matches next time and can be selected now
+
+    const input  = document.getElementById(`ing-prod-input-${idx}`);
+    const hidden = document.getElementById(`ing-prod-${idx}`);
+    if (input)  input.value  = created.name;
+    if (hidden) hidden.value = created.id;
+    onProductChange(idx); // sets the row's product + clears the flag
+
+    showToast(`Added "${name}" to Products — set its price on the Products page to include it in the cost.`, 'success');
+  } catch (e) {
+    showToast('Could not add product: ' + e.message, 'error');
+  }
+}
+
+// Remove a resolved row's flag (data + DOM) and refresh the save-blocking state.
+function clearRowFlag(idx) {
+  const row = ingredientRows[idx];
+  if (row) { delete row._status; delete row._candidateIds; delete row._rawInput; delete row._ingredientName; }
+  const flag = document.querySelector(`#ing-${idx} .ing-flag`);
+  if (flag) flag.remove();
+  const input = document.getElementById(`ing-prod-input-${idx}`);
+  if (input) input.classList.remove('ing-input-flagged');
+  updateUnresolvedState();
+}
+
+// True while any row is still an unresolved (ambiguous / not-found) flag.
+function hasUnresolved() {
+  return ingredientRows.some(r => r && r._status && !r.product_id);
+}
+
+// Disable Save and show the banner while unresolved ingredients remain.
+function updateUnresolvedState() {
+  const blocked = hasUnresolved();
+  const btn = document.getElementById('saveRecipeBtn');
+  if (btn) {
+    btn.disabled = blocked;
+    btn.title = blocked ? 'Resolve or remove the flagged ingredients first' : '';
+  }
+  const banner = document.getElementById('unresolvedBanner');
+  if (banner) banner.style.display = blocked ? 'flex' : 'none';
 }
 
 function activeRows() {
@@ -533,6 +700,11 @@ async function saveRecipe() {
   const editId    = document.getElementById('editRecipeId').value;
 
   if (!name) { showToast('Recipe name is required.', 'error'); return; }
+
+  if (hasUnresolved()) {
+    showToast('Resolve or remove the flagged ingredients before saving.', 'error');
+    return;
+  }
 
   const items = activeRows();
   if (!items.length) { showToast('Add at least one ingredient.', 'error'); return; }
@@ -600,6 +772,7 @@ function clearRecipeForm() {
   ingredientRows = [];
   addIngredientLine();
   recalcCosts();
+  updateUnresolvedState();
 }
 
 // ── Load Recipes ───────────────────────────────────────────────

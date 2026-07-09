@@ -601,71 +601,77 @@ function updateEntryCostPerUnit() {
 }
 
 // ── Unit conversion for ePackUnit dropdown ─────────────────────
-const _WEIGHT_UNITS = ['kg', 'lb', 'g'];
-const _VOLUME_UNITS = ['L', 'ml'];
-const _COUNT_UNITS  = ['Can', 'Pack', 'Case', 'Dozen'];
+// Convertible units, matched case-insensitively. `factor` = amount of the
+// dimension's base unit (weight base = kg, volume base = L) in one of this unit.
+// Units NOT listed here (Each, Case, Pack, Can, Dozen, …) are non-convertible.
+const _UNIT_FACTORS = {
+  kg:  { dim: 'weight', factor: 1 },
+  g:   { dim: 'weight', factor: 0.001 },
+  lb:  { dim: 'weight', factor: 0.45359237 },
+  lbs: { dim: 'weight', factor: 0.45359237 },
+  oz:  { dim: 'weight', factor: 0.0283495231 },
+  l:   { dim: 'volume', factor: 1 },
+  ml:  { dim: 'volume', factor: 0.001 },
+  gal: { dim: 'volume', factor: 3.78541178 },
+};
 
-// Returns { cost: number } on success, or { error: string } on failure.
-// All costs are expressed as cost-per-unit-of-measure (e.g. $/kg, $/lb).
-// avg_weight_per_unit is in kg (used only for Each conversions).
+// Look up a unit's dimension + base factor, case- and whitespace-insensitive.
+function _unitInfo(unit) {
+  return _UNIT_FACTORS[String(unit || '').trim().toLowerCase()] || null;
+}
+
+function _sameUnit(a, b) {
+  return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+}
+
+function _isEach(unit) {
+  return String(unit || '').trim().toLowerCase() === 'each';
+}
+
+// Convert a cost-per-unit-of-measure (e.g. $/lb -> $/kg).
+// Returns { cost } on success, or { error } on failure.
+// avgWeightPerUnit is in kg (used only for Each -> weight conversions).
 function _convertUnitCost(cost, fromUnit, toUnit, avgWeightPerUnit) {
-  if (fromUnit === toUnit) return { cost };
+  if (_sameUnit(fromUnit, toUnit)) return { cost };
 
-  const fromIsWeight = _WEIGHT_UNITS.includes(fromUnit);
-  const fromIsVolume = _VOLUME_UNITS.includes(fromUnit);
-  const fromIsEach   = fromUnit === 'Each';
-  const fromIsCount  = _COUNT_UNITS.includes(fromUnit);
+  const from = _unitInfo(fromUnit);
+  const to   = _unitInfo(toUnit);
 
-  const toIsWeight   = _WEIGHT_UNITS.includes(toUnit);
-  const toIsVolume   = _VOLUME_UNITS.includes(toUnit);
-  const toIsEach     = toUnit === 'Each';
-  const toIsCount    = _COUNT_UNITS.includes(toUnit);
-
-  // Can/Pack/Case/Dozen can't convert to or from anything
-  if (fromIsCount || toIsCount) {
-    return { error: `Cannot convert ${fromUnit} to ${toUnit}` };
-  }
-
-  // Weight <-> Volume: not possible
-  if ((fromIsWeight && toIsVolume) || (fromIsVolume && toIsWeight)) {
-    return { error: `Cannot convert ${fromUnit} to ${toUnit}` };
-  }
-
-  // Weight or Volume -> Each: not possible
-  if ((fromIsWeight || fromIsVolume) && toIsEach) {
-    return { error: `Cannot convert ${fromUnit} to ${toUnit}` };
-  }
-
-  // Each -> Weight or Volume: requires avg_weight_per_unit
-  if (fromIsEach && toIsVolume) {
-    return { error: `Cannot convert ${fromUnit} to ${toUnit}` };
-  }
-  if (fromIsEach && toIsWeight) {
+  // Each -> weight: cost_per_kg = cost_per_each / kg_per_each, then into toUnit.
+  if (_isEach(fromUnit) && to && to.dim === 'weight') {
     if (!avgWeightPerUnit || isNaN(avgWeightPerUnit) || avgWeightPerUnit <= 0) {
       return { error: 'Set Average Weight per Unit first to enable conversion' };
     }
-    // avg_weight_per_unit is in kg; cost_per_kg = cost_per_each / avg_weight_per_unit
     const costPerKg = cost / avgWeightPerUnit;
-    if (toUnit === 'kg') return { cost: costPerKg };
-    if (toUnit === 'lb') return { cost: costPerKg * 0.45359 };
-    if (toUnit === 'g')  return { cost: costPerKg * 0.001 };
+    return { cost: costPerKg * to.factor };
   }
 
-  // Weight <-> Weight: normalise through kg
-  if (fromIsWeight && toIsWeight) {
-    let costPerKg;
-    if (fromUnit === 'kg') costPerKg = cost;
-    if (fromUnit === 'lb') costPerKg = cost * 2.20462;
-    if (fromUnit === 'g')  costPerKg = cost * 1000;
-    if (toUnit === 'kg') return { cost: costPerKg };
-    if (toUnit === 'lb') return { cost: costPerKg * 0.45359 };
-    if (toUnit === 'g')  return { cost: costPerKg * 0.001 };
+  // Same dimension (weight<->weight or volume<->volume): cost_B = cost_A × factor_B/factor_A.
+  if (from && to && from.dim === to.dim) {
+    return { cost: cost * (to.factor / from.factor) };
   }
 
-  // Volume <-> Volume: normalise through L
-  if (fromIsVolume && toIsVolume) {
-    const costPerL = fromUnit === 'L' ? cost : cost * 1000;
-    return { cost: toUnit === 'L' ? costPerL : costPerL * 0.001 };
+  return { error: `Cannot convert ${fromUnit} to ${toUnit}` };
+}
+
+// Convert a physical quantity (e.g. 35 lb -> 15.876 kg) — the reciprocal of the
+// cost conversion above. Returns { qty } on success, or { error } on failure.
+function _convertQuantity(qty, fromUnit, toUnit, avgWeightPerUnit) {
+  if (_sameUnit(fromUnit, toUnit)) return { qty };
+
+  const from = _unitInfo(fromUnit);
+  const to   = _unitInfo(toUnit);
+
+  // Each -> weight: qty items × kg each, expressed in toUnit.
+  if (_isEach(fromUnit) && to && to.dim === 'weight') {
+    if (!avgWeightPerUnit || isNaN(avgWeightPerUnit) || avgWeightPerUnit <= 0) {
+      return { error: 'Set Average Weight per Unit first to enable conversion' };
+    }
+    return { qty: (qty * avgWeightPerUnit) / to.factor };
+  }
+
+  if (from && to && from.dim === to.dim) {
+    return { qty: qty * (from.factor / to.factor) };
   }
 
   return { error: `Cannot convert ${fromUnit} to ${toUnit}` };
@@ -688,26 +694,25 @@ async function onPackUnitChange() {
 
   if (newUnit === prevUnit) { updateEntryCostPerUnit(); return; }
 
-  const costStr = document.getElementById('eCost').value.trim();
-  const cost    = parseFloat(costStr);
-
-  // No cost entered yet — still convert other entries' units
-  if (!costStr || isNaN(cost) || cost <= 0) {
-    await _convertAllEntriesToUnit(prevUnit, newUnit);
-    updateEntryCostPerUnit();
-    return;
-  }
-
-  // Look up avg_weight_per_unit for the current product
+  // Look up avg_weight_per_unit for the current product (Each <-> weight only)
   let avgWeight = null;
   if (currentGenericId) {
     const g = allGeneric.find(x => x.id === currentGenericId);
     if (g) avgWeight = parseFloat(g.avg_weight_per_unit) || null;
   }
 
-  const result = _convertUnitCost(cost, prevUnit, newUnit, avgWeight);
+  // Pack size is a physical quantity — converting it is what makes the derived
+  // per-unit price correct (e.g. 35 lb -> 15.876 kg, so $/kg recomputes right).
+  const packQtyEl = document.getElementById('ePackQty');
+  const packQty   = parseFloat(packQtyEl.value);
+  const hasQty    = !isNaN(packQty) && packQty > 0;
 
-  if (result.error) {
+  // Probe convertibility on the quantity (falls back to 1 when no pack size yet).
+  const probe = _convertQuantity(hasQty ? packQty : 1, prevUnit, newUnit, avgWeight);
+
+  if (probe.error) {
+    // Genuinely incompatible (e.g. kg -> L, or Each without avg weight).
+    // Offer to keep the price as-is (just relabel) or revert the dropdown.
     const keepAnyway = await new Promise(resolve => {
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999';
@@ -730,16 +735,19 @@ async function onPackUnitChange() {
       updateEntryCostPerUnit();
       return;  // reverted — leave other entries alone
     }
-    // "Keep anyway" — unit changed, try to convert other entries even if this one couldn't
+    // "Keep anyway" — relabel only; convert whatever sibling entries can convert.
     await _convertAllEntriesToUnit(prevUnit, newUnit);
     updateEntryCostPerUnit();
     return;
   }
 
-  // eCost is the invoice line total — it does not change when the unit changes.
-  // The derived per-unit display recalculates via updateEntryCostPerUnit().
-  // _convertUnitCost is still called above for the error/keep-anyway branch.
-  void result;
+  // Convertible: rewrite the pack size in the new unit. eCost (invoice line total)
+  // stays fixed, so the derived per-unit price recomputes correctly.
+  if (hasQty) {
+    const converted = Math.round(probe.qty * 1e6) / 1e6;
+    packQtyEl.value = Number.isInteger(converted) ? converted : parseFloat(converted.toFixed(6));
+  }
+
   await _convertAllEntriesToUnit(prevUnit, newUnit);
   updateEntryCostPerUnit();
 }

@@ -31,6 +31,108 @@
       font-size: .875rem;
       color: var(--text-muted);
     }
+    /* Keep the Unit <select> aligned with the Qty & Product inputs by lifting the
+       per-unit cost hint out of flow so it no longer pushes the select upward. */
+    .ingredient-line { margin-bottom: 1.4rem; }
+    .ingredient-line .unit-group { position: relative; }
+    .ingredient-line .unit-group > span {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+    }
+
+    /* ===== Quick add from text ===== */
+    .quick-add { margin-bottom: .85rem; }
+    .quick-add-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: .45rem;
+      background: none;
+      border: none;
+      padding: .25rem 0;
+      font: inherit;
+      font-size: .85rem;
+      font-weight: 600;
+      color: var(--primary);
+      cursor: pointer;
+    }
+    .quick-add-chevron { font-size: .7rem; transition: transform .15s ease; }
+    .quick-add-body {
+      margin-top: .55rem;
+      padding: .75rem;
+      border: 1px dashed var(--border);
+      border-radius: var(--radius-sm);
+      background: #fafafe;
+    }
+    .quick-add-body textarea {
+      width: 100%;
+      padding: .55rem .7rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-family: inherit;
+      font-size: .85rem;
+      color: var(--text);
+      resize: vertical;
+    }
+    .quick-add-body textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(79,70,229,.1);
+    }
+    .quick-add-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: .75rem;
+      margin-top: .55rem;
+    }
+    .quick-add-hint { font-size: .74rem; color: var(--text-muted); }
+
+    /* ===== Unresolved banner + inline flags ===== */
+    .unresolved-banner {
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+      padding: .55rem .75rem;
+      margin-bottom: .75rem;
+      border-radius: var(--radius-sm);
+      background: #fef3c7;
+      border: 1px solid #fcd34d;
+      color: #92400e;
+      font-size: .8rem;
+      font-weight: 500;
+    }
+    .ing-input-flagged { border-color: #f87171 !important; background: #fff5f5 !important; }
+    .ing-flag {
+      margin-top: .3rem;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: .35rem .5rem;
+      font-size: .74rem;
+    }
+    .ing-flag-label { display: inline-flex; align-items: center; gap: .3rem; font-weight: 600; }
+    .ing-flag.ambiguous .ing-flag-label { color: #b45309; }
+    .ing-flag.notfound  .ing-flag-label { color: #b91c1c; }
+    .ing-flag-muted { color: var(--text-muted); font-weight: 400; }
+    .ing-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: .3rem;
+      padding: .2rem .55rem;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: #fff;
+      font: inherit;
+      font-size: .74rem;
+      color: var(--text);
+      cursor: pointer;
+      transition: var(--transition);
+    }
+    .ing-chip:hover { border-color: var(--primary); color: var(--primary); }
+    .ing-chip.add { border-color: #6ee7b7; color: #047857; background: #ecfdf5; }
+    .ing-chip.add:hover { border-color: #10b981; }
   </style>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
@@ -91,6 +193,30 @@
 
           <!-- Ingredient lines -->
           <h3 class="section-title"><i class="fas fa-list"></i> Ingredients</h3>
+
+          <!-- Quick add from plain-English text -->
+          <div class="quick-add">
+            <button type="button" class="quick-add-toggle" id="quickAddToggle">
+              <i class="fas fa-wand-magic-sparkles"></i> Quick add from text
+              <i class="fas fa-chevron-down quick-add-chevron"></i>
+            </button>
+            <div class="quick-add-body hidden" id="quickAddBody">
+              <textarea id="quickAddText" rows="4"
+                placeholder="Type your ingredients, one per line — e.g.&#10;30 kg tomatoes&#10;2 kg ground beef&#10;1 L white wine"></textarea>
+              <div class="quick-add-actions">
+                <span class="quick-add-hint"><i class="fas fa-circle-info"></i> The system matches each line to your products.</span>
+                <button type="button" class="btn btn-primary btn-sm" id="quickAddParseBtn">
+                  <i class="fas fa-arrow-down"></i> Add to recipe
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div id="unresolvedBanner" class="unresolved-banner" style="display:none">
+            <i class="fas fa-triangle-exclamation"></i>
+            <span>Some ingredients need attention — pick a product, add it, or remove the line before saving.</span>
+          </div>
+
           <div id="ingredientLines"></div>
           <button class="btn btn-secondary btn-sm" id="addIngredientBtn">
             <i class="fas fa-plus"></i> Add Ingredient
