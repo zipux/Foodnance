@@ -196,6 +196,21 @@ body {
 .data-table tbody tr.product-row {
   cursor: pointer;
 }
+.data-table tbody tr.product-row--archived {
+  cursor: default;
+  background: #f8fafc;
+}
+.data-table tbody tr.product-row--archived td:first-child strong {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.data-table tbody tr.product-row--archived:hover {
+  background: #f1f5f9;
+}
+.data-table tbody tr.product-row--archived:hover td:first-child strong {
+  color: var(--text-muted);
+  text-decoration: none;
+}
 .data-table tbody tr.product-row:hover {
   background: #eef2ff;
 }

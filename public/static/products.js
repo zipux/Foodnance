@@ -7,6 +7,7 @@ const PAGE_SIZE      = 15;
 let currentPage       = 1;
 let searchQuery       = '';
 let categoryFilter    = null; // null = all, or category string
+let showArchived      = false; // true = list archived (soft-deleted) products
 let allGeneric        = [];   // generic_products rows
 let allEntries        = [];   // product_entries rows
 let allSupplierList   = [];   // suppliers rows (for dropdowns)
@@ -30,6 +31,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     currentPage = 1;
     renderProductTable();
   });
+  document.getElementById('toggleArchivedBtn').addEventListener('click', toggleArchivedView);
   document.getElementById('openAddProductModal').addEventListener('click', openAddProductModal);
 document.getElementById('saveProductBtn').addEventListener('click', saveGenericProduct);
   document.getElementById('closeModal').addEventListener('click', () => { _restoreEntrySnapshots(); closeModal('productModal'); });
@@ -118,7 +120,7 @@ function invoiceNumber(invoiceId) {
 
 // ── Render generic product table ───────────────────────────────
 function filteredGeneric() {
-  let list = allGeneric.filter(g => !g.deleted_at);
+  let list = allGeneric.filter(g => showArchived ? !!g.deleted_at : !g.deleted_at);
   if (categoryFilter) list = list.filter(g => g.category === categoryFilter);
   if (!searchQuery) return list;
   const q = searchQuery.toLowerCase();
@@ -146,7 +148,10 @@ function renderProductTable() {
   const slice = list.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   if (!slice.length) {
-    tbody.innerHTML = `<tr><td colspan="6" class="empty-row"><i class="fas fa-box-open"></i> No products found.</td></tr>`;
+    const emptyMsg = showArchived
+      ? '<i class="fas fa-box-archive"></i> No archived products.'
+      : '<i class="fas fa-box-open"></i> No products found.';
+    tbody.innerHTML = `<tr><td colspan="6" class="empty-row">${emptyMsg}</td></tr>`;
     pagi.innerHTML = '';
     return;
   }
@@ -175,6 +180,24 @@ function renderProductTable() {
     // Most recent purchase date
     const dates = entries.map(e => e.purchase_date).filter(Boolean).sort().reverse();
     const lastPurchase = dates[0] || '—';
+
+    if (showArchived) {
+      const archivedOn = g.deleted_at ? String(g.deleted_at).slice(0, 10) : '—';
+      return `
+        <tr class="product-row product-row--archived" title="Archived product">
+          <td><strong>${esc(g.name)}</strong></td>
+          <td>${g.category ? `<span class="category-badge cat-${slugify(g.category)}">${esc(g.category)}</span>` : '—'}</td>
+          <td>${supplierLabel}</td>
+          <td>${bestCpu !== null ? fmt(bestCpu) + ' / ' + esc(bestUnit) : '—'}</td>
+          <td style="color:var(--text-muted);font-size:.85rem">Archived ${archivedOn}</td>
+          <td style="white-space:nowrap">
+            <button class="btn btn-primary btn-icon" onclick="restoreGenericProduct('${esc(g.id)}')" title="Restore product">
+              <i class="fas fa-rotate-left"></i> Restore
+            </button>
+          </td>
+        </tr>
+      `;
+    }
 
     return `
       <tr class="product-row" onclick="openEditProduct('${esc(g.id)}')" title="Click to edit">
@@ -434,6 +457,42 @@ async function deleteGenericProduct(id) {
     await loadAll();
   } catch (e) {
     showToast('Delete failed: ' + e.message, 'error');
+  }
+}
+
+// ── Archived view ──────────────────────────────────────────────
+// Toggle between the active product list and the archived (soft-deleted) list.
+function toggleArchivedView() {
+  showArchived = !showArchived;
+  currentPage  = 1;
+  categoryFilter = null; // category tabs count actives; don't carry the filter across
+  const btn = document.getElementById('toggleArchivedBtn');
+  btn.innerHTML = showArchived
+    ? '<i class="fas fa-arrow-left"></i> Back to active'
+    : '<i class="fas fa-box-archive"></i> Show archived';
+  btn.classList.toggle('btn-primary', showArchived);
+  btn.classList.toggle('btn-secondary', !showArchived);
+  // Hide "Add Product" while browsing the archive — it's not the place to add.
+  document.getElementById('openAddProductModal').style.display = showArchived ? 'none' : '';
+  renderStats();
+  renderProductTable();
+}
+
+// Restore a soft-deleted product: clear deleted_at so it returns to active lists.
+// Inventory and aliases were cleared at archive time and are NOT restored — the
+// product comes back with its purchase history but no live stock (run a stock
+// take if needed).
+async function restoreGenericProduct(id) {
+  const g = allGeneric.find(x => x.id === id);
+  if (!confirm(`Restore "${g ? g.name : 'this product'}" to your active products?\n\nIts purchase history returns. Stock levels are not restored — do a stock take if needed.`)) return;
+  try {
+    await apiPatch(`tables/${GENERIC_TABLE}/${id}`, { deleted_at: null });
+    if (g) g.deleted_at = null;
+    showToast('Product restored.', 'success');
+    renderStats();
+    renderProductTable();
+  } catch (e) {
+    showToast('Restore failed: ' + e.message, 'error');
   }
 }
 
