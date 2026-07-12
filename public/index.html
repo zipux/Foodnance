@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Products — InvoiceDB</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260713-1" />
+  <link rel="stylesheet" href="/static/style.css?v=20260713-2" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 </head>
@@ -36,7 +36,11 @@
         <h2><i class="fas fa-database"></i> Products</h2>
         <div class="header-actions">
           <input type="text" id="searchInput" class="search-input" placeholder="Search products…" />
-          <button class="btn btn-secondary" id="toggleArchivedBtn"><i class="fas fa-box-archive"></i> Show archived</button>
+          <label class="switch-toggle" title="Show archived products">
+            <input type="checkbox" id="toggleArchivedInput" />
+            <span class="switch-track"><span class="switch-thumb"></span></span>
+            <span class="switch-label">Archived</span>
+          </label>
 <button class="btn btn-primary" id="openAddProductModal"><i class="fas fa-plus"></i> Add Product</button>
         </div>
       </div>
@@ -352,7 +356,7 @@
   <script src="/static/utils.js?v=20260422-2"></script>
   <script src="/static/inventory.js?v=20260407-1"></script>
   <script src="/static/suppliers.js?v=20260407-1"></script>
-  <script src="/static/products.js?v=20260713-1"></script>
+  <script src="/static/products.js?v=20260713-2"></script>
 
   <!-- ── Inline invoice-file viewer modal (shared, lightweight) ── -->
   <div class="modal-overlay hidden" id="entryFileViewModal">

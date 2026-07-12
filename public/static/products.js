@@ -31,7 +31,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     currentPage = 1;
     renderProductTable();
   });
-  document.getElementById('toggleArchivedBtn').addEventListener('click', toggleArchivedView);
+  document.getElementById('toggleArchivedInput').addEventListener('change', toggleArchivedView);
   document.getElementById('openAddProductModal').addEventListener('click', openAddProductModal);
 document.getElementById('saveProductBtn').addEventListener('click', saveGenericProduct);
   document.getElementById('closeModal').addEventListener('click', () => { _restoreEntrySnapshots(); closeModal('productModal'); });
@@ -463,15 +463,9 @@ async function deleteGenericProduct(id) {
 // ── Archived view ──────────────────────────────────────────────
 // Toggle between the active product list and the archived (soft-deleted) list.
 function toggleArchivedView() {
-  showArchived = !showArchived;
+  showArchived = document.getElementById('toggleArchivedInput').checked;
   currentPage  = 1;
   categoryFilter = null; // category tabs count actives; don't carry the filter across
-  const btn = document.getElementById('toggleArchivedBtn');
-  btn.innerHTML = showArchived
-    ? '<i class="fas fa-arrow-left"></i> Back to active'
-    : '<i class="fas fa-box-archive"></i> Show archived';
-  btn.classList.toggle('btn-primary', showArchived);
-  btn.classList.toggle('btn-secondary', !showArchived);
   // Hide "Add Product" while browsing the archive — it's not the place to add.
   document.getElementById('openAddProductModal').style.display = showArchived ? 'none' : '';
   renderStats();

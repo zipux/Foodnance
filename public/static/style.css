@@ -115,6 +115,16 @@ body {
 .card-body { padding: 1.5rem; }
 .header-actions { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
 
+/* Compact on/off switch (e.g. Show archived) */
+.switch-toggle { display: inline-flex; align-items: center; gap: .4rem; cursor: pointer; user-select: none; font-size: .85rem; color: var(--text-muted); }
+.switch-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+.switch-track { position: relative; width: 34px; height: 18px; background: #cbd5e1; border-radius: 999px; transition: background .15s; flex: none; }
+.switch-thumb { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; background: #fff; border-radius: 50%; box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: transform .15s; }
+.switch-toggle input:checked + .switch-track { background: var(--primary); }
+.switch-toggle input:checked + .switch-track .switch-thumb { transform: translateX(16px); }
+.switch-toggle input:checked ~ .switch-label { color: var(--primary); font-weight: 600; }
+.switch-toggle input:focus-visible + .switch-track { outline: 2px solid var(--primary); outline-offset: 2px; }
+
 /* ===== UPLOAD DROP ZONE ===== */
 .drop-zone {
   border: 2.5px dashed var(--border);
