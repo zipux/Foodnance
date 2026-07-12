@@ -119,14 +119,25 @@ async function loadFpCatalogues() {
  * inventory quantity, return the entry whose batch is actively being consumed.
  * Mirrors the corrected logic in recipes.js → fifoActiveEntry().
  */
+// Quantity a single purchase (entry) brought into stock, in the entry's pack unit:
+//   pack_qty × qty_ordered. Prefers the pack_qty/qty_ordered columns; falls back
+// to parsing a legacy pack_size string. Mirrors recipes.js → fifoEntryQty().
+function fp_fifoEntryQty(entry) {
+  let pQty = (entry.pack_qty != null && entry.pack_qty !== '')
+    ? parseFloat(entry.pack_qty)
+    : parseFloat((String(entry.pack_size || '').match(/^([\d.]+)/) || [])[1]);
+  if (!(pQty > 0)) pQty = 1;
+  const ordered = parseFloat(entry.qty_ordered) || 1;
+  return pQty * ordered;
+}
+
 function fp_fifoActiveEntry(sortedEntries, invQty) {
   if (!sortedEntries.length) return null;
 
   // Sum all purchased quantities
   let totalPurchased = 0;
   for (const entry of sortedEntries) {
-    const m = (entry.pack_size || '').match(/^([\d.]+)/);
-    totalPurchased += m ? parseFloat(m[1]) : 1;
+    totalPurchased += fp_fifoEntryQty(entry);
   }
 
   // How much has already been consumed
@@ -135,9 +146,7 @@ function fp_fifoActiveEntry(sortedEntries, invQty) {
   // Walk oldest→newest: first entry whose running cumulative > consumed = active batch
   let cumulative = 0;
   for (const entry of sortedEntries) {
-    const m    = (entry.pack_size || '').match(/^([\d.]+)/);
-    const pQty = m ? parseFloat(m[1]) : 1;
-    cumulative += pQty;
+    cumulative += fp_fifoEntryQty(entry);
     if (cumulative > consumed) return entry;
   }
 

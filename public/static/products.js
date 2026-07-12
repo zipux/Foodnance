@@ -211,20 +211,23 @@ function renderProductTable() {
 
 function renderStats() {
   const el   = document.getElementById('productStats');
-  const total = allGeneric.length;
+  const activeGeneric = allGeneric.filter(g => !g.deleted_at);
+  const total = activeGeneric.length;
   const cats  = ['Ingredients','Packaging','Disposables','Non-Alcoholic Beverages','Alcohol','Cleaning & Sanitation','Linen','Other'];
-  const catCounts = cats.map(c => ({ label: c, count: allGeneric.filter(g => g.category === c).length }));
-  const uncat = allGeneric.filter(g => !g.category).length;
+  const catCounts = cats.map(c => ({ label: c, count: activeGeneric.filter(g => g.category === c).length }));
+  const uncat = activeGeneric.filter(g => !g.category).length;
 
-  // Expiry from entries
+  // Expiry from entries — only entries whose parent product is still active
+  const activeIds = new Set(activeGeneric.map(g => g.id));
+  const activeEntries = allEntries.filter(e => activeIds.has(e.generic_product_id));
   const today = new Date(); today.setHours(0,0,0,0);
-  const expiring = allEntries.filter(e => {
+  const expiring = activeEntries.filter(e => {
     if (!e.expiry_date) return false;
     const d = new Date(e.expiry_date); if (isNaN(d)) return false;
     const days = Math.floor((d - today) / 86400000);
     return days >= 0 && days <= 30;
   }).length;
-  const expired = allEntries.filter(e => {
+  const expired = activeEntries.filter(e => {
     if (!e.expiry_date) return false;
     const d = new Date(e.expiry_date); if (isNaN(d)) return false;
     return Math.floor((d - today) / 86400000) < 0;
@@ -400,8 +403,9 @@ async function saveGenericProduct() {
     await _flushEntryConversions(savedId, entryId);
 
     if (entryHasData || entryId) {
-      await _saveEntryForGeneric(savedId, name, category);
-      // _saveEntryForGeneric handles toast + inventory prompt
+      // _saveEntryForGeneric handles toast + inventory prompt; returns true on success
+      const ok = await _saveEntryForGeneric(savedId, name, category);
+      if (ok) closeModal('productModal');
     } else {
       showToast(id ? 'Product updated!' : 'Product saved!', 'success');
       closeModal('productModal');
@@ -417,13 +421,16 @@ async function saveGenericProduct() {
 }
 
 async function deleteGenericProduct(id) {
-  if (!confirm('Delete this product and ALL its supplier entries? This cannot be undone.')) return;
+  if (!confirm(
+    'Delete this product? It will be removed from your active products and current inventory.\n\n' +
+    'Its purchase history and stock-movement log are kept for your records.'
+  )) return;
   try {
-    // Delete all entries first
-    const mine = allEntries.filter(e => e.generic_product_id === id);
-    for (const e of mine) await apiDelete(`tables/${ENTRIES_TABLE}/${e.id}`);
+    // Archive (soft delete): the backend sets deleted_at and clears live state
+    // (inventory, aliases) while preserving entries, recipe links and stock_log.
+    // Entries are intentionally NOT deleted here — they're historical records.
     await apiDelete(`tables/${GENERIC_TABLE}/${id}`);
-    showToast('Product deleted.', 'warning');
+    showToast('Product deleted — history kept.', 'warning');
     await loadAll();
   } catch (e) {
     showToast('Delete failed: ' + e.message, 'error');
@@ -944,8 +951,10 @@ async function _saveEntryForGeneric(genericId, overrideName, overrideCategory) {
     renderEntriesTable(genericId);
     renderProductTable();
     renderStats();
+    return true;
   } catch (e) {
     showToast('Save failed: ' + e.message, 'error');
+    return false;
   }
 }
 
@@ -1033,34 +1042,10 @@ async function confirmEntryInventory() {
   }
 }
 
-// ── FIFO cost helper (used by recipes.js & finished-products.js) ──
-// Returns cost-per-unit for a generic product using FIFO (oldest purchase first).
-function fifoCostPerUnit(genericId) {
-  const entries = allEntries
-    .filter(e => e.generic_product_id === genericId)
-    .sort((a, b) => (a.purchase_date || '') > (b.purchase_date || '') ? 1 : -1); // oldest first
-  if (!entries.length) return { cpu: 0, unit: 'unit', packUnit: 'unit', subUnitName: '', subUnitQty: 0 };
-  const oldest  = entries[0];
-  const qty     = entryPackQty(oldest);
-  const unit    = entryPackUnit(oldest);
-  const g       = allGeneric.find(x => x.id === genericId);
-  // CHANGE 7: prefer stored cost_per_unit; fall back to computing from cost/pack_qty
-  return {
-    cpu: (oldest.cost_per_unit != null && oldest.cost_per_unit > 0)
-           ? oldest.cost_per_unit
-           : (qty > 0 ? oldest.cost / qty : oldest.cost),
-    unit,
-    packUnit:     unit,
-    subUnitName:  g?.sub_unit_name || '',
-    subUnitQty:   g?.sub_unit_qty  || 0,
-  };
-}
-
 // ── Expose globally for recipes.js and finished-products.js ──
 window.productsAPI = {
   allGeneric:     () => allGeneric,
   allEntries:     () => allEntries,
-  fifoCostPerUnit,
   entryPackQty,
   entryPackUnit,
 };

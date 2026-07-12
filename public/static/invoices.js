@@ -131,6 +131,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('saveInvDetailBtn').addEventListener('click',    saveInvDetail);
   document.getElementById('confirmInvSaveBtn').addEventListener('click',   confirmAndSaveInvoice);
   document.getElementById('deleteInvBtn').addEventListener('click',        deleteInvoice);
+  document.getElementById('addPageBtn')?.addEventListener('click', () => document.getElementById('addPageFileInput')?.click());
+  document.getElementById('addPageFileInput')?.addEventListener('change', handleAddPageFile);
+  document.getElementById('markCompleteBtn')?.addEventListener('click', markInvoiceComplete);
   document.getElementById('addLineBtn').addEventListener('click',          addLineRow);
 
   // Live cost summary as user edits additional costs
@@ -271,6 +274,11 @@ function renderInvStats() {
 let currentParsedData = null;
 let isActionRequired  = false;
 
+// Multi-page preview state for the detail modal (see invGotoPage).
+let _invPageUrls = [];
+let _invPageIdx  = 0;
+let _invPageIsPdf = false;
+
 // Try to JSON-parse a parsed_data field; returns null if missing or invalid.
 function tryParseParsedData(raw) {
   if (!raw) return null;
@@ -301,10 +309,13 @@ async function openInvDetail(id) {
     saveChangesBtn.classList.add('hidden');
     confirmBtn.classList.remove('hidden');
     renderParsedWarnings(currentParsedData?.warnings || []);
+    updateAddPageUI();
   } else {
     banner.classList.add('hidden');
     saveChangesBtn.classList.remove('hidden');
     confirmBtn.classList.add('hidden');
+    document.getElementById('addPageBtn')?.classList.add('hidden');
+    const apl = document.getElementById('addedPagesList'); if (apl) apl.innerHTML = '';
   }
 
   // Prefer parsed_data values when reviewing an Action Required invoice
@@ -379,6 +390,20 @@ async function openInvDetail(id) {
   const isImage      = ['png','jpg','jpeg','webp','gif'].includes(ext);
   const isPdf        = ext === 'pdf';
 
+  // Every uploaded page (multi-page invoices store extra page keys in parsed_data.pages).
+  // Falls back to the single primary file for older / single-page invoices.
+  const pageKeys     = Array.isArray(currentParsedData?.pages) ? currentParsedData.pages.filter(Boolean) : [];
+  const pageUrls     = pageKeys.length ? pageKeys.map(k => `/api/files/${k}`) : (fileUrl ? [fileUrl] : []);
+  _invPageUrls  = pageUrls;
+  _invPageIdx   = 0;
+  _invPageIsPdf = isPdf;
+  const pager = pageUrls.length > 1 ? `
+      <div style="display:flex;align-items:center;gap:.4rem;margin-left:.5rem">
+        <button id="invPagePrev" class="btn btn-secondary btn-sm" onclick="invGotoPage(-1)" disabled><i class="fas fa-chevron-left"></i></button>
+        <span id="invPageLabel" style="font-size:.8rem;color:var(--text-muted);min-width:82px;text-align:center">Page 1 of ${pageUrls.length}</span>
+        <button id="invPageNext" class="btn btn-secondary btn-sm" onclick="invGotoPage(1)"><i class="fas fa-chevron-right"></i></button>
+      </div>` : '';
+
   const fileBoxTop   = document.getElementById('detailFileBoxTop');
   const fileBox      = document.getElementById('detailFileBox');
 
@@ -394,7 +419,7 @@ async function openInvDetail(id) {
       const h = isActionRequired ? '55vh' : '420px';
       preview = `
         <div style="margin-top:.5rem">
-          <iframe src="${esc(fileUrl)}" style="width:100%;height:${h};border:1px solid var(--border);border-radius:8px" title="Invoice PDF"></iframe>
+          <iframe id="invPageFrame" src="${esc(fileUrl)}" style="width:100%;height:${h};border:1px solid var(--border);border-radius:8px" title="Invoice PDF"></iframe>
         </div>`;
     } else if (isImage) {
       if (isActionRequired) {
@@ -418,6 +443,7 @@ async function openInvDetail(id) {
     const fileMeta = `
       <i class="fas fa-${fileIcon}" style="color:var(--primary);font-size:1.1rem"></i>
       <span style="font-weight:600;font-size:.9rem">${esc(inv.invoice_number || 'N/A')}</span>
+      ${pager}
       ${openBtn}
       <a href="${esc(fileUrl)}" download="${esc(fileName)}" class="btn btn-secondary btn-sm">
         <i class="fas fa-download"></i> Download
@@ -534,6 +560,182 @@ function renderParsedWarnings(warnings) {
       <span>${esc(w.message || '')}</span>
     </div>
   `).join('');
+}
+
+// ── Add missing page ────────────────────────────────────────────
+// Button shows only when the parser flagged a missing page. Adds page 2+:
+// re-parses it, appends its line items, fills any empty money fields, stores
+// the page image, and persists immediately.
+
+function hasMissingPageWarning() {
+  return !!(currentParsedData?.warnings || []).some(w => w.id === 'missing_pages');
+}
+
+// Show/hide the Add-page button, gate Confirm & Save, and list attached pages.
+function updateAddPageUI() {
+  const missing      = hasMissingPageWarning();
+  const btn          = document.getElementById('addPageBtn');
+  const markBtn      = document.getElementById('markCompleteBtn');
+  const confirmBtn   = document.getElementById('confirmInvSaveBtn');
+  const list         = document.getElementById('addedPagesList');
+
+  if (btn)     btn.classList.toggle('hidden', !missing);
+  if (markBtn) markBtn.classList.toggle('hidden', !missing);
+
+  // Block confirming while a page is known to be missing (override clears it).
+  if (confirmBtn) {
+    confirmBtn.disabled = missing;
+    confirmBtn.title = missing
+      ? 'A page appears to be missing — add it, or click "It\'s complete" to proceed.'
+      : '';
+  }
+
+  if (!list) return;
+  const pages = Array.isArray(currentParsedData?.pages) ? currentParsedData.pages : [];
+  // pages[0] is page 1 (the original upload); show links for page 2+ only
+  list.innerHTML = pages.slice(1).map((key, i) =>
+    `<a href="/api/files/${esc(key)}" target="_blank" class="btn btn-secondary btn-sm">
+       <i class="fas fa-file-image"></i> View page ${i + 2}
+     </a>`
+  ).join('');
+}
+
+// Override: user confirms the invoice is actually complete despite the flag.
+// Clears the missing-page warning, persists, and unblocks Confirm & Save.
+async function markInvoiceComplete() {
+  const id  = document.getElementById('detailInvId').value;
+  const inv = allInvoices.find(i => i.id === id);
+  if (!id || !inv || !currentParsedData) return;
+  currentParsedData.warnings = (currentParsedData.warnings || []).filter(w => w.id !== 'missing_pages');
+  try {
+    const patch = { parsed_data: JSON.stringify(currentParsedData) };
+    await apiPatch(`tables/${INV_LIST_TABLE}/${id}`, patch);
+    Object.assign(inv, patch);
+  } catch (err) {
+    showToast('Could not update invoice: ' + err.message, 'error');
+    return;
+  }
+  renderParsedWarnings(currentParsedData.warnings);
+  updateAddPageUI();
+  showToast('Marked complete — you can now Confirm & Save.', 'success');
+}
+
+// Fill a money input only when it's currently empty/zero (per user's choice).
+function _fillMoneyIfEmpty(inputId, value) {
+  const el = document.getElementById(inputId);
+  if (!el) return;
+  const cur = parseFloat(el.value) || 0;
+  const v   = parseFloat(value)   || 0;
+  if (cur === 0 && v > 0) el.value = v.toFixed(2);
+}
+
+async function handleAddPageFile(e) {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = ''; // allow re-selecting the same file later
+  if (!file) return;
+
+  const id  = document.getElementById('detailInvId').value;
+  const inv = allInvoices.find(i => i.id === id);
+  if (!id || !inv || !isActionRequired || !currentParsedData) return;
+
+  const btn = document.getElementById('addPageBtn');
+  const prevHtml = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Reading page…'; }
+
+  try {
+    // 1. Store the page image in R2 (non-fatal if it fails — parsing still runs)
+    let pageKey = '';
+    try { pageKey = (await apiUploadFile(file)).key || ''; }
+    catch (upErr) { console.warn('Extra-page upload failed (continuing):', upErr.message); }
+
+    // 2. Parse the new page with Claude
+    const fd = new FormData();
+    fd.append('file', file);
+    const resp = await fetch('/api/ai/parse-invoice', { method: 'POST', body: fd });
+    const data = await resp.json();
+    if (!resp.ok || data.error) throw new Error(data.error || `Server error ${resp.status}`);
+    const res = data.result || {};
+    const newItems = Array.isArray(res.items) ? res.items : [];
+
+    // 3. Append the new page's line items to parsed_data (same shape as upload)
+    currentParsedData.items = (currentParsedData.items || []).concat(
+      newItems.map(it => ({
+        name:         it.name        || '',
+        brand:        it.brand       || '',
+        sku:          it.sku         || '',
+        pack_size:    it.pack_size   || '',
+        qty:          parseFloat(it.qty)        || 1,
+        unit_price:   parseFloat(it.unit_price) || 0,
+        cost:         parseFloat(it.cost)       || 0,
+        invoice_ref:  '',
+        original_ocr: it.original_ocr || '',
+        auto_mapped:  false,
+      }))
+    );
+
+    // 4. Fill money fields only if currently empty (page 2 often carries the totals)
+    _fillMoneyIfEmpty('detailTotalInput', res.total);
+    _fillMoneyIfEmpty('detailTaxGst',     res.tax_gst);
+    _fillMoneyIfEmpty('detailTaxPst',     res.tax_pst);
+    _fillMoneyIfEmpty('detailDelivery',   (parseFloat(res.delivery) || 0) + (parseFloat(res.fuel_surcharge) || 0));
+    _fillMoneyIfEmpty('detailDeposit',    res.deposit);
+    _fillMoneyIfEmpty('detailCredit',     res.credit);
+    _fillMoneyIfEmpty('detailOtherCost',  res.other_cost);
+    const totalNow = parseFloat(document.getElementById('detailTotalInput').value) || 0;
+    if (totalNow > 0) currentInvTotal = totalNow;
+
+    // 5. Track pages: pages[0] = original upload, then each added page
+    if (!Array.isArray(currentParsedData.pages)) {
+      currentParsedData.pages = inv.file_key ? [inv.file_key] : [];
+    }
+    if (pageKey) currentParsedData.pages.push(pageKey);
+    const uploadedCount = Math.max(currentParsedData.pages.length, 1);
+
+    // 6. Re-evaluate the missing-page warning against this page's page_total
+    const pageTotal = parseInt(res.page_total, 10) || 0;
+    currentParsedData.warnings = (currentParsedData.warnings || []).filter(w => w.id !== 'missing_pages');
+    if (pageTotal > uploadedCount) {
+      currentParsedData.warnings.push({
+        id: 'missing_pages', severity: 'warning',
+        message: `Invoice shows ${pageTotal} pages but only ${uploadedCount} uploaded — still missing a page.`,
+      });
+    }
+
+    // 7. Mirror the merged money fields into parsed_data, then persist immediately
+    currentParsedData.total      = currentInvTotal;
+    currentParsedData.tax_gst    = parseFloat(document.getElementById('detailTaxGst').value)    || 0;
+    currentParsedData.tax_pst    = parseFloat(document.getElementById('detailTaxPst').value)    || 0;
+    currentParsedData.delivery   = parseFloat(document.getElementById('detailDelivery').value)  || 0;
+    currentParsedData.deposit    = parseFloat(document.getElementById('detailDeposit').value)   || 0;
+    currentParsedData.credit     = parseFloat(document.getElementById('detailCredit').value)    || 0;
+    currentParsedData.other_cost = parseFloat(document.getElementById('detailOtherCost').value) || 0;
+
+    const patch = {
+      parsed_data: JSON.stringify(currentParsedData),
+      total:       currentInvTotal,
+      tax_gst:     currentParsedData.tax_gst,
+      tax_pst:     currentParsedData.tax_pst,
+      delivery:    currentParsedData.delivery,
+      deposit:     currentParsedData.deposit,
+      credit:      currentParsedData.credit,
+      other_cost:  currentParsedData.other_cost,
+    };
+    await apiPatch(`tables/${INV_LIST_TABLE}/${id}`, patch);
+    // Keep local cache in sync so reopening reflects the added page
+    Object.assign(inv, patch);
+
+    // 8. Re-render the review UI
+    await loadAndRenderLines(id);
+    renderParsedWarnings(currentParsedData.warnings);
+    updateAddPageUI();
+
+    showToast(`Page added — ${newItems.length} line item${newItems.length === 1 ? '' : 's'} imported. Review, then Confirm & Save.`, 'success');
+  } catch (err) {
+    console.error(err);
+    showToast('Could not add page: ' + err.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = prevHtml; }
+  }
 }
 
 function renderLinesTable() {
@@ -799,6 +1001,27 @@ function _cleanInvImgZoom() {
   if (_invImgZoomCleanup) { _invImgZoomCleanup(); _invImgZoomCleanup = null; }
 }
 
+// Navigate the multi-page preview in the detail modal. Swaps the image/PDF
+// source in place and resets zoom for images so each page fits the frame.
+function invGotoPage(delta) {
+  if (_invPageUrls.length < 2) return;
+  _invPageIdx = Math.max(0, Math.min(_invPageUrls.length - 1, _invPageIdx + delta));
+  const url = _invPageUrls[_invPageIdx];
+  if (_invPageIsPdf) {
+    const frame = document.getElementById('invPageFrame');
+    if (frame) frame.src = url;
+  } else {
+    const img = document.getElementById('invZoomImg');
+    if (img) { img.src = url; _initInvImgZoom(); }
+  }
+  const lbl  = document.getElementById('invPageLabel');
+  const prev = document.getElementById('invPagePrev');
+  const next = document.getElementById('invPageNext');
+  if (lbl)  lbl.textContent = `Page ${_invPageIdx + 1} of ${_invPageUrls.length}`;
+  if (prev) prev.disabled = _invPageIdx === 0;
+  if (next) next.disabled = _invPageIdx === _invPageUrls.length - 1;
+}
+
 function _initInvImgZoom() {
   _cleanInvImgZoom();
   const wrap = document.getElementById('invImgZoomWrap');
@@ -948,6 +1171,10 @@ async function confirmAndSaveInvoice() {
   if (!id || !inv) return;
   if (inv.status !== 'Action Required') {
     showToast('This invoice is no longer in Action Required state.', 'warning');
+    return;
+  }
+  if (hasMissingPageWarning()) {
+    showToast('A page appears to be missing — add it, or click "It\'s complete" to proceed.', 'error');
     return;
   }
 

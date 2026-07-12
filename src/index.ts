@@ -174,15 +174,25 @@ app.patch('/api/tables/:table/:id', async (c) => {
   return c.json({ id, ...body })
 })
 
-// ── Delete generic_product (cascades related data correctly)
+// ── Delete generic_product → ARCHIVE (soft delete)
+// Professional inventory software never hard-deletes a product that has history:
+// stock movements, purchase entries and invoices reference it, and their
+// stock_log rows must stay resolvable. Instead we mark the product deleted_at
+// (it drops out of every active list, which filters `deleted_at IS NULL`) while
+// preserving all historical/reference data:
+//   • product_entries — kept linked (past purchases stay attached; reversible)
+//   • recipe_items     — kept (don't silently alter recipes)
+//   • stock_log        — untouched (the whole point: history survives)
+// Only *live* state is cleared:
+//   • inventory        — current stock removed (a discontinued item holds none;
+//                        its movement history remains in stock_log)
+//   • product_aliases  — removed so future invoices don't auto-relink to it
 app.delete('/api/tables/generic_products/:id', async (c) => {
   const { id } = c.req.param()
   await c.env.DB.batch([
-    c.env.DB.prepare('UPDATE product_entries SET generic_product_id = NULL WHERE generic_product_id = ?').bind(id),
     c.env.DB.prepare('DELETE FROM product_aliases WHERE generic_product_id = ?').bind(id),
     c.env.DB.prepare('DELETE FROM inventory WHERE item_id = ?').bind(id),
-    c.env.DB.prepare('DELETE FROM recipe_items WHERE product_id = ?').bind(id),
-    c.env.DB.prepare('DELETE FROM generic_products WHERE id = ?').bind(id),
+    c.env.DB.prepare("UPDATE generic_products SET deleted_at = datetime('now') WHERE id = ?").bind(id),
   ])
   return c.body(null, 204)
 })
@@ -982,6 +992,8 @@ app.post('/api/ai/parse-invoice', async (c) => {
   "invoice_number": "invoice number or empty string",
   "invoice_date": "YYYY-MM-DD or empty string",
   "page_note": "any 'Page X of Y' text visible on the invoice, copied verbatim, or empty string",
+  "page_current": 0,
+  "page_total": 0,
   "total": 0.00,
   "payment_account": "A/P",
   "tax_gst": 0.00,
@@ -1025,7 +1037,7 @@ app.post('/api/ai/parse-invoice', async (c) => {
 - For 'other_cost': any other fee not covered above (handling fee, etc.)
 - For 'other_desc': description of the other_cost if applicable
 - For dates: convert any format to YYYY-MM-DD
-- For 'page_note': if the invoice shows pagination like 'Page 1 of 3', copy that text verbatim; otherwise use empty string
+- Pagination (IMPORTANT — used to detect missing pages): carefully inspect BOTH the header and the footer of the invoice for any page indicator, such as 'Page 1 of 2', 'Page 1/2', '1 of 2', 'Pg 1 of 2', or a bare 'Page 1'. Set 'page_current' and 'page_total' to the integers shown — e.g. 'Page 1 of 2' → page_current 1, page_total 2. If you can only read a fragment (e.g. just 'Page 1' with no total), fill what you can and set the unknown one to 0. Also copy the raw pagination text verbatim into 'page_note'. If there is genuinely no pagination text anywhere, set both to 0 and page_note to ''. Do not skip this — pagination is often small print in a corner.
 - Use 0.00 for numeric fields you cannot find
 - Use empty string '' for text fields you cannot find
 - If any field is unclear or ambiguous, mark it as 'needs review' instead of guessing

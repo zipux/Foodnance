@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Invoices — InvoiceDB</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260407-1" />
+  <link rel="stylesheet" href="/static/style.css?v=20260712-1" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <style>
@@ -234,6 +234,17 @@
             This invoice was uploaded but <strong>not yet saved</strong> to your products database. Review the parsed data below, then click <strong>Confirm &amp; Save</strong> to add the products, supplier, and line items.
           </p>
           <div id="parsedWarnings" style="margin-top:.65rem;display:flex;flex-direction:column;gap:.4rem"></div>
+          <!-- Shown only when a page is detected missing -->
+          <button class="btn btn-sm hidden" id="addPageBtn"
+            style="margin-top:.7rem;background:#b45309;color:#fff">
+            <i class="fas fa-file-circle-plus"></i> Add missing page
+          </button>
+          <button class="btn btn-sm hidden" id="markCompleteBtn"
+            style="margin-top:.7rem;margin-left:.5rem;background:transparent;color:#92400e;border:1px solid #d97706">
+            <i class="fas fa-check"></i> It's complete — don't block
+          </button>
+          <div id="addedPagesList" style="margin-top:.5rem;display:flex;flex-wrap:wrap;gap:.5rem"></div>
+          <input type="file" id="addPageFileInput" accept="image/*,application/pdf" class="hidden" />
         </div>
 
         <!-- File viewer — full-width, shown only in review (Action Required) mode -->
@@ -429,6 +440,6 @@
 
   <script src="/static/utils.js?v=20260426-1"></script>
   <script src="/static/inventory.js?v=20260407-1"></script>
-  <script src="/static/invoices.js?v=20260426-1"></script>
+  <script src="/static/invoices.js?v=20260713-1"></script>
 </body>
 </html>

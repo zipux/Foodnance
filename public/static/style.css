@@ -274,6 +274,13 @@ body {
   transition: var(--transition);
   text-decoration: none;
 }
+.btn:disabled,
+.btn[disabled] {
+  opacity: .45;
+  cursor: not-allowed;
+  filter: grayscale(35%);
+  pointer-events: none;
+}
 .btn-primary  { background: var(--primary); color: #fff; }
 .btn-primary:hover { background: var(--primary-d); }
 .btn-success  { background: var(--success); color: #fff; }

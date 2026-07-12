@@ -23,6 +23,7 @@ let originalGptNames = [];         // GPT names before mappings (used as mapping
 let currentFileName = '';
 let currentFileKey  = '';
 let currentFileUrl  = '';
+let currentPageKeys = [];   // R2 keys for every uploaded page (index 0 = page 1 = currentFileKey)
 
 let currentTaxGst        = 0;
 let currentTaxPst        = 0;
@@ -173,7 +174,7 @@ function clearBatch() {
   currentCredit = 0; currentOtherCost = 0; currentOtherDesc = '';
   currentVendor = ''; currentInvoiceNumber = ''; currentInvoiceDate = '';
   currentInvoiceTotal = 0;
-  currentFileName = ''; currentFileKey = ''; currentFileUrl = '';
+  currentFileName = ''; currentFileKey = ''; currentFileUrl = ''; currentPageKeys = [];
   removeBlocker('parseBlocker');
   removeBlocker('qualityBlocker');
 }
@@ -630,7 +631,7 @@ async function submitBatch() {
   currentTaxGst = 0; currentTaxPst = 0; currentDelivery = 0;
   currentFuelSurcharge = 0; currentDeposit = 0;
   currentCredit = 0; currentOtherCost = 0; currentOtherDesc = '';
-  currentFileName = ''; currentFileKey = ''; currentFileUrl = '';
+  currentFileName = ''; currentFileKey = ''; currentFileUrl = ''; currentPageKeys = [];
   removeBlocker('parseBlocker');
   removeBlocker('qualityBlocker');
   hideSavedBanner();
@@ -656,6 +657,27 @@ async function submitBatch() {
   }
 }
 
+// Upload every staged file to R2. files[0] becomes the primary attached file
+// (currentFileKey); all successfully-uploaded keys are collected in
+// currentPageKeys so the review modal can display every page, not just page 1.
+// A per-page upload failure is tolerated (that page just won't have an image).
+async function uploadAllPages(files) {
+  currentPageKeys = [];
+  currentFileName = files[0].name;
+  for (let i = 0; i < files.length; i++) {
+    try {
+      const uploaded = await apiUploadFile(files[i]);
+      currentPageKeys.push(uploaded.key);
+      if (i === 0) {
+        currentFileKey = uploaded.key;
+        currentFileUrl = uploaded.url;
+      }
+    } catch (upErr) {
+      console.warn(`R2 upload failed for page ${i + 1} (continuing):`, upErr.message);
+    }
+  }
+}
+
 // ── PDF batch ─────────────────────────────────────────────────
 async function processPDFBatch() {
   const files = stagedFiles.map(s => s.file);
@@ -663,16 +685,9 @@ async function processPDFBatch() {
 
   showProgress(28, `Uploading ${total} PDF${total > 1 ? 's' : ''}…`);
 
-  // Upload first file to R2 (primary attached file)
-  try {
-    const uploaded = await apiUploadFile(files[0]);
-    currentFileKey  = uploaded.key;
-    currentFileUrl  = uploaded.url;
-    currentFileName = files[0].name;
-  } catch (upErr) {
-    console.warn('R2 upload failed (continuing):', upErr.message);
-    currentFileName = files[0].name;
-  }
+  // Upload every file to R2. files[0] is the primary attached file; the rest
+  // are stored as additional pages so the review modal can show them all.
+  await uploadAllPages(files);
 
   if (!_aiConfigured) {
     hideProgress();
@@ -732,15 +747,7 @@ async function processImageBatch() {
   }
 
   showProgress(28, `Uploading ${total} image${total > 1 ? 's' : ''}…`);
-  try {
-    const uploaded = await apiUploadFile(files[0]);
-    currentFileKey  = uploaded.key;
-    currentFileUrl  = uploaded.url;
-    currentFileName = files[0].name;
-  } catch (upErr) {
-    console.warn('R2 upload failed (continuing):', upErr.message);
-    currentFileName = files[0].name;
-  }
+  await uploadAllPages(files);
 
   showProgress(70, 'Reading invoice with Claude…');
 
@@ -876,6 +883,9 @@ async function saveQuickInvoice() {
     })),
     warnings: invoiceWarnings.slice(),
     file_name: currentFileName || '',
+    // All uploaded page images (index 0 = page 1 = file_key). Lets the review
+    // modal show every page of a multi-page invoice, not just the primary file.
+    pages: currentPageKeys.slice(),
   };
 
   let savedInvoiceId = null;
@@ -1150,19 +1160,22 @@ function runValidation(gptResult, ocrFullText, uploadedPageCount) {
   }
   deepSearch(gptResult, '');
 
-  // Missing pages hint
-  if (ocrFullText) {
+  // Missing pages hint.
+  // Primary signal: structured page_total the model reports (reliable for photos,
+  // where there's no text layer). Fallback: scan any verbatim page text for
+  // "page N of N". Either way, warn when the invoice claims more pages than uploaded.
+  let totalPages = parseInt(gptResult.page_total, 10);
+  let pageSrc = totalPages > 0 ? `Invoice shows page ${parseInt(gptResult.page_current, 10) || '?'} of ${totalPages}` : '';
+  if (!(totalPages > 0) && ocrFullText) {
     const m = ocrFullText.match(/\bpage\s+\d+\s+of\s+(\d+)\b/i);
-    if (m) {
-      const totalPages = parseInt(m[1], 10);
-      if (!isNaN(totalPages) && totalPages > 1 && uploadedPageCount < totalPages) {
-        invoiceWarnings.push({
-          id: 'missing_pages',
-          severity: 'warning',
-          message: `Invoice text mentions "${m[0]}" but only ${uploadedPageCount} page${uploadedPageCount === 1 ? '' : 's'} uploaded — possible missing page.`,
-        });
-      }
-    }
+    if (m) { totalPages = parseInt(m[1], 10); pageSrc = `Invoice text mentions "${m[0]}"`; }
+  }
+  if (totalPages > 1 && uploadedPageCount < totalPages) {
+    invoiceWarnings.push({
+      id: 'missing_pages',
+      severity: 'warning',
+      message: `${pageSrc} but only ${uploadedPageCount} page${uploadedPageCount === 1 ? '' : 's'} uploaded — possible missing page.`,
+    });
   }
 }
 
