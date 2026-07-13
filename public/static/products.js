@@ -416,7 +416,9 @@ async function saveGenericProduct() {
     let savedId = id;
     if (id) {
       // ── Edit existing generic product ──
-      await apiPut(`tables/${GENERIC_TABLE}/${id}`, payload);
+      // Dedicated endpoint cascades a name change to invoice lines, entries,
+      // mappings, inventory and recipe links so nothing goes stale.
+      await apiPut(`${GENERIC_TABLE}/${id}`, payload);
     } else {
       // ── Create new generic product ──
       const created = await apiPost(`tables/${GENERIC_TABLE}`, payload);

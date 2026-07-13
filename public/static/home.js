@@ -386,6 +386,18 @@ async function loadSpendingBreakdown() {
 }
 
 function sbNavigate(label) {
+  // "Uncategorized" / "Unknown" are synthetic fallback labels, not real
+  // categories/vendors — spending from invoice lines (or invoices) that don't
+  // resolve to a product/vendor. Navigating to a filter for them lands on an
+  // empty list, so explain instead.
+  if (label === 'Uncategorized') {
+    showToast('These are invoice line items whose product name doesn\'t match any product — nothing to filter to. Rename the product to match, or edit the invoice line.', 'info');
+    return;
+  }
+  if (label === 'Unknown') {
+    showToast('These are invoices with no vendor set — nothing to filter to.', 'info');
+    return;
+  }
   if (sbView === 'vendor') {
     window.location.href = `/invoices.html?vendor=${encodeURIComponent(label)}`;
   } else {

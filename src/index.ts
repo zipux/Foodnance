@@ -282,6 +282,65 @@ app.delete('/api/tables/generic_products/:id', async (c) => {
   return c.body(null, 204)
 })
 
+// PUT /api/generic_products/:id
+// Update a product and, when the name changes, cascade it to every place the
+// product name is denormalized — otherwise those copies go stale and features
+// that match by name (e.g. the spending breakdown joining invoice_lines to
+// products) can no longer categorize them.
+//   invoice_lines.product_name, product_entries.generic_product_name,
+//   product_mappings.corrected_name, inventory.item_name, recipe_items.product_name
+// stock_log.item_name is intentionally left alone — it's a historical snapshot.
+app.put('/api/generic_products/:id', async (c) => {
+  const { id } = c.req.param()
+  const body = await c.req.json() as {
+    name?: string; category?: string
+    sub_unit_name?: string; sub_unit_qty?: number | null; avg_weight_per_unit?: number | null
+  }
+  const newName = (body.name || '').trim()
+  if (!newName) return c.json({ error: 'name required' }, 400)
+
+  const current = await c.env.DB.prepare('SELECT name FROM generic_products WHERE id = ?')
+    .bind(id).first<{ name: string }>()
+  if (!current) return c.json({ error: 'Product not found' }, 404)
+  const oldName = current.name
+
+  await c.env.DB.prepare(
+    `UPDATE generic_products
+       SET name = ?, category = ?, sub_unit_name = ?, sub_unit_qty = ?, avg_weight_per_unit = ?
+     WHERE id = ?`
+  ).bind(
+    newName,
+    body.category ?? '',
+    body.sub_unit_name ?? '',
+    body.sub_unit_qty ?? null,
+    body.avg_weight_per_unit ?? null,
+    id
+  ).run()
+
+  // Cascade the name only when it actually changed (ignoring case/space)
+  if (oldName.trim().toLowerCase() !== newName.toLowerCase()) {
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        'UPDATE product_entries SET generic_product_name = ? WHERE generic_product_id = ? OR LOWER(TRIM(generic_product_name)) = LOWER(TRIM(?))'
+      ).bind(newName, id, oldName),
+      c.env.DB.prepare(
+        'UPDATE invoice_lines SET product_name = ? WHERE LOWER(TRIM(product_name)) = LOWER(TRIM(?))'
+      ).bind(newName, oldName),
+      c.env.DB.prepare(
+        'UPDATE product_mappings SET corrected_name = ? WHERE LOWER(TRIM(corrected_name)) = LOWER(TRIM(?))'
+      ).bind(newName, oldName),
+      c.env.DB.prepare(
+        'UPDATE inventory SET item_name = ? WHERE item_id = ?'
+      ).bind(newName, id),
+      c.env.DB.prepare(
+        'UPDATE recipe_items SET product_name = ? WHERE product_id = ?'
+      ).bind(newName, id),
+    ])
+  }
+
+  return c.json({ id, name: newName })
+})
+
 // ── Delete
 app.delete('/api/tables/:table/:id', async (c) => {
   const { table, id } = c.req.param()
