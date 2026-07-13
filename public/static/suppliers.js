@@ -93,8 +93,10 @@ async function saveSupplier() {
   };
   try {
     if (id) {
-      await apiPut(`tables/${SUPPLIERS_TABLE}/${id}`, payload);
-      showToast('Supplier updated!', 'success');
+      // Dedicated endpoint: updates the supplier AND cascades a name change
+      // to product entries, invoices, mappings and fee templates.
+      await apiPut(`suppliers/${id}`, payload);
+      showToast('Supplier updated everywhere!', 'success');
     } else {
       await apiPost(`tables/${SUPPLIERS_TABLE}`, payload);
       showToast('Supplier added!', 'success');

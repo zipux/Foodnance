@@ -532,6 +532,60 @@ app.post('/api/suppliers/match', async (c) => {
   return c.json(classifySupplierMatch(name, all.results || []))
 })
 
+// PUT /api/suppliers/:id
+// Update a supplier and, when the name changes, cascade it to every place the
+// name is denormalized so the rename shows up everywhere:
+//   product_entries.supplier_name, invoices.vendor,
+//   product_mappings.vendor_name, vendor_fee_templates.vendor_name
+app.put('/api/suppliers/:id', async (c) => {
+  const { id } = c.req.param()
+  const body = await c.req.json() as { name?: string; contact?: string; email?: string; notes?: string }
+  const newName = (body.name || '').trim()
+  if (!newName) return c.json({ error: 'name required' }, 400)
+
+  const current = await c.env.DB.prepare('SELECT name FROM suppliers WHERE id = ?')
+    .bind(id).first<{ name: string }>()
+  if (!current) return c.json({ error: 'Supplier not found' }, 404)
+  const oldName = current.name
+
+  // Update the supplier row itself
+  await c.env.DB.prepare(
+    'UPDATE suppliers SET name = ?, contact = ?, email = ?, notes = ? WHERE id = ?'
+  ).bind(newName, body.contact ?? '', body.email ?? '', body.notes ?? '', id).run()
+
+  // Cascade only when the name actually changed (ignoring case/space)
+  if (oldName.trim().toLowerCase() !== newName.toLowerCase()) {
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        'UPDATE product_entries SET supplier_name = ? WHERE supplier_id = ? OR LOWER(TRIM(supplier_name)) = LOWER(TRIM(?))'
+      ).bind(newName, id, oldName),
+      c.env.DB.prepare(
+        'UPDATE invoices SET vendor = ? WHERE LOWER(TRIM(vendor)) = LOWER(TRIM(?))'
+      ).bind(newName, oldName),
+      c.env.DB.prepare(
+        'UPDATE product_mappings SET vendor_name = ? WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?))'
+      ).bind(newName, oldName),
+    ])
+
+    // vendor_fee_templates.vendor_name is UNIQUE — renaming into an existing
+    // one would violate the constraint, so drop the old row in that case.
+    const clashTmpl = await c.env.DB.prepare(
+      'SELECT id FROM vendor_fee_templates WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?))'
+    ).bind(newName).first<{ id: string }>()
+    if (clashTmpl) {
+      await c.env.DB.prepare(
+        'DELETE FROM vendor_fee_templates WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?))'
+      ).bind(oldName).run()
+    } else {
+      await c.env.DB.prepare(
+        'UPDATE vendor_fee_templates SET vendor_name = ? WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?))'
+      ).bind(newName, oldName).run()
+    }
+  }
+
+  return c.json({ id, name: newName, contact: body.contact ?? '', email: body.email ?? '', notes: body.notes ?? '' })
+})
+
 // POST /api/bulk/upsert-products
 // Smart upsert: find-or-create supplier by name, find-or-create generic_product by name,
 // then ALWAYS create a new product_entry (each purchase is its own record).
