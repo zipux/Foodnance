@@ -15,17 +15,17 @@ const TYPE_META = {
 const TYPE_ORDER = ['raw_material', 'batch', 'finished_product'];
 
 document.addEventListener('DOMContentLoaded', async () => {
-  document.getElementById('stDate').textContent = todayDDMMYYYY();
+  document.getElementById('stDate').textContent = todayYMD();
   document.getElementById('stCancelBtn').addEventListener('click', cancelStockTake);
   document.getElementById('stSubmitBtn').addEventListener('click', submitStockTake);
   await loadOrStart();
 });
 
-function todayDDMMYYYY() {
+function todayYMD() {
   const d = new Date();
   const dd = String(d.getDate()).padStart(2, '0');
   const mm = String(d.getMonth() + 1).padStart(2, '0');
-  return `${dd}/${mm}/${d.getFullYear()}`;
+  return `${d.getFullYear()}/${mm}/${dd}`;
 }
 
 async function loadOrStart() {

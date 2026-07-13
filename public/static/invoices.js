@@ -41,7 +41,7 @@ function populateInvoiceUnitDropdown(select, selectedValue) {
 function fmtDate(iso) {
   if (!iso) return '—';
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
+  return m ? `${m[1]}/${m[2]}/${m[3]}` : iso;
 }
 
 function parsePackaging(str) {

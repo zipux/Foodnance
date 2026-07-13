@@ -183,10 +183,10 @@ function renderProductTable() {
 
     // Most recent purchase date
     const dates = entries.map(e => e.purchase_date).filter(Boolean).sort().reverse();
-    const lastPurchase = dates[0] || '—';
+    const lastPurchase = dates[0] ? fmtDate(dates[0]) : '—';
 
     if (showArchived) {
-      const archivedOn = g.deleted_at ? String(g.deleted_at).slice(0, 10) : '—';
+      const archivedOn = g.deleted_at ? fmtDate(String(g.deleted_at).slice(0, 10)) : '—';
       return `
         <tr class="product-row product-row--archived" title="Archived product">
           <td><strong>${esc(g.name)}</strong></td>
