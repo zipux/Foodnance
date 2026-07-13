@@ -635,6 +635,7 @@ async function submitBatch() {
   currentFileName = ''; currentFileKey = ''; currentFileUrl = ''; currentPageKeys = []; currentUploadFailed = false;
   removeBlocker('parseBlocker');
   removeBlocker('qualityBlocker');
+  removeBlocker('uploadBlocker');
   hideSavedBanner();
 
   try {
@@ -671,9 +672,9 @@ async function _uploadWithRetry(file) {
 // Upload every staged file to R2. files[0] becomes the primary attached file
 // (currentFileKey); all successfully-uploaded keys are collected in
 // currentPageKeys so the review modal can display every page, not just page 1.
-// A per-page upload failure is tolerated (that page just won't have an image),
-// but a failure of the PRIMARY file (page 1) sets currentUploadFailed so the
-// user is warned — otherwise the invoice would save with no attached image.
+// Returns true only if EVERY page uploaded. If any page fails (after a retry),
+// it returns false and the caller hard-stops the pipeline — we never save an
+// invoice with a missing image; the user must retry the upload.
 async function uploadAllPages(files) {
   currentPageKeys = [];
   currentFileName = files[0].name;
@@ -687,17 +688,12 @@ async function uploadAllPages(files) {
         currentFileUrl = uploaded.url;
       }
     } catch (upErr) {
-      console.warn(`R2 upload failed for page ${i + 1} (continuing):`, upErr.message);
-      if (i === 0) {
-        currentUploadFailed = true;
-        showToast(
-          'Warning: the invoice image could not be saved to storage. ' +
-          'It will parse, but no file will be attached — re-upload to attach it.',
-          'error'
-        );
-      }
+      console.warn(`R2 upload failed for page ${i + 1}:`, upErr.message);
+      currentUploadFailed = true;
+      return false;  // hard-stop: don't parse/save an invoice with a missing image
     }
   }
+  return true;
 }
 
 // ── PDF batch ─────────────────────────────────────────────────
@@ -709,7 +705,8 @@ async function processPDFBatch() {
 
   // Upload every file to R2. files[0] is the primary attached file; the rest
   // are stored as additional pages so the review modal can show them all.
-  await uploadAllPages(files);
+  // Hard-stop if any page fails — don't parse/save an invoice with no image.
+  if (!(await uploadAllPages(files))) { hideProgress(); showUploadBlocker(); return; }
 
   if (!_aiConfigured) {
     hideProgress();
@@ -769,7 +766,8 @@ async function processImageBatch() {
   }
 
   showProgress(28, `Uploading ${total} image${total > 1 ? 's' : ''}…`);
-  await uploadAllPages(files);
+  // Hard-stop if any page fails — don't parse/save an invoice with no image.
+  if (!(await uploadAllPages(files))) { hideProgress(); showUploadBlocker(); return; }
 
   showProgress(70, 'Reading invoice with Claude…');
 
@@ -1032,6 +1030,46 @@ function showParseBlocker(message) {
   resetSubmitButton();
 }
 
+// Shown when a page image fails to upload to storage. The pipeline stops before
+// parsing/saving so nothing is written; the user must retry. A Retry button
+// re-runs the whole submit (the staged files are still there).
+function showUploadBlocker() {
+  removeBlocker('parseBlocker');
+  removeBlocker('uploadBlocker');
+  const blocker = document.createElement('div');
+  blocker.id = 'uploadBlocker';
+  blocker.style.cssText = `
+    margin-top: 1.25rem;
+    padding: 1.1rem 1.25rem;
+    background: #fef2f2;
+    border: 2px solid #ef4444;
+    border-radius: 10px;
+    color: #991b1b;
+    font-size: .92rem;
+    line-height: 1.6;
+  `;
+  blocker.innerHTML = `
+    <div style="display:flex;align-items:flex-start;gap:.75rem">
+      <i class="fas fa-cloud-arrow-up" style="font-size:1.3rem;margin-top:.1rem;flex-shrink:0"></i>
+      <div style="flex:1">
+        <strong style="display:block;font-size:1rem;margin-bottom:.4rem">Image Upload Failed — Nothing Saved</strong>
+        <div>The invoice image couldn't be saved to storage (even after a retry), so processing was stopped and nothing was saved. Check your connection and try again.</div>
+        <button class="btn btn-primary btn-sm" id="uploadRetryBtn" style="margin-top:.7rem">
+          <i class="fas fa-rotate-right"></i> Retry upload
+        </button>
+      </div>
+    </div>
+  `;
+  const uploadCard = document.querySelector('.upload-card');
+  if (uploadCard?.parentNode) uploadCard.parentNode.insertBefore(blocker, uploadCard.nextSibling);
+  document.getElementById('uploadRetryBtn').addEventListener('click', () => {
+    removeBlocker('uploadBlocker');
+    submitBatch();
+  });
+  showToast('Image upload failed — nothing was saved. Retry when ready.', 'error');
+  resetSubmitButton();
+}
+
 // ══════════════════════════════════════════════════════════════
 // CLAUDE CALL — send the raw document(s) for direct reading
 // ══════════════════════════════════════════════════════════════
@@ -1137,18 +1175,6 @@ async function applyProductMappings(vendor) {
 // ══════════════════════════════════════════════════════════════
 function runValidation(gptResult, ocrFullText, uploadedPageCount) {
   invoiceWarnings = [];
-
-  // Image failed to upload to storage — persist a warning so it shows in the
-  // review modal (and survives in parsed_data) rather than silently saving a
-  // fileless invoice.
-  if (currentUploadFailed) {
-    invoiceWarnings.push({
-      id: 'image_not_saved',
-      severity: 'warning',
-      message: 'The invoice image could not be saved to storage, so no file is attached. Re-upload this invoice to attach the image.',
-    });
-  }
-
   if (!gptResult) return;
 
   const items     = Array.isArray(gptResult.items) ? gptResult.items : [];
