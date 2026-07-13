@@ -24,6 +24,7 @@ let currentFileName = '';
 let currentFileKey  = '';
 let currentFileUrl  = '';
 let currentPageKeys = [];   // R2 keys for every uploaded page (index 0 = page 1 = currentFileKey)
+let currentUploadFailed = false; // true when the primary image failed to store in R2
 
 let currentTaxGst        = 0;
 let currentTaxPst        = 0;
@@ -174,7 +175,7 @@ function clearBatch() {
   currentCredit = 0; currentOtherCost = 0; currentOtherDesc = '';
   currentVendor = ''; currentInvoiceNumber = ''; currentInvoiceDate = '';
   currentInvoiceTotal = 0;
-  currentFileName = ''; currentFileKey = ''; currentFileUrl = ''; currentPageKeys = [];
+  currentFileName = ''; currentFileKey = ''; currentFileUrl = ''; currentPageKeys = []; currentUploadFailed = false;
   removeBlocker('parseBlocker');
   removeBlocker('qualityBlocker');
 }
@@ -631,7 +632,7 @@ async function submitBatch() {
   currentTaxGst = 0; currentTaxPst = 0; currentDelivery = 0;
   currentFuelSurcharge = 0; currentDeposit = 0;
   currentCredit = 0; currentOtherCost = 0; currentOtherDesc = '';
-  currentFileName = ''; currentFileKey = ''; currentFileUrl = ''; currentPageKeys = [];
+  currentFileName = ''; currentFileKey = ''; currentFileUrl = ''; currentPageKeys = []; currentUploadFailed = false;
   removeBlocker('parseBlocker');
   removeBlocker('qualityBlocker');
   hideSavedBanner();
@@ -657,16 +658,29 @@ async function submitBatch() {
   }
 }
 
+// Upload a single file to R2 with one retry, to ride out transient hiccups.
+async function _uploadWithRetry(file) {
+  try {
+    return await apiUploadFile(file);
+  } catch (firstErr) {
+    console.warn('R2 upload failed, retrying once:', firstErr.message);
+    return await apiUploadFile(file);  // second attempt; throws if it also fails
+  }
+}
+
 // Upload every staged file to R2. files[0] becomes the primary attached file
 // (currentFileKey); all successfully-uploaded keys are collected in
 // currentPageKeys so the review modal can display every page, not just page 1.
-// A per-page upload failure is tolerated (that page just won't have an image).
+// A per-page upload failure is tolerated (that page just won't have an image),
+// but a failure of the PRIMARY file (page 1) sets currentUploadFailed so the
+// user is warned — otherwise the invoice would save with no attached image.
 async function uploadAllPages(files) {
   currentPageKeys = [];
   currentFileName = files[0].name;
+  currentUploadFailed = false;
   for (let i = 0; i < files.length; i++) {
     try {
-      const uploaded = await apiUploadFile(files[i]);
+      const uploaded = await _uploadWithRetry(files[i]);
       currentPageKeys.push(uploaded.key);
       if (i === 0) {
         currentFileKey = uploaded.key;
@@ -674,6 +688,14 @@ async function uploadAllPages(files) {
       }
     } catch (upErr) {
       console.warn(`R2 upload failed for page ${i + 1} (continuing):`, upErr.message);
+      if (i === 0) {
+        currentUploadFailed = true;
+        showToast(
+          'Warning: the invoice image could not be saved to storage. ' +
+          'It will parse, but no file will be attached — re-upload to attach it.',
+          'error'
+        );
+      }
     }
   }
 }
@@ -1115,6 +1137,18 @@ async function applyProductMappings(vendor) {
 // ══════════════════════════════════════════════════════════════
 function runValidation(gptResult, ocrFullText, uploadedPageCount) {
   invoiceWarnings = [];
+
+  // Image failed to upload to storage — persist a warning so it shows in the
+  // review modal (and survives in parsed_data) rather than silently saving a
+  // fileless invoice.
+  if (currentUploadFailed) {
+    invoiceWarnings.push({
+      id: 'image_not_saved',
+      severity: 'warning',
+      message: 'The invoice image could not be saved to storage, so no file is attached. Re-upload this invoice to attach the image.',
+    });
+  }
+
   if (!gptResult) return;
 
   const items     = Array.isArray(gptResult.items) ? gptResult.items : [];
