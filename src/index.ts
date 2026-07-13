@@ -288,8 +288,12 @@ app.delete('/api/tables/generic_products/:id', async (c) => {
 // that match by name (e.g. the spending breakdown joining invoice_lines to
 // products) can no longer categorize them.
 //   invoice_lines.product_name, product_entries.generic_product_name,
-//   product_mappings.corrected_name, inventory.item_name, recipe_items.product_name
-// stock_log.item_name is intentionally left alone — it's a historical snapshot.
+//   product_mappings.corrected_name, inventory.item_name, recipe_items.product_name,
+//   stock_log.item_name
+// A rename is a correction of the SAME item (matched by item_id here), so the
+// stock log is kept in sync for consistency. (Deletion is different — there we
+// keep stock_log as-is because the product row is gone and the stored name is
+// the only remaining record of what the item was called.)
 app.put('/api/generic_products/:id', async (c) => {
   const { id } = c.req.param()
   const body = await c.req.json() as {
@@ -334,6 +338,9 @@ app.put('/api/generic_products/:id', async (c) => {
       ).bind(newName, id),
       c.env.DB.prepare(
         'UPDATE recipe_items SET product_name = ? WHERE product_id = ?'
+      ).bind(newName, id),
+      c.env.DB.prepare(
+        'UPDATE stock_log SET item_name = ? WHERE item_id = ?'
       ).bind(newName, id),
     ])
   }
