@@ -1124,10 +1124,11 @@ function runValidation(gptResult, ocrFullText, uploadedPageCount) {
   const delivery  = (parseFloat(gptResult.delivery) || 0) + (parseFloat(gptResult.fuel_surcharge) || 0);
   const credit    = parseFloat(gptResult.credit)        || 0;
   const otherCost = parseFloat(gptResult.other_cost)    || 0;
+  const deposit   = parseFloat(gptResult.deposit)       || 0;
 
   // Totals match check
   const itemsSum = items.reduce((s, it) => s + (parseFloat(it.cost) || 0), 0);
-  const charges  = taxGst + taxPst + delivery + otherCost - credit;
+  const charges  = taxGst + taxPst + delivery + deposit + otherCost - credit;
   if (items.length > 0 && total > 0) {
     const tol = 1.00;
     const computedA = itemsSum + charges;
