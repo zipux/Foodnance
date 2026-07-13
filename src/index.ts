@@ -16,6 +16,91 @@ function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
 }
 
+// ─── Supplier name matching ────────────────────────────────────
+// Dedupes near-identical vendor names (e.g. "Chefs' Warehouse" vs
+// "Chefs Warehouse") so a punctuation/typo difference doesn't spawn a
+// second supplier. Normalization strips case, punctuation and extra
+// spaces; similarity uses Levenshtein on the normalized strings.
+function normalizeSupplierName(s: string): string {
+  return (s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')  // punctuation → space
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0
+  if (!a.length) return b.length
+  if (!b.length) return a.length
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i)
+  let curr = new Array(b.length + 1)
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
+    }
+    [prev, curr] = [curr, prev]
+  }
+  return prev[b.length]
+}
+
+// Score two supplier names in [0,1]; 1 = identical after normalization.
+function supplierSimilarity(a: string, b: string): number {
+  const na = normalizeSupplierName(a)
+  const nb = normalizeSupplierName(b)
+  if (!na || !nb) return 0
+  if (na === nb) return 1
+  const dist = levenshtein(na, nb)
+  return 1 - dist / Math.max(na.length, nb.length)
+}
+
+// All significant (len ≥ 3) tokens of the shorter name appear in the longer,
+// and the shorter has ≥ 2 such tokens. Catches "Oyster and King" ⊂
+// "1088115 B.C. LTD. - Oyster and King" without matching a lone token like "BCL".
+function supplierTokenContained(a: string, b: string): boolean {
+  const ta = normalizeSupplierName(a).split(' ').filter(t => t.length >= 3)
+  const tb = normalizeSupplierName(b).split(' ').filter(t => t.length >= 3)
+  if (!ta.length || !tb.length) return false
+  const [short, long] = ta.length <= tb.length ? [ta, tb] : [tb, ta]
+  if (short.length < 2) return false
+  const longSet = new Set(long)
+  return short.every(t => longSet.has(t))
+}
+
+type SupplierMatch = {
+  decision: 'auto' | 'suggest' | 'none'
+  match: { id: string; name: string } | null
+  score: number
+}
+
+// Classify a candidate vendor name against existing suppliers:
+//   auto    → near-identical, safe to snap silently (≥ 0.88 or normalized-equal)
+//   suggest → plausible but confirm first (≥ 0.70, or token-contained)
+//   none    → treat as a new supplier
+function classifySupplierMatch(
+  name: string,
+  suppliers: { id: string; name: string }[]
+): SupplierMatch {
+  let best: { id: string; name: string } | null = null
+  let bestScore = 0
+  let bestContained = false
+  for (const s of suppliers) {
+    const score = supplierSimilarity(name, s.name)
+    const contained = supplierTokenContained(name, s.name)
+    if (score > bestScore || (score === bestScore && contained && !bestContained)) {
+      best = { id: s.id, name: s.name }
+      bestScore = score
+      bestContained = contained
+    }
+  }
+  if (!best) return { decision: 'none', match: null, score: 0 }
+  if (bestScore >= 0.88) return { decision: 'auto', match: best, score: bestScore }
+  if (bestScore >= 0.70 || bestContained) return { decision: 'suggest', match: best, score: bestScore }
+  return { decision: 'none', match: null, score: bestScore }
+}
+
 // ─── Helper: parse pack_size strings into { packQty, packUnit } ─
 // Handles complex formats from OCR/GPT:
 //   "12 LB"       → { packQty: 12, packUnit: "LB" }
@@ -428,6 +513,25 @@ app.post('/api/ensure-invoice', async (c) => {
 })
 
 
+// POST /api/suppliers/match
+// Classify a candidate vendor name against existing suppliers.
+// Body: { name }  →  { decision: 'auto'|'suggest'|'none', match: {id,name}|null, score }
+// Used by the invoice review modal to auto-correct or suggest a supplier name.
+app.post('/api/suppliers/match', async (c) => {
+  const body = await c.req.json() as { name?: string }
+  const name = (body.name || '').trim()
+  if (!name) return c.json({ decision: 'none', match: null, score: 0 })
+
+  // Exact (case/space-insensitive) match short-circuits — nothing to correct.
+  const exact = await c.env.DB.prepare(
+    `SELECT id, name FROM suppliers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))`
+  ).bind(name).first<{ id: string; name: string }>()
+  if (exact) return c.json({ decision: 'exact', match: exact, score: 1 })
+
+  const all = await c.env.DB.prepare(`SELECT id, name FROM suppliers`).all<{ id: string; name: string }>()
+  return c.json(classifySupplierMatch(name, all.results || []))
+})
+
 // POST /api/bulk/upsert-products
 // Smart upsert: find-or-create supplier by name, find-or-create generic_product by name,
 // then ALWAYS create a new product_entry (each purchase is its own record).
@@ -450,9 +554,18 @@ app.post('/api/bulk/upsert-products', async (c) => {
 
   const vendorName = (body.vendor_name || '').trim()
   if (vendorName) {
-    const existingSupplier = await c.env.DB.prepare(
+    let existingSupplier = await c.env.DB.prepare(
       `SELECT id, name FROM suppliers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))`
     ).bind(vendorName).first<{ id: string; name: string }>()
+
+    // No exact match: fuzzy-match against existing suppliers and reuse one for
+    // near-identical names (auto tier) so a punctuation/typo variation doesn't
+    // spawn a duplicate. Looser "suggest"-tier matches are left to the review UI.
+    if (!existingSupplier) {
+      const all = await c.env.DB.prepare(`SELECT id, name FROM suppliers`).all<{ id: string; name: string }>()
+      const m = classifySupplierMatch(vendorName, all.results || [])
+      if (m.decision === 'auto' && m.match) existingSupplier = m.match
+    }
 
     if (existingSupplier) {
       supplierId   = existingSupplier.id

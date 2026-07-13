@@ -336,6 +336,13 @@ async function openInvDetail(id) {
   document.getElementById('detailDateInput').value     = invDate;
   document.getElementById('detailTotalInput').value    = total ? total.toFixed(2) : '';
 
+  // Supplier de-dupe: match the parsed vendor against existing suppliers.
+  // Only in review mode (the vendor field is editable there).
+  const matchBox = document.getElementById('detailVendorMatch');
+  matchBox.classList.add('hidden');
+  matchBox.innerHTML = '';
+  if (isActionRequired && vendor) checkVendorMatch(vendor);
+
   document.getElementById('detailUpload').textContent  = fmtDate(inv.upload_date);
   currentInvTotal = total;
   document.getElementById('detailTotal').textContent   = total ? '$' + total.toFixed(2) : '—';
@@ -484,6 +491,58 @@ async function openInvDetail(id) {
       }
     });
   }
+}
+
+// ── Supplier de-dupe (vendor name matching) ──────────────────────
+// Ask the backend whether the parsed vendor matches an existing supplier.
+//   auto    → snap the vendor field to the canonical name (with a note)
+//   suggest → show "Did you mean X?" with Use / Keep-as-is buttons
+// Prevents duplicate suppliers like "Chefs' Warehouse" vs "Chefs Warehouse".
+async function checkVendorMatch(name) {
+  const box = document.getElementById('detailVendorMatch');
+  let res;
+  try {
+    res = await apiPost('suppliers/match', { name });
+  } catch (_) { return; }
+  // Bail if the user already edited the field since we asked.
+  const input = document.getElementById('detailVendorInput');
+  if (!input || input.value.trim() !== name.trim()) return;
+  if (!res || !res.match) return;
+
+  if (res.decision === 'auto') {
+    input.value = res.match.name;
+    box.className = '';
+    box.innerHTML = `<span style="color:var(--text-muted)">
+      <i class="fas fa-wand-magic-sparkles"></i> Matched existing supplier
+      <strong>“${esc(res.match.name)}”</strong>.
+      <a href="#" onclick="dismissVendorMatch('${esc(name)}');return false" style="margin-left:.3rem">Undo</a>
+    </span>`;
+  } else if (res.decision === 'suggest') {
+    box.className = '';
+    box.innerHTML = `<span style="color:#b45309">
+      <i class="fas fa-circle-question"></i> Did you mean existing supplier
+      <strong>“${esc(res.match.name)}”</strong>?
+      <a href="#" onclick="acceptVendorMatch('${esc(res.match.name)}');return false" style="margin-left:.3rem;font-weight:600">Use it</a>
+      <a href="#" onclick="dismissVendorMatch();return false" style="margin-left:.5rem">Keep “${esc(name)}”</a>
+    </span>`;
+  }
+}
+
+// Suggest tier: user accepted the existing supplier name.
+function acceptVendorMatch(canonicalName) {
+  document.getElementById('detailVendorInput').value = canonicalName;
+  const box = document.getElementById('detailVendorMatch');
+  box.className = '';
+  box.innerHTML = `<span style="color:var(--text-muted)"><i class="fas fa-check"></i> Using <strong>“${esc(canonicalName)}”</strong>.</span>`;
+}
+
+// Auto tier: user undid the snap and wants their original name back.
+// (Also used to dismiss a suggestion.)
+function dismissVendorMatch(originalName) {
+  if (originalName != null) document.getElementById('detailVendorInput').value = originalName;
+  const box = document.getElementById('detailVendorMatch');
+  box.classList.add('hidden');
+  box.innerHTML = '';
 }
 
 // ── Line items ───────────────────────────────────────────────────
