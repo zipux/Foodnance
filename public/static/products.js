@@ -122,11 +122,16 @@ function invoiceNumber(invoiceId) {
 function filteredGeneric() {
   let list = allGeneric.filter(g => showArchived ? !!g.deleted_at : !g.deleted_at);
   if (categoryFilter) list = list.filter(g => g.category === categoryFilter);
-  if (!searchQuery) return list;
-  const q = searchQuery.toLowerCase();
-  return list.filter(g =>
-    (g.name     || '').toLowerCase().includes(q) ||
-    (g.category || '').toLowerCase().includes(q)
+  if (searchQuery) {
+    const q = searchQuery.toLowerCase();
+    list = list.filter(g =>
+      (g.name     || '').toLowerCase().includes(q) ||
+      (g.category || '').toLowerCase().includes(q)
+    );
+  }
+  // Always show products A→Z by name (case-insensitive, natural number order)
+  return list.sort((a, b) =>
+    (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base', numeric: true })
   );
 }
 
