@@ -166,16 +166,20 @@ function renderProductTable() {
         ? `<span class="entry-count-badge">${esc(latestSupplierName)}</span>`
         : `<span class="entry-count-badge">${supplierCount} vendors</span>`;
 
-    // Best (lowest) cost per unit across entries
-    // CHANGE 1: prefer stored cost_per_unit; fall back to computing from cost/pack_qty
-    let bestCpu = null;
-    let bestUnit = '';
-    entries.forEach(e => {
-      const cpu = (e.cost_per_unit != null && e.cost_per_unit > 0)
-        ? e.cost_per_unit
-        : (entryPackQty(e) > 0 ? e.cost / entryPackQty(e) : e.cost);
-      if (bestCpu === null || cpu < bestCpu) { bestCpu = cpu; bestUnit = entryPackUnit(e); }
-    });
+    // Latest cost per unit — the most recent purchase (what you're paying now),
+    // not the historical lowest which could be a year old. Newest-first sort
+    // matches the product detail modal so the two views agree.
+    // Prefer stored cost_per_unit; fall back to computing from cost/pack_qty.
+    const latestEntry = [...entries]
+      .sort((a, b) => (b.purchase_date || b.created_at || '') > (a.purchase_date || a.created_at || '') ? 1 : -1)[0];
+    let latestCpu = null;
+    let latestUnit = '';
+    if (latestEntry) {
+      latestCpu = (latestEntry.cost_per_unit != null && latestEntry.cost_per_unit > 0)
+        ? latestEntry.cost_per_unit
+        : (entryPackQty(latestEntry) > 0 ? latestEntry.cost / entryPackQty(latestEntry) : latestEntry.cost);
+      latestUnit = entryPackUnit(latestEntry);
+    }
 
     // Most recent purchase date
     const dates = entries.map(e => e.purchase_date).filter(Boolean).sort().reverse();
@@ -188,7 +192,7 @@ function renderProductTable() {
           <td><strong>${esc(g.name)}</strong></td>
           <td>${g.category ? `<span class="category-badge cat-${slugify(g.category)}">${esc(g.category)}</span>` : '—'}</td>
           <td>${supplierLabel}</td>
-          <td>${bestCpu !== null ? fmt(bestCpu) + ' / ' + esc(bestUnit) : '—'}</td>
+          <td>${latestCpu !== null ? fmt(latestCpu) + ' / ' + esc(latestUnit) : '—'}</td>
           <td style="color:var(--text-muted);font-size:.85rem">Archived ${archivedOn}</td>
           <td style="white-space:nowrap">
             <button class="btn btn-primary btn-icon" onclick="restoreGenericProduct('${esc(g.id)}')" title="Restore product">
@@ -204,7 +208,7 @@ function renderProductTable() {
         <td><strong>${esc(g.name)}</strong></td>
         <td>${g.category ? `<span class="category-badge cat-${slugify(g.category)}">${esc(g.category)}</span>` : '—'}</td>
         <td>${supplierLabel}</td>
-        <td>${bestCpu !== null ? fmt(bestCpu) + ' / ' + esc(bestUnit) : '—'}</td>
+        <td>${latestCpu !== null ? fmt(latestCpu) + ' / ' + esc(latestUnit) : '—'}</td>
         <td style="color:var(--text-muted);font-size:.85rem">${lastPurchase}</td>
         <td onclick="event.stopPropagation()" style="white-space:nowrap">
           <button class="btn btn-primary btn-icon" onclick="openEditProduct('${esc(g.id)}')" title="Edit product">
