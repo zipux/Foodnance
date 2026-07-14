@@ -356,6 +356,33 @@ app.delete('/api/tables/:table/:id', async (c) => {
   return c.body(null, 204)   // 204 No Content — must have no body
 })
 
+// POST /api/invoices/:id/void
+// Soft-void a posted invoice: it's kept and restorable, but drops out of the
+// active list and is excluded from P&L/spending. Standard for a financial doc —
+// never hard-delete a posted invoice. (Drafts still use plain DELETE.)
+app.post('/api/invoices/:id/void', async (c) => {
+  const { id } = c.req.param()
+  const body = await c.req.json().catch(() => ({})) as { reason?: string }
+  const reason = (body.reason || '').trim()
+  const inv = await c.env.DB.prepare('SELECT id FROM invoices WHERE id = ?')
+    .bind(id).first<{ id: string }>()
+  if (!inv) return c.json({ error: 'Invoice not found' }, 404)
+  const now = new Date().toISOString()
+  await c.env.DB.prepare(
+    "UPDATE invoices SET voided_at = datetime('now'), void_reason = ? WHERE id = ?"
+  ).bind(reason, id).run()
+  return c.json({ id, voided_at: now, void_reason: reason })
+})
+
+// POST /api/invoices/:id/restore — un-void: back into the active list and P&L.
+app.post('/api/invoices/:id/restore', async (c) => {
+  const { id } = c.req.param()
+  await c.env.DB.prepare(
+    "UPDATE invoices SET voided_at = NULL, void_reason = '' WHERE id = ?"
+  ).bind(id).run()
+  return c.json({ id, voided_at: null, void_reason: '' })
+})
+
 // ─── File Upload (R2) ─────────────────────────────────────────
 // POST /api/upload  → multipart/form-data: field "file"
 // Returns: { key, url, name, size, type }
@@ -1605,6 +1632,7 @@ app.get('/api/spending-breakdown', async (c) => {
       SUM(COALESCE(fuel_surcharge, 0))                     AS fuel_surcharge
     FROM invoices
     WHERE status = 'Closed'
+      AND voided_at IS NULL
       AND invoice_date >= ?
       AND invoice_date <= ?
   `).bind(from, to).first<{
@@ -1624,6 +1652,7 @@ app.get('/api/spending-breakdown', async (c) => {
     SELECT vendor, SUM(COALESCE(total, 0)) AS amount
     FROM invoices
     WHERE status = 'Closed'
+      AND voided_at IS NULL
       AND invoice_date >= ?
       AND invoice_date <= ?
     GROUP BY vendor
@@ -1651,6 +1680,7 @@ app.get('/api/spending-breakdown', async (c) => {
       FROM invoice_lines il
       JOIN invoices i ON il.invoice_id = i.id
       WHERE i.status = 'Closed'
+        AND i.voided_at IS NULL
         AND i.invoice_date >= ?
         AND i.invoice_date <= ?
     )

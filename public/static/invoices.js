@@ -131,6 +131,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('saveInvDetailBtn').addEventListener('click',    saveInvDetail);
   document.getElementById('confirmInvSaveBtn').addEventListener('click',   confirmAndSaveInvoice);
   document.getElementById('deleteInvBtn').addEventListener('click',        deleteInvoice);
+  document.getElementById('voidInvBtn').addEventListener('click',         voidInvoice);
+  document.getElementById('restoreInvBtn').addEventListener('click',      restoreInvoice);
   document.getElementById('addPageBtn')?.addEventListener('click', () => document.getElementById('addPageFileInput')?.click());
   document.getElementById('addPageFileInput')?.addEventListener('change', handleAddPageFile);
   document.getElementById('markCompleteBtn')?.addEventListener('click', markInvoiceComplete);
@@ -170,7 +172,14 @@ function applyFilters() {
   const cutoff  = days ? new Date(Date.now() - days * 86400000).toISOString().slice(0, 10) : null;
 
   filteredInvs = allInvoices.filter(inv => {
-    if (activeStatus !== 'all' && inv.status !== activeStatus) return false;
+    const isVoided = !!inv.voided_at;
+    // The "Voided" tab shows only voided invoices; every other tab hides them.
+    if (activeStatus === 'voided') {
+      if (!isVoided) return false;
+    } else {
+      if (isVoided) return false;
+      if (activeStatus !== 'all' && inv.status !== activeStatus) return false;
+    }
     if (vendor && inv.vendor !== vendor) return false;
     if (cutoff  && (inv.invoice_date || inv.upload_date || '') < cutoff) return false;
     if (query) {
@@ -214,7 +223,7 @@ function renderInvoices() {
         <td style="font-weight:500">${esc(inv.vendor || '—')}</td>
         <td>${esc(inv.invoice_number || '—')}</td>
         <td>${fmtDate(inv.invoice_date)}</td>
-        <td>${statusBadge(inv.status)}</td>
+        <td>${inv.voided_at ? '<span class="status-badge" style="background:#fee2e2;color:#991b1b">Voided</span>' : statusBadge(inv.status)}</td>
         <td style="text-align:right;font-weight:600">${inv.total ? '$' + parseFloat(inv.total).toFixed(2) : '—'}</td>
         <td>${esc(inv.payment_account || 'A/P')}</td>
         <td style="text-align:center">
@@ -300,6 +309,8 @@ async function openInvDetail(id) {
   // Toggle editable inputs vs read-only labels
   toggleEditableMeta(isActionRequired);
 
+  const isVoided = !!inv.voided_at;
+
   // Toggle Action Required banner + footer buttons
   const banner          = document.getElementById('actionRequiredBanner');
   const saveChangesBtn  = document.getElementById('saveInvDetailBtn');
@@ -317,6 +328,26 @@ async function openInvDetail(id) {
     document.getElementById('addPageBtn')?.classList.add('hidden');
     const apl = document.getElementById('addedPagesList'); if (apl) apl.innerHTML = '';
   }
+
+  // Voided banner + delete/void/restore button visibility.
+  //   voided            → Restore only (read-only, no editing/deleting)
+  //   posted (Closed)   → Void (never hard-delete a posted invoice)
+  //   draft (other)     → Delete (hard) — nothing derived from it yet
+  const voidedBanner = document.getElementById('voidedBanner');
+  const deleteBtn    = document.getElementById('deleteInvBtn');
+  const voidBtn      = document.getElementById('voidInvBtn');
+  const restoreBtn   = document.getElementById('restoreInvBtn');
+  const isPosted     = inv.status === 'Closed';
+  voidedBanner.classList.toggle('hidden', !isVoided);
+  if (isVoided) {
+    document.getElementById('voidedBannerReason').textContent =
+      `Voided ${fmtDate((inv.voided_at || '').slice(0, 10))}${inv.void_reason ? ' — ' + inv.void_reason : ''}`;
+  }
+  deleteBtn.classList.toggle('hidden', isVoided || isPosted);
+  voidBtn.classList.toggle('hidden', isVoided || !isPosted);
+  restoreBtn.classList.toggle('hidden', !isVoided);
+  // A voided invoice is read-only — no Save.
+  if (isVoided) saveChangesBtn.classList.add('hidden');
 
   // Prefer parsed_data values when reviewing an Action Required invoice
   const src = (isActionRequired && currentParsedData) ? currentParsedData : inv;
@@ -1052,6 +1083,48 @@ async function deleteInvoice() {
     applyFilters();
   } catch (e) {
     showToast('Delete failed: ' + e.message, 'error');
+  }
+}
+
+// Void a posted invoice: kept + restorable, but out of the active list and P&L.
+async function voidInvoice() {
+  const id  = document.getElementById('detailInvId').value;
+  const inv = allInvoices.find(i => i.id === id);
+  if (!inv) return;
+  const reason = prompt(
+    `Void invoice "${inv.invoice_number || id}"?\n\nIt will be removed from your P&L and the active list, but kept and restorable.\n\nReason (optional):`,
+    ''
+  );
+  if (reason === null) return;  // cancelled
+  try {
+    const res = await apiPost(`invoices/${id}/void`, { reason: reason.trim() });
+    inv.voided_at = res.voided_at || new Date().toISOString();
+    inv.void_reason = res.void_reason || reason.trim();
+    showToast('Invoice voided — excluded from P&L, restorable anytime.', 'warning');
+    _cleanInvImgZoom();
+    closeModal('invDetailModal');
+    applyFilters();
+  } catch (e) {
+    showToast('Void failed: ' + e.message, 'error');
+  }
+}
+
+// Restore a voided invoice: back into the active list and P&L.
+async function restoreInvoice() {
+  const id  = document.getElementById('detailInvId').value;
+  const inv = allInvoices.find(i => i.id === id);
+  if (!inv) return;
+  if (!confirm(`Restore invoice "${inv.invoice_number || id}" back into your active list and P&L?`)) return;
+  try {
+    await apiPost(`invoices/${id}/restore`, {});
+    inv.voided_at = null;
+    inv.void_reason = '';
+    showToast('Invoice restored.', 'success');
+    _cleanInvImgZoom();
+    closeModal('invDetailModal');
+    applyFilters();
+  } catch (e) {
+    showToast('Restore failed: ' + e.message, 'error');
   }
 }
 

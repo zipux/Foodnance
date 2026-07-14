@@ -178,6 +178,7 @@
             <button class="status-tab" data-status="In Processing">Processing</button>
             <button class="status-tab" data-status="Action Required">Action Required</button>
             <button class="status-tab" data-status="Closed">Closed</button>
+            <button class="status-tab" data-status="voided">Voided</button>
           </div>
 
           <!-- Search -->
@@ -224,6 +225,14 @@
       </div>
       <div class="modal-body">
         <input type="hidden" id="detailInvId" />
+
+        <!-- ── Voided banner (shown only when the invoice is voided) ── -->
+        <div id="voidedBanner" class="hidden" style="margin-bottom:1rem;padding:.85rem 1rem;background:#fef2f2;border:2px solid #ef4444;border-radius:10px">
+          <div style="display:flex;align-items:center;gap:.5rem;font-weight:700;color:#991b1b">
+            <i class="fas fa-ban"></i> This invoice is voided — excluded from P&amp;L. Restore it to bring it back.
+          </div>
+          <div id="voidedBannerReason" style="margin-top:.35rem;font-size:.85rem;color:#7f1d1d"></div>
+        </div>
 
         <!-- ── Action Required banner (shown only when status = Action Required) ── -->
         <div id="actionRequiredBanner" class="hidden" style="margin-bottom:1rem;padding:.85rem 1rem;background:#fffbeb;border:2px solid #f59e0b;border-radius:10px">
@@ -385,6 +394,8 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-danger btn-sm" id="deleteInvBtn"><i class="fas fa-trash"></i> Delete</button>
+        <button class="btn btn-sm hidden" id="voidInvBtn" style="background:#b45309;color:#fff"><i class="fas fa-ban"></i> Void</button>
+        <button class="btn btn-sm hidden" id="restoreInvBtn" style="background:#16a34a;color:#fff"><i class="fas fa-rotate-left"></i> Restore</button>
         <button class="btn btn-secondary" id="closeInvDetailBtn">Cancel</button>
         <button class="btn btn-primary" id="saveInvDetailBtn"><i class="fas fa-save"></i> Save Changes</button>
         <button class="btn btn-success hidden" id="confirmInvSaveBtn"><i class="fas fa-check-circle"></i> Confirm &amp; Save</button>
@@ -441,6 +452,6 @@
 
   <script src="/static/utils.js?v=20260714-1"></script>
   <script src="/static/inventory.js?v=20260407-1"></script>
-  <script src="/static/invoices.js?v=20260714-2"></script>
+  <script src="/static/invoices.js?v=20260714-3"></script>
 </body>
 </html>
