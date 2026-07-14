@@ -76,6 +76,7 @@ async function loadFpCatalogues() {
       if (!myEntries.length) {
         return {
           id: g.id, name: g.name, category: g.category,
+          deleted_at: g.deleted_at || null,   // archived items stay resolvable but are hidden from the picker
           pack_size: '', cost: 0,
           sub_unit_name: g.sub_unit_name || '', sub_unit_qty: g.sub_unit_qty || 0,
           _cpu: 0, _packUnit: 'unit',
@@ -100,6 +101,7 @@ async function loadFpCatalogues() {
         id:            g.id,
         name:          g.name,
         category:      g.category,
+        deleted_at:    g.deleted_at || null,   // archived items stay resolvable but are hidden from the picker
         pack_size:     packSz,
         cost:          activeEntry.cost || 0,
         sub_unit_name: g.sub_unit_name || '',
@@ -313,7 +315,9 @@ function addFpProductLine(prefill = null) {
   div.className = 'fp-line';
   div.id = `fpp-${idx}`;
 
-  const opts = allProducts_fp.map(p => {
+  // Hide archived (discontinued) products, but keep the one this line already
+  // uses (row.ref_id) so editing an existing finished product never loses its selection.
+  const opts = allProducts_fp.filter(p => !p.deleted_at || p.id === row.ref_id).map(p => {
     const cpu = fp_costPerUnit(p);
     const pu  = p._packUnit || fp_packUnit(p);
     return `<option value="${esc(p.id)}" data-cost="${cpu}" data-packunit="${esc(pu)}"
