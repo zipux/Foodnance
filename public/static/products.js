@@ -15,6 +15,7 @@ let allInvoices       = [];   // invoices rows (for invoice number lookup)
 let currentGenericId  = null; // which generic product is open in modal
 let _pendingEntryInv  = null; // { genericId, entryId, itemName, packQty, packUnit, category }
 let allUnits          = [];   // units table rows, sorted by sort_order
+let allCategories     = [];   // category names from the categories table (master list)
 let _entrySnapshots   = null; // Map<id,{cost_per_unit,pack_unit}> captured when modal opens; null = no pending changes
 let _entriesShownCount = 10; // how many entries are visible in the modal table
 
@@ -63,19 +64,25 @@ document.getElementById('saveProductBtn').addEventListener('click', saveGenericP
 // ── Load everything ────────────────────────────────────────────
 async function loadAll() {
   try {
-    const [gd, ed, sd, ivd, ud] = await Promise.all([
+    const [gd, ed, sd, ivd, ud, cd] = await Promise.all([
       apiGet(`tables/${GENERIC_TABLE}?page=1&limit=500`),
       apiGet(`tables/${ENTRIES_TABLE}?page=1&limit=1000`),
       apiGet(`tables/suppliers?page=1&limit=500`),
       apiGet(`tables/invoices?page=1&limit=1000`),
       apiGet(`tables/units?page=1&limit=100`),
+      apiGet(`tables/categories?page=1&limit=200`),
     ]);
     allGeneric      = gd.data  || [];
     allEntries      = ed.data  || [];
     allSupplierList = sd.data  || [];
     allInvoices     = ivd.data || [];
     allUnits        = (ud.data || []).slice().sort((a, b) => a.sort_order - b.sort_order);
+    allCategories   = (cd.data || [])
+      .slice()
+      .sort((a, b) => (a.sort_order - b.sort_order) || a.name.localeCompare(b.name))
+      .map(c => c.name);
     populateUnitDropdown(document.getElementById('ePackUnit'));
+    refreshCategoryDropdown();
     renderProductTable();
     renderStats();
   } catch (e) {
@@ -109,6 +116,23 @@ function setSelectValueCI(select, value) {
   const lower = value.toLowerCase();
   const opt = Array.from(select.options).find(o => o.value.toLowerCase() === lower);
   if (opt) select.value = opt.value;
+}
+
+// ── Category helpers ──────────────────────────────────────────
+// Distinct categories currently saved on products — merged into the dropdown
+// and stat chips so user-created categories persist without a DB table.
+function usedCategories() {
+  return [...new Set(allGeneric.map(g => (g.category || '').trim()).filter(Boolean))];
+}
+
+// Repopulate the product-modal category <select> from the DB master list
+// (plus any label a product already carries but that isn't in the list),
+// preserving the current selection, and (re)attach the action-row handler.
+function refreshCategoryDropdown(selectedValue) {
+  const sel = document.getElementById('pCategory');
+  const names = dedupeNames(allCategories, usedCategories());
+  populateCategoryDropdown(sel, selectedValue, names);
+  attachNewCategoryHandler(sel);
 }
 
 // ── Invoice number lookup ──────────────────────────────────────
@@ -245,7 +269,9 @@ function renderStats() {
   const el   = document.getElementById('productStats');
   const activeGeneric = allGeneric.filter(g => !g.deleted_at);
   const total = activeGeneric.length;
-  const cats  = ['Ingredients','Packaging','Disposables','Non-Alcoholic Beverages','Alcohol','Cleaning & Sanitation','Linen','Other'];
+  // Built-in taxonomy + any custom categories currently in use (chips with a
+  // zero count are skipped when rendered, so listing them all is harmless).
+  const cats  = mergeCategories(activeGeneric.map(g => g.category));
   const catCounts = cats.map(c => ({ label: c, count: activeGeneric.filter(g => g.category === c).length }));
   const uncat = activeGeneric.filter(g => !g.category).length;
 
@@ -291,7 +317,7 @@ async function openAddProductModal() {
   document.getElementById('saveProductBtn').innerHTML = '<i class="fas fa-save"></i> Save Product';
   document.getElementById('editProductId').value = '';
   document.getElementById('pName').value        = '';
-  document.getElementById('pCategory').value    = '';
+  refreshCategoryDropdown('');
   document.getElementById('pSubUnitName').value = '';
   document.getElementById('pSubUnitQty').value  = '';
   document.getElementById('pAvgWeight').value   = '';
@@ -326,7 +352,7 @@ async function openEditProduct(id) {
   document.getElementById('saveProductBtn').innerHTML = '<i class="fas fa-save"></i> Save Changes';
   document.getElementById('editProductId').value    = id;
   document.getElementById('pName').value            = g.name         || '';
-  document.getElementById('pCategory').value        = g.category     || '';
+  refreshCategoryDropdown(g.category || '');
   document.getElementById('pSubUnitName').value     = g.sub_unit_name        || '';
   document.getElementById('pSubUnitQty').value      = g.sub_unit_qty         || '';
   document.getElementById('pAvgWeight').value       = g.avg_weight_per_unit  != null ? g.avg_weight_per_unit : '';
@@ -934,7 +960,7 @@ async function _saveEntryForGeneric(genericId, overrideName, overrideCategory) {
 
   const g          = allGeneric.find(x => x.id === genericId);
   const gName      = overrideName     || g?.name     || '';
-  const gCategory  = overrideCategory || g?.category || 'Ingredients';
+  const gCategory  = overrideCategory || g?.category || 'Other';
   const supplier   = allSupplierList.find(s => s.id === supplierId);
   const expiry      = document.getElementById('eExpiry').value;
   const pQty        = parseFloat(packQtyVal) || 1;
@@ -1158,6 +1184,14 @@ registerUnitRefreshCallback(async () => {
   const ud = await apiGet(`tables/units?page=1&limit=100`);
   allUnits = (ud.data || []).slice().sort((a, b) => a.sort_order - b.sort_order);
   populateUnitDropdown(document.getElementById('ePackUnit'));
+});
+
+// Reload the category dropdown after manage-categories / inline-add changes
+registerCategoryRefreshCallback(async () => {
+  if (!document.getElementById('pCategory')) return;
+  allCategories = await fetchCategoryNames();
+  const sel = document.getElementById('pCategory');
+  refreshCategoryDropdown(sel.value);
 });
 
 // ══════════════════════════════════════════════════════════════

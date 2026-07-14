@@ -149,20 +149,40 @@ function parsePackSize(raw: string): { packQty: number; packUnit: string } {
 }
 
 // ─── Helper: infer product category from name via keyword matching ─
+// Best-effort classification for invoice auto-import. Keep the returned labels
+// in sync with DEFAULT_CATEGORIES in public/static/utils.js (the frontend list).
+// Rules are ordered most-specific first — the first keyword hit wins — so more
+// distinctive food groups (seafood, meat, dairy) are matched before broad ones
+// (produce, dry goods). Unmatched items fall to 'Other' rather than being
+// silently dumped into a food bucket.
 function inferCategory(name: string): string {
   const n = name.toLowerCase()
   const rules: [string, string[]][] = [
-    ['Linen',                   ['napkin','towel','apron','cloth','uniform','rag','linen']],
-    ['Disposables',             ['glove','cup','plate','fork','spoon','tissue','straw','cutlery','bio cont','container']],
-    ['Packaging',               ['box','bag','wrap','film','pail','jar','bottle','packaging']],
-    ['Non-Alcoholic Beverages', ['juice','water','soda','coffee','tea','syrup','drink','beverage']],
-    ['Alcohol',                 ['wine','beer','spirit','liquor','vodka','whiskey','rum','gin','alcohol']],
-    ['Cleaning & Sanitation',   ['cleaner','sanitizer','soap','detergent','bleach','disinfectant','cleaning']],
+    // ── Food (COGS) ──
+    ['Seafood',                    ['fish','salmon','tuna','shrimp','prawn','crab','lobster','oyster','mussel','clam','scallop','squid','calamari','cod','halibut','tilapia','anchovy','seafood']],
+    ['Meat & Poultry',             ['beef','pork','chicken','turkey','lamb','veal','bacon','sausage','prosciutto','salami','pepperoni','ham','duck','steak','brisket','ribs','poultry','meat']],
+    ['Dairy & Eggs',               ['milk','cream','butter','cheese','yogurt','yoghurt','egg','mozzarella','parmesan','parmigiano','cheddar','ricotta','mascarpone','buttermilk','dairy']],
+    ['Bakery',                     ['bread','bun','bagel','baguette','brioche','croissant','pastry','tortilla','dough','crust','bakery']],
+    ['Frozen',                     ['frozen','ice cream','gelato','sorbet']],
+    ['Oils, Sauces & Condiments',  ['olive oil','canola','vinegar','sauce','ketchup','mustard','mayo','mayonnaise','dressing','condiment']],
+    ['Spices & Seasonings',        ['spice','seasoning','cinnamon','cumin','paprika','oregano','nutmeg','turmeric','pepper corn','peppercorn','sea salt','kosher salt']],
+    ['Produce',                    ['lettuce','tomato','onion','potato','carrot','garlic','mushroom','spinach','kale','cucumber','celery','avocado','apple','lemon','lime','berry','banana','herb','produce','vegetable','fruit']],
+    ['Dry Goods & Pantry',        ['flour','sugar','rice','pasta','noodle','bean','lentil','chickpea','grain','oat','quinoa','cereal','cornstarch','baking','yeast','canned','pantry']],
+    // ── Beverage ──
+    ['Alcohol',                    ['wine','beer','spirit','liquor','vodka','whiskey','whisky','rum','gin','tequila','alcohol']],
+    ['Non-Alcoholic Beverages',    ['juice','water','soda','pop','coffee','tea','syrup','cordial','soft drink','beverage']],
+    // ── Operating supplies ──
+    ['Cleaning & Sanitation',      ['cleaner','sanitizer','sanitiser','soap','detergent','bleach','disinfectant','degreaser','cleaning']],
+    ['Disposables',                ['glove','napkin','tissue','straw','cutlery','disposable','paper towel','food wrap','deli container']],
+    ['Packaging',                  ['box','bag','wrap','film','pail','jar','bottle','carton','clamshell','packaging','label']],
+    ['Linen & Uniforms',           ['towel','apron','uniform','tablecloth','rag','linen']],
+    ['Smallwares & Equipment',     ['pan','pot','knife','sheet tray','whisk','spatula','tong','utensil','smallware','equipment']],
+    ['Office & Admin',             ['printer','ink','toner','stationery','pen ','envelope','office']],
   ]
   for (const [category, keywords] of rules) {
     if (keywords.some(k => n.includes(k))) return category
   }
-  return 'Ingredients'
+  return 'Other'
 }
 
 // ─── Generic table CRUD helper ────────────────────────────────
@@ -178,7 +198,7 @@ const ALLOWED_TABLES = [
   'recipes', 'recipe_items', 'finished_products', 'finished_product_items',
   'inventory', 'stock_log', 'invoices', 'invoice_lines',
   'staff', 'certification_types', 'staff_certifications',
-  'product_mappings', 'units', 'product_aliases',
+  'product_mappings', 'units', 'categories', 'product_aliases',
   'stock_takes', 'stock_take_items'
 ]
 
@@ -224,7 +244,7 @@ app.get('/api/tables/:table/:id', async (c) => {
 })
 
 // Tables that use INTEGER PRIMARY KEY AUTOINCREMENT — don't inject a UUID id
-const INTEGER_PK_TABLES = ['units']
+const INTEGER_PK_TABLES = ['units', 'categories']
 
 // ── Insert
 app.post('/api/tables/:table', async (c) => {
@@ -775,10 +795,11 @@ app.post('/api/bulk/upsert-products', async (c) => {
       reusedGenerics++
     } else {
       genericId = uid()
+      // Treat the generic placeholders ('Other' now, 'Ingredients' legacy) as
+      // "no real category given" and infer a specific one from the name instead.
       const providedCategory = (p.category as string || '').trim()
-      const category = (providedCategory && providedCategory !== 'Ingredients')
-        ? providedCategory
-        : inferCategory(name)
+      const isPlaceholder = !providedCategory || providedCategory === 'Ingredients' || providedCategory === 'Other'
+      const category = isPlaceholder ? inferCategory(name) : providedCategory
       await c.env.DB.prepare(
         `INSERT INTO generic_products (id, name, category, sub_unit_name, sub_unit_qty)
          VALUES (?, ?, ?, ?, ?)`
@@ -1616,6 +1637,35 @@ app.delete('/api/units/:id', async (c) => {
   }
 
   await c.env.DB.prepare(`DELETE FROM units WHERE id = ?`).bind(id).run()
+  return c.body(null, 204)
+})
+
+// DELETE /api/categories/:id  (mirrors /api/units/:id)
+// Without ?force=true: returns { warning, count, message } if the category is
+// still assigned to products. With ?force=true: deletes the master-list row
+// regardless. Products keep their (now free-text) category string either way —
+// deleting from the master list only removes it from the picker, it does not
+// re-categorize existing products.
+app.delete('/api/categories/:id', async (c) => {
+  const id    = c.req.param('id')
+  const force = c.req.query('force') === 'true'
+
+  const cat = await c.env.DB.prepare(`SELECT * FROM categories WHERE id = ?`)
+    .bind(id).first<{ id: number; name: string; sort_order: number }>()
+  if (!cat) return c.json({ error: 'Not found' }, 404)
+
+  if (!force) {
+    const usage = await c.env.DB.prepare(
+      `SELECT COUNT(*) as count FROM generic_products
+         WHERE deleted_at IS NULL AND LOWER(TRIM(category)) = LOWER(TRIM(?))`
+    ).bind(cat.name).first<{ count: number }>()
+    const count = usage?.count ?? 0
+    if (count > 0) {
+      return c.json({ warning: true, count, message: `Used by ${count} products` })
+    }
+  }
+
+  await c.env.DB.prepare(`DELETE FROM categories WHERE id = ?`).bind(id).run()
   return c.body(null, 204)
 })
 

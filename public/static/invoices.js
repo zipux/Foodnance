@@ -1564,7 +1564,7 @@ async function confirmInvPrompt(invoiceRef) {
           itemId:   match.id,
           itemType: 'raw_material',
           itemName: match.name,
-          category: match.category || 'Ingredients',
+          category: match.category || 'Other',
           unit,
           change:   qty,
           reason:   `Invoice stock-in: ${invoiceRef || 'manual'}`,

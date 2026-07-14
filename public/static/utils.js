@@ -117,6 +117,151 @@ function slugify(str) {
   return (str || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
+// ── Product categories ────────────────────────────────────────────
+// Built-in taxonomy, grouped into food (COGS) / beverage / operating
+// supplies so the spending-breakdown report splits food cost the way a
+// professional kitchen tracks it, instead of one giant "Ingredients" bucket.
+// Category is stored as free-text on each product, so users can also add
+// their own (see populateCategoryDropdown's "+ New category…" option).
+// This constant is the single source of truth for the built-in list; a
+// follow-up will promote categories to a DB-managed table (like `units`).
+const DEFAULT_CATEGORIES = [
+  // Food (COGS)
+  'Produce', 'Meat & Poultry', 'Seafood', 'Dairy & Eggs',
+  'Dry Goods & Pantry', 'Bakery', 'Frozen',
+  'Oils, Sauces & Condiments', 'Spices & Seasonings',
+  // Beverage
+  'Alcohol', 'Non-Alcoholic Beverages',
+  // Operating supplies
+  'Packaging', 'Disposables', 'Cleaning & Sanitation',
+  'Linen & Uniforms', 'Smallwares & Equipment', 'Office & Admin',
+  // Fallback
+  'Other',
+];
+
+// Sentinel option values for the dropdown's action rows.
+const NEW_CATEGORY_SENTINEL    = '__new_category__';
+const MANAGE_CATEGORY_SENTINEL = '__manage_categories__';
+
+// Dedupe a set of name lists case-insensitively, preserving first-seen order.
+function dedupeNames(...lists) {
+  const seen = new Set();
+  const out = [];
+  for (const list of lists) {
+    for (const c of (list || [])) {
+      const v = (c || '').trim();
+      if (!v || seen.has(v.toLowerCase())) continue;
+      seen.add(v.toLowerCase());
+      out.push(v);
+    }
+  }
+  return out;
+}
+
+// Merge the built-in list with any extra categories (e.g. those already saved
+// on products). Built-in order first, extras appended A→Z. Used for stat chips
+// and as a fallback when the DB category list isn't available.
+function mergeCategories(extra = []) {
+  const seen = new Set(DEFAULT_CATEGORIES.map(c => c.toLowerCase()));
+  const extras = [];
+  for (const c of extra) {
+    const v = (c || '').trim();
+    if (!v || seen.has(v.toLowerCase())) continue;
+    seen.add(v.toLowerCase());
+    extras.push(v);
+  }
+  extras.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  return [...DEFAULT_CATEGORIES, ...extras];
+}
+
+// Populate a category <select> from an explicit list of names, plus the
+// "+ New category…" and "+ Manage categories" action rows.
+//   select        – the <select> element
+//   selectedValue – value to preselect (falls back to the select's current value)
+//   categories    – names to list (from the DB categories table). Falls back to
+//                   the built-in taxonomy if empty.
+function populateCategoryDropdown(select, selectedValue, categories) {
+  if (!select) return;
+  const prev = selectedValue !== undefined ? selectedValue : select.value;
+  const names = (categories && categories.length) ? categories : DEFAULT_CATEGORIES;
+  select.innerHTML =
+    '<option value="">— Select category —</option>' +
+    names.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('') +
+    `<option value="${NEW_CATEGORY_SENTINEL}" style="color:var(--primary);font-style:italic">+ New category…</option>` +
+    `<option value="${MANAGE_CATEGORY_SENTINEL}" style="color:var(--primary);font-style:italic">⚙ Manage categories</option>`;
+  // Case-insensitive reselect so a stored value like "produce" still matches.
+  if (prev) {
+    const lower = String(prev).toLowerCase();
+    const opt = Array.from(select.options).find(o => o.value.toLowerCase() === lower);
+    if (opt) {
+      select.value = opt.value;
+    } else {
+      // A value not in the list (custom/legacy): inject it so it stays selected.
+      const injected = document.createElement('option');
+      injected.value = prev; injected.textContent = prev;
+      select.insertBefore(injected, select.options[select.options.length - 2]);
+      select.value = prev;
+    }
+  }
+  select.dataset.prevCat = select.value;
+}
+
+// Wire a category <select> so the action rows work:
+//   "+ New category…"     → prompt, persist to the DB categories table, select it
+//   "⚙ Manage categories" → open the Manage Categories modal
+// Falls back to the previous value on cancel/blank/duplicate. Call once.
+function attachNewCategoryHandler(select) {
+  if (!select || select.dataset.newCatWired) return;
+  select.dataset.newCatWired = '1';
+  select.dataset.prevCat = select.value;
+  select.addEventListener('change', async () => {
+    const v = select.value;
+
+    if (v === MANAGE_CATEGORY_SENTINEL) {
+      select.value = select.dataset.prevCat || '';
+      openManageCategoriesModal();
+      return;
+    }
+
+    if (v !== NEW_CATEGORY_SENTINEL) {
+      select.dataset.prevCat = v;
+      return;
+    }
+
+    const name = (window.prompt('New category name:') || '').trim();
+    if (!name) { select.value = select.dataset.prevCat || ''; return; }
+
+    // Already listed? Just select it (case-insensitive).
+    const existing = Array.from(select.options).find(
+      o => o.value.toLowerCase() === name.toLowerCase() &&
+           o.value !== NEW_CATEGORY_SENTINEL && o.value !== MANAGE_CATEGORY_SENTINEL
+    );
+    if (existing) {
+      select.value = existing.value;
+      select.dataset.prevCat = select.value;
+      return;
+    }
+
+    // Persist to the master list, then refresh every category dropdown.
+    try {
+      await apiPost('tables/categories', { name, sort_order: 100 });
+      await _refreshAllCategoriesAndDropdowns();
+    } catch (e) {
+      // Non-fatal (e.g. UNIQUE race) — still show it locally for this save.
+    }
+    const opt = Array.from(select.options).find(o => o.value.toLowerCase() === name.toLowerCase());
+    if (opt) {
+      select.value = opt.value;
+    } else {
+      const injected = document.createElement('option');
+      injected.value = name; injected.textContent = name;
+      select.insertBefore(injected, select.options[select.options.length - 2]);
+      select.value = name;
+    }
+    select.dataset.prevCat = select.value;
+  });
+}
+
 // ── Manage Units ──────────────────────────────────────────────────
 const _unitRefreshCallbacks = [];
 let _manageUnitsCache = [];
@@ -227,3 +372,123 @@ async function deleteUnit(id, name) {
 window.openManageUnitsModal = openManageUnitsModal;
 window.addUnit  = addUnit;
 window.deleteUnit = deleteUnit;
+
+// ── Manage Categories ─────────────────────────────────────────────
+// Mirrors Manage Units: a DB-backed master list (categories table) edited
+// through a modal, with callbacks so every open category dropdown refreshes.
+const _categoryRefreshCallbacks = [];
+let _manageCategoriesCache = [];
+
+function registerCategoryRefreshCallback(fn) {
+  _categoryRefreshCallbacks.push(fn);
+}
+
+async function _refreshAllCategoriesAndDropdowns() {
+  for (const fn of _categoryRefreshCallbacks) {
+    try { await fn(); } catch (e) { console.error('Category refresh error', e); }
+  }
+}
+
+// Fetch the category master list (sorted), for callers that need the names.
+async function fetchCategoryNames() {
+  const data = await apiGet('tables/categories?page=1&limit=200');
+  return (data.data || [])
+    .slice()
+    .sort((a, b) => (a.sort_order - b.sort_order) || a.name.localeCompare(b.name))
+    .map(c => c.name);
+}
+
+async function openManageCategoriesModal() {
+  if (!document.getElementById('manageCategoriesModal')) return;
+  await renderManageCategoriesList();
+  openModal('manageCategoriesModal');
+}
+
+async function renderManageCategoriesList() {
+  const container = document.getElementById('manageCategoriesList');
+  if (!container) return;
+  container.innerHTML = '<div style="color:var(--text-muted);font-size:.85rem;padding:.5rem 0"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
+  try {
+    const data = await apiGet('tables/categories?page=1&limit=200');
+    _manageCategoriesCache = (data.data || [])
+      .sort((a, b) => (a.sort_order - b.sort_order) || a.name.localeCompare(b.name));
+    if (!_manageCategoriesCache.length) {
+      container.innerHTML = '<div style="color:var(--text-muted);font-size:.85rem;padding:.5rem 0">No categories defined yet.</div>';
+      return;
+    }
+    container.innerHTML = _manageCategoriesCache.map(c => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:.45rem .65rem;border:1px solid var(--border);border-radius:6px;margin-bottom:.35rem;background:#fafbff">
+        <span style="font-weight:500;font-size:.92rem">${esc(c.name)}</span>
+        <button class="btn btn-danger btn-icon" onclick="deleteCategory(${c.id},'${esc(c.name).replace(/'/g, "\\'")}')" title="Delete category" style="padding:.3rem .55rem;font-size:.78rem">
+          <i class="fas fa-trash"></i>
+        </button>
+      </div>
+    `).join('');
+  } catch (e) {
+    container.innerHTML = '<div style="color:#dc2626;font-size:.85rem">Failed to load categories.</div>';
+  }
+}
+
+async function addCategory() {
+  const input = document.getElementById('newCategoryName');
+  const errEl = document.getElementById('manageCategoriesError');
+  const name  = (input?.value || '').trim();
+
+  errEl.style.display = 'none';
+
+  if (!name) {
+    errEl.textContent = 'Please enter a category name.';
+    errEl.style.display = '';
+    return;
+  }
+  if (_manageCategoriesCache.some(c => c.name.toLowerCase() === name.toLowerCase())) {
+    errEl.textContent = `Category "${name}" already exists.`;
+    errEl.style.display = '';
+    return;
+  }
+
+  try {
+    await apiPost('tables/categories', { name, sort_order: 100 });
+    input.value = '';
+    await renderManageCategoriesList();
+    await _refreshAllCategoriesAndDropdowns();
+  } catch (e) {
+    errEl.textContent = e.message || 'Failed to add category.';
+    errEl.style.display = '';
+  }
+}
+
+async function deleteCategory(id, name) {
+  const res = await fetch(`/api/categories/${id}`, { method: 'DELETE' });
+
+  if (res.status === 204) {
+    await renderManageCategoriesList();
+    await _refreshAllCategoriesAndDropdowns();
+    return;
+  }
+
+  let data = {};
+  try { data = await res.json(); } catch (_) {}
+
+  if (data.warning) {
+    const confirmed = confirm(
+      `"${name}" is assigned to ${data.count} ${data.count === 1 ? 'product' : 'products'}. ` +
+      `Deleting it only removes it from the picker — those products keep the label. Delete anyway?`
+    );
+    if (!confirmed) return;
+    const res2 = await fetch(`/api/categories/${id}?force=true`, { method: 'DELETE' });
+    if (res2.status === 204) {
+      await renderManageCategoriesList();
+      await _refreshAllCategoriesAndDropdowns();
+    } else {
+      showToast('Failed to delete category.', 'error');
+    }
+    return;
+  }
+
+  showToast(data.error || 'Failed to delete category.', 'error');
+}
+
+window.openManageCategoriesModal = openManageCategoriesModal;
+window.addCategory = addCategory;
+window.deleteCategory = deleteCategory;

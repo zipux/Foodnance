@@ -19,7 +19,7 @@
 
 ### 📦 Products (`/`)
 - Two-level product model: Generic Product + Supplier Entries
-- Category management (Ingredients, Packaging, Labels, Shipping)
+- Category management: food (COGS) groups — Produce, Meat & Poultry, Seafood, Dairy & Eggs, Dry Goods & Pantry, Bakery, Frozen, Oils/Sauces/Condiments, Spices & Seasonings — plus beverage and operating-supply categories, with inline "+ New category" for custom ones
 - Sub-unit breakdown (e.g. 1 Dozen = 12 Eggs)
 - Supplier entries with FIFO pricing, variance column
 - Auto "Add to Inventory" prompt after saving entries

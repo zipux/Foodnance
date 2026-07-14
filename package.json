@@ -9,7 +9,7 @@
     "deploy": "npm run build && wrangler pages deploy dist --project-name webapp",
     "cf-typegen": "wrangler types --env-interface CloudflareBindings",
     "db:migrate:local": "wrangler d1 migrations apply invoicedb-production --local",
-    "db:migrate:prod": "wrangler d1 migrations apply invoicedb-production",
+    "db:migrate:prod": "wrangler d1 migrations apply invoicedb-production --remote",
     "db:reset": "rm -rf .wrangler/state/v3/d1 && npm run db:migrate:local",
     "db:wipe:local": "wrangler d1 execute invoicedb-production --local --file=./wipe-data.sql",
     "db:wipe:prod": "wrangler d1 execute invoicedb-production --remote --file=./wipe-data.sql"

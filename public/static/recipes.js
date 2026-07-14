@@ -617,7 +617,7 @@ async function addMissingProduct(idx) {
   if (!name) { showToast('No ingredient name to add.', 'error'); return; }
 
   try {
-    const created = await apiPost(`tables/${PRODUCTS_TABLE_R}`, { name, category: 'Ingredients' });
+    const created = await apiPost(`tables/${PRODUCTS_TABLE_R}`, { name, category: 'Other' });
     allProducts.push(created); // so it matches next time and can be selected now
 
     const input  = document.getElementById(`ing-prod-input-${idx}`);
@@ -1145,7 +1145,7 @@ async function confirmProduceBatch() {
         itemId:    it.product_id,
         itemType:  'raw_material',
         itemName:  it.product_name,
-        category:  prod?.category || 'Ingredients',
+        category:  prod?.category || 'Other',
         unit:      it.unit || 'kg',
         change:    -deductQty,
         reason,

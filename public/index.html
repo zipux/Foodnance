@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Products — InvoiceDB</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260713-2" />
+  <link rel="stylesheet" href="/static/style.css?v=20260715-1" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 </head>
@@ -84,16 +84,9 @@
           </div>
           <div class="form-group">
             <label>Category *</label>
+            <!-- Options populated by populateCategoryDropdown() in products.js -->
             <select id="pCategory">
               <option value="">— Select category —</option>
-              <option value="Ingredients">Ingredients</option>
-              <option value="Packaging">Packaging</option>
-              <option value="Disposables">Disposables</option>
-              <option value="Non-Alcoholic Beverages">Non-Alcoholic Beverages</option>
-              <option value="Alcohol">Alcohol</option>
-              <option value="Cleaning &amp; Sanitation">Cleaning &amp; Sanitation</option>
-              <option value="Linen">Linen</option>
-              <option value="Other">Other</option>
             </select>
           </div>
         </div>
@@ -296,6 +289,30 @@
     </div>
   </div>
 
+  <!-- MANAGE CATEGORIES MODAL -->
+  <div class="modal-overlay hidden" id="manageCategoriesModal">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header">
+        <h3><i class="fas fa-tags"></i> Manage Categories</h3>
+        <button class="modal-close" onclick="closeModal('manageCategoriesModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <div id="manageCategoriesList" style="margin-bottom:1rem;max-height:320px;overflow-y:auto"></div>
+        <div style="display:flex;gap:.5rem;align-items:center">
+          <input type="text" id="newCategoryName" placeholder="New category name…" style="flex:1"
+                 onkeydown="if(event.key==='Enter') addCategory()" />
+          <button class="btn btn-primary btn-sm" onclick="addCategory()">
+            <i class="fas fa-plus"></i> Add
+          </button>
+        </div>
+        <div id="manageCategoriesError" style="color:#dc2626;font-size:.82rem;margin-top:.35rem;display:none"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('manageCategoriesModal')">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- MERGE PRODUCT MODAL -->
   <div class="modal-overlay hidden" id="mergeProductModal">
     <div class="modal" style="max-width:480px">
@@ -353,10 +370,10 @@
     </div>
   </div>
 
-  <script src="/static/utils.js?v=20260714-1"></script>
+  <script src="/static/utils.js?v=20260715-2"></script>
   <script src="/static/inventory.js?v=20260407-1"></script>
   <script src="/static/suppliers.js?v=20260714-1"></script>
-  <script src="/static/products.js?v=20260714-4"></script>
+  <script src="/static/products.js?v=20260715-2"></script>
 
   <!-- ── Inline invoice-file viewer modal (shared, lightweight) ── -->
   <div class="modal-overlay hidden" id="entryFileViewModal">
