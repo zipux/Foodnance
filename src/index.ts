@@ -200,6 +200,13 @@ app.get('/api/tables/:table', async (c) => {
     filterEntries.forEach(([, v]) => args.push(v))
   }
 
+  // Hide voided product entries by default — a voided invoice's purchases must
+  // not count toward Latest Price / costing anywhere they're read. (Restore
+  // clears the flag and they reappear.)
+  if (table === 'product_entries') {
+    where = where ? `${where} AND voided_at IS NULL` : 'WHERE voided_at IS NULL'
+  }
+
   const rows = await c.env.DB.prepare(
     `SELECT * FROM ${table} ${where} ORDER BY rowid DESC LIMIT ? OFFSET ?`
   ).bind(...args, l, offset).all()
@@ -368,18 +375,31 @@ app.post('/api/invoices/:id/void', async (c) => {
     .bind(id).first<{ id: string }>()
   if (!inv) return c.json({ error: 'Invoice not found' }, 404)
   const now = new Date().toISOString()
-  await c.env.DB.prepare(
-    "UPDATE invoices SET voided_at = datetime('now'), void_reason = ? WHERE id = ?"
-  ).bind(reason, id).run()
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      "UPDATE invoices SET voided_at = datetime('now'), void_reason = ? WHERE id = ?"
+    ).bind(reason, id),
+    // Reverse the money side: flag the purchase entries this invoice created so
+    // they stop counting toward Latest Price / price-movers / costing.
+    c.env.DB.prepare(
+      "UPDATE product_entries SET voided_at = datetime('now') WHERE invoice_id = ?"
+    ).bind(id),
+  ])
   return c.json({ id, voided_at: now, void_reason: reason })
 })
 
-// POST /api/invoices/:id/restore — un-void: back into the active list and P&L.
+// POST /api/invoices/:id/restore — un-void: back into the active list and P&L,
+// and un-flag the purchase entries so cost history counts again.
 app.post('/api/invoices/:id/restore', async (c) => {
   const { id } = c.req.param()
-  await c.env.DB.prepare(
-    "UPDATE invoices SET voided_at = NULL, void_reason = '' WHERE id = ?"
-  ).bind(id).run()
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      "UPDATE invoices SET voided_at = NULL, void_reason = '' WHERE id = ?"
+    ).bind(id),
+    c.env.DB.prepare(
+      "UPDATE product_entries SET voided_at = NULL WHERE invoice_id = ?"
+    ).bind(id),
+  ])
   return c.json({ id, voided_at: null, void_reason: '' })
 })
 
@@ -933,6 +953,7 @@ app.get('/api/price-movers', async (c) => {
     FROM product_entries pe
     WHERE pe.purchase_date IS NOT NULL AND pe.purchase_date != ''
       AND pe.generic_product_id IS NOT NULL AND pe.generic_product_id != ''
+      AND pe.voided_at IS NULL
   `
   const args: string[] = []
   if (from) { sql += ' AND pe.purchase_date >= ?'; args.push(from) }
