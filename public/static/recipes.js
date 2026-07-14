@@ -125,25 +125,48 @@ function costPerUnit(p) {
   return qty > 0 ? (p.cost || 0) / qty : (p.cost || 0);
 }
 
-// Conversion factor: how many "recipeUnit" equal 1 "packUnit"
+// kg-equivalent of one weight unit (used for all weight ↔ weight math)
+const _WEIGHT_KG = { kg: 1, g: 0.001, lb: 0.453592 };
+// Treat these pack units as a discrete "each"/count
+function _isEachUnit(u) { return u === 'each' || u === 'ea' || u === 'unit'; }
+
+// Conversion factor: how many "packUnit" equal 1 "recipeUnit".
 // Returns a multiplier so that:  line_cost = unit_cost_per_packUnit × quantity × conversionFactor
 // e.g. packUnit=kg, recipeUnit=g  → 1g = 0.001kg → factor = 0.001
 // e.g. packUnit=g,  recipeUnit=kg → 1kg = 1000g  → factor = 1000
-function unitConversionFactor(packUnitStr, recipeUnitStr) {
+//
+// Each ↔ weight requires the product's average weight per each (avgWeightKg,
+// stored in kg as generic_products.avg_weight_per_unit). If that conversion is
+// needed but no average weight is set, returns NULL — callers must treat null
+// as "cannot cost this line" and flag it, never fall back to a silent factor of 1.
+function unitConversionFactor(packUnitStr, recipeUnitStr, avgWeightKg) {
   const pu = (packUnitStr  || '').toLowerCase();
   const ru = (recipeUnitStr || '').toLowerCase();
   if (pu === ru) return 1;
-  // Weight
-  if (pu === 'kg'  && ru === 'g')   return 0.001;
-  if (pu === 'g'   && ru === 'kg')  return 1000;
-  if (pu === 'kg'  && ru === 'lb')  return 0.453592;
-  if (pu === 'lb'  && ru === 'kg')  return 2.20462;
-  if (pu === 'g'   && ru === 'lb')  return 453.592;
-  if (pu === 'lb'  && ru === 'g')   return 0.00220462;
-  // Volume
+  // Weight ↔ weight
+  if (_WEIGHT_KG[pu] != null && _WEIGHT_KG[ru] != null) return _WEIGHT_KG[ru] / _WEIGHT_KG[pu];
+  // Volume ↔ volume
   if (pu === 'l'   && ru === 'ml')  return 0.001;
   if (pu === 'ml'  && ru === 'l')   return 1000;
+  // Each ↔ weight, via average weight per each
+  //   packUnit=each, recipeUnit=weight → each per 1 recipeUnit = (recipeUnit in kg) / avgWeightKg
+  //   packUnit=weight, recipeUnit=each → packUnits per 1 each = avgWeightKg / (packUnit in kg)
+  if (_isEachUnit(pu) && _WEIGHT_KG[ru] != null) {
+    if (!avgWeightKg || avgWeightKg <= 0) return null;
+    return _WEIGHT_KG[ru] / avgWeightKg;
+  }
+  if (_WEIGHT_KG[pu] != null && _isEachUnit(ru)) {
+    if (!avgWeightKg || avgWeightKg <= 0) return null;
+    return avgWeightKg / _WEIGHT_KG[pu];
+  }
   return 1;
+}
+
+// Average weight (kg per each) for the product referenced by a recipe row, or 0.
+function rowAvgWeightKg(r) {
+  const p = r && r.product_id ? allProducts.find(x => x.id === r.product_id) : null;
+  const w = p ? parseFloat(p.avg_weight_per_unit) : 0;
+  return (w && w > 0) ? w : 0;
 }
 
 // Build the unit <option> list for an ingredient line.
@@ -201,6 +224,8 @@ async function loadProductCatalogue() {
       if (!entries.length) {
         return {
           id: g.id, name: g.name, category: g.category,
+          deleted_at: g.deleted_at || null,   // archived items stay resolvable but are hidden from pickers
+          avg_weight_per_unit: g.avg_weight_per_unit ?? null,  // kg per "each" — enables each↔weight costing
           pack_size: '', cost: 0,
           sub_unit_name: g.sub_unit_name || '', sub_unit_qty: g.sub_unit_qty || 0,
           _cpu: 0, _packUnit: 'unit',
@@ -230,6 +255,8 @@ async function loadProductCatalogue() {
         id:            g.id,
         name:          g.name,
         category:      g.category,
+        deleted_at:    g.deleted_at || null,   // archived items stay resolvable but are hidden from pickers
+        avg_weight_per_unit: g.avg_weight_per_unit ?? null,  // kg per "each" — enables each↔weight costing
         pack_size:     packSz,
         pack_qty:      pQty,
         pack_unit:     pUnit,
@@ -328,11 +355,12 @@ function addIngredientLine(prefill = null) {
   div.innerHTML = `
     <div class="form-group" style="position:relative">
       ${idx === 0 ? '<label>Product</label>' : '<label>&nbsp;</label>'}
-      <input type="text" id="ing-prod-input-${idx}" value="${prefillName}" placeholder="Type to search…" autocomplete="off"
+      <input type="text" id="ing-prod-input-${idx}" value="${prefillName}" placeholder="Search or pick a product…" autocomplete="off"
              class="${isFlagged ? 'ing-input-flagged' : ''}"
-             oninput="onProductSearch(${idx})" onblur="hideProductSuggestions(${idx})" />
+             oninput="onProductSearch(${idx})" onfocus="onProductFocus(${idx})"
+             onkeydown="onProductKeydown(${idx}, event)" onblur="hideProductSuggestions(${idx})" />
       <input type="hidden" id="ing-prod-${idx}" value="${esc(row.product_id || '')}" />
-      <div id="ing-prod-suggestions-${idx}" class="product-suggestions"></div>
+      <div id="ing-prod-suggestions-${idx}" class="product-suggestions" onmousedown="event.preventDefault()"></div>
       ${ingFlagHtml(idx, row)}
     </div>
     <div class="form-group">
@@ -409,7 +437,11 @@ function _updateIngCostDisplay(idx) {
   const r = ingredientRows[idx];
   if (!r || !r.product_id || !r.unit_cost || !r.pack_unit) { el.textContent = ''; return; }
   const unit   = r.unit || r.pack_unit;
-  const factor = unitConversionFactor(r.pack_unit, unit);
+  const factor = unitConversionFactor(r.pack_unit, unit, rowAvgWeightKg(r));
+  if (factor === null) {
+    el.innerHTML = `<span style="color:#dc2626" title="Set an Average Weight per Unit on this product to use it by ${esc(unit)}"><i class="fas fa-triangle-exclamation"></i> set avg. weight</span>`;
+    return;
+  }
   el.textContent = `${fmt(r.unit_cost * factor)} / ${unit}`;
 }
 
@@ -454,31 +486,139 @@ function onUnitChange(idx) {
   _updateIngCostDisplay(idx);
   recalcCosts();
 }
+// ── Ingredient product picker ─────────────────────────────────────
+// One field, two modes: empty → browse the full catalogue grouped by
+// category; typing → flat, name-only, ranked results. Keyboard: ↑/↓ move,
+// Enter picks, Esc closes. Archived products are never offered.
+let _pickerItems  = [];   // selectable rows for the OPEN dropdown, in display order
+let _pickerActive = -1;   // index into _pickerItems that's keyboard-highlighted
+
+// Opening (focus): show the list for whatever's currently typed (empty → browse).
+function onProductFocus(idx) {
+  const input = document.getElementById(`ing-prod-input-${idx}`);
+  renderProductSuggestions(idx, input ? input.value : '');
+}
+
+// Typing: a new query invalidates any prior selection, then re-render.
 function onProductSearch(idx) {
-  const input          = document.getElementById(`ing-prod-input-${idx}`);
-  const hidden         = document.getElementById(`ing-prod-${idx}`);
-  const suggestionsDiv = document.getElementById(`ing-prod-suggestions-${idx}`);
-  const query          = input.value.trim().toLowerCase();
+  const input  = document.getElementById(`ing-prod-input-${idx}`);
+  const hidden = document.getElementById(`ing-prod-${idx}`);
+  if (hidden) hidden.value = '';
+  renderProductSuggestions(idx, input ? input.value : '');
+}
 
-  hidden.value = '';
+function renderProductSuggestions(idx, rawQuery) {
+  const box = document.getElementById(`ing-prod-suggestions-${idx}`);
+  if (!box) return;
+  const q      = (rawQuery || '').trim();
+  const ql     = q.toLowerCase();
+  const active = allProducts.filter(p => !p.deleted_at);   // never offer archived
+  _pickerItems = [];
+  _pickerActive = -1;
+  let html = '';
 
-  if (query.length < 3) {
-    suggestionsDiv.style.display = 'none';
+  if (!active.length) {
+    box.innerHTML = '<div class="product-suggestion-empty">No products yet — type a name and add it.</div>';
+    box.style.display = 'block';
     return;
   }
 
-  const matches = allProducts.filter(p => p.name.toLowerCase().includes(query));
-
-  if (!matches.length) {
-    suggestionsDiv.innerHTML = '<div class="product-suggestion-empty">No products found</div>';
-    suggestionsDiv.style.display = 'block';
-    return;
+  if (!ql) {
+    // ── Browse mode: group by category, ordered by the built-in taxonomy ──
+    const byCat = new Map();
+    active.forEach(p => {
+      const c = (p.category || '').trim() || 'Uncategorised';
+      (byCat.get(c) || byCat.set(c, []).get(c)).push(p);
+    });
+    const order = mergeCategories([...byCat.keys()]);           // taxonomy order + any extras
+    const cats  = order.filter(c => byCat.has(c));
+    if (byCat.has('Uncategorised')) { cats.splice(cats.indexOf('Uncategorised'), 1); cats.push('Uncategorised'); }
+    for (const c of cats) {
+      const items = byCat.get(c).sort((a, b) => a.name.localeCompare(b.name));
+      html += `<div class="product-suggestion-cat">${esc(c)}</div>`;
+      for (const p of items) html += _pickerRow(idx, p, null);
+    }
+  } else {
+    // ── Search mode: name-only, prefix matches first, then A→Z ──
+    const matches = active
+      .filter(p => p.name.toLowerCase().includes(ql))
+      .sort((a, b) => {
+        const ap = a.name.toLowerCase().startsWith(ql) ? 0 : 1;
+        const bp = b.name.toLowerCase().startsWith(ql) ? 0 : 1;
+        return ap - bp || a.name.localeCompare(b.name);
+      });
+    if (!matches.length) html += `<div class="product-suggestion-empty">No products match “${esc(q)}”.</div>`;
+    for (const p of matches) html += _pickerRow(idx, p, p.category || '—');
+    // Always offer to add what they typed as a new product.
+    const n = _pickerItems.length;
+    _pickerItems.push({ type: 'add' });
+    html += `<div class="product-suggestion-item add-new" data-n="${n}" onmousedown="addProductFromSearch(${idx})">
+      <span><i class="fas fa-plus"></i>&nbsp; Add “${esc(q)}” as a new product</span></div>`;
   }
 
-  suggestionsDiv.innerHTML = matches.map(p =>
-    `<div class="product-suggestion-item" onmousedown="selectProduct(${idx}, '${esc(p.id)}')">${esc(p.name)}</div>`
-  ).join('');
-  suggestionsDiv.style.display = 'block';
+  box.innerHTML = html;
+  box.style.display = 'block';
+  _applyPickerHighlight(box);
+}
+
+// Build one selectable product row and register it for keyboard nav.
+function _pickerRow(idx, p, subtitle) {
+  const n = _pickerItems.length;
+  _pickerItems.push({ type: 'product', id: p.id });
+  const sub = subtitle ? `<span class="psi-sub">${esc(subtitle)}</span>` : '';
+  return `<div class="product-suggestion-item" data-n="${n}" onmousedown="selectProduct(${idx}, '${esc(p.id)}')">
+    <span>${esc(p.name)}</span>${sub}</div>`;
+}
+
+function _applyPickerHighlight(box) {
+  box.querySelectorAll('.product-suggestion-item').forEach(el => {
+    const on = Number(el.dataset.n) === _pickerActive;
+    el.classList.toggle('active', on);
+    if (on) el.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+// Keyboard: ↑/↓ move highlight, Enter selects, Esc closes.
+function onProductKeydown(idx, e) {
+  const box = document.getElementById(`ing-prod-suggestions-${idx}`);
+  const open = box && box.style.display !== 'none' && _pickerItems.length;
+  if (!open) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); onProductFocus(idx); }
+    return;
+  }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault(); _pickerActive = Math.min(_pickerItems.length - 1, _pickerActive + 1); _applyPickerHighlight(box);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault(); _pickerActive = Math.max(0, _pickerActive - 1); _applyPickerHighlight(box);
+  } else if (e.key === 'Enter') {
+    if (_pickerActive >= 0 && _pickerActive < _pickerItems.length) {
+      e.preventDefault();
+      const it = _pickerItems[_pickerActive];
+      if (it.type === 'product') selectProduct(idx, it.id);
+      else addProductFromSearch(idx);
+    }
+  } else if (e.key === 'Escape') {
+    box.style.display = 'none';
+  }
+}
+
+// Create a brand-new product from the typed text and select it on this line.
+async function addProductFromSearch(idx) {
+  const input = document.getElementById(`ing-prod-input-${idx}`);
+  const name  = (input?.value || '').trim();
+  if (!name) return;
+  try {
+    const created = await apiPost(`tables/${PRODUCTS_TABLE_R}`, { name, category: 'Other' });
+    allProducts.push({ ...created, deleted_at: null, avg_weight_per_unit: created.avg_weight_per_unit ?? null });
+    const hidden = document.getElementById(`ing-prod-${idx}`);
+    if (hidden) hidden.value = created.id;
+    input.value = created.name;
+    hideProductSuggestions(idx);
+    onProductChange(idx);
+    showToast(`Added "${name}" to Products — set its price on the Products page to include it in the cost.`, 'success');
+  } catch (e) {
+    showToast('Could not add product: ' + e.message, 'error');
+  }
 }
 
 function selectProduct(idx, productId) {
@@ -532,7 +672,8 @@ async function quickAddParse() {
   try {
     const res = await apiPost('ai/parse-recipe', {
       text,
-      products: allProducts.map(p => ({ id: p.id, name: p.name, category: p.category || '' })),
+      // Only offer active products as match candidates — never an archived one.
+      products: allProducts.filter(p => !p.deleted_at).map(p => ({ id: p.id, name: p.name, category: p.category || '' })),
     });
     const items = res.items || [];
     if (!items.length) { showToast('No ingredients recognised in that text.', 'warning'); return; }
@@ -667,12 +808,11 @@ function activeRows() {
 function recalcCosts() {
   const yieldQty  = parseFloat(document.getElementById('recipeYieldQty').value) || 1;
   const yieldUnit = document.getElementById('recipeYieldUnit').value || 'kg';
-  let total = 0;
-  activeRows().forEach(r => {
-    total += calcIngredientLineCost(r);
-  });
-  document.getElementById('totalCostDisplay').textContent       = fmt(total);
-  document.getElementById('costPerServingDisplay').textContent  = fmt(total / yieldQty);
+  const costs = activeRows().map(calcIngredientLineCost);
+  const total = costs.reduce((t, c) => t + (isUncostable(c) ? 0 : c), 0);
+  const warn  = costs.some(isUncostable) ? ' ⚠' : '';   // total excludes uncostable lines
+  document.getElementById('totalCostDisplay').textContent       = fmt(total) + warn;
+  document.getElementById('costPerServingDisplay').textContent  = fmt(total / yieldQty) + warn;
   document.getElementById('costPerUnitLabel').textContent       = `Cost per ${yieldUnit}`;
 }
 
@@ -696,9 +836,34 @@ function calcIngredientLineCost(r) {
     return costPerSub * (r.quantity || 0);
   }
 
-  // Standard path: use unit conversion factor
-  const factor = unitConversionFactor(r.pack_unit || 'kg', r.unit || 'kg');
+  // Standard path: use unit conversion factor (avg-weight-aware for each↔weight)
+  const factor = unitConversionFactor(r.pack_unit || 'kg', r.unit || 'kg', rowAvgWeightKg(r));
+  if (factor === null) return null;   // uncostable (each↔weight with no avg weight set)
   return (r.unit_cost || 0) * (r.quantity || 1) * factor;
+}
+
+// A line cost is "uncostable" (null) when its units can't be converted — e.g. an
+// each-priced product used by weight with no average weight set on the product.
+function isUncostable(v) { return v === null || (typeof v === 'number' && isNaN(v)); }
+
+// Sum line costs, ignoring uncostable ones (they're flagged separately in the UI).
+function sumLineCosts(rows) {
+  return rows.reduce((t, r) => {
+    const c = calcIngredientLineCost(r);
+    return t + (isUncostable(c) ? 0 : c);
+  }, 0);
+}
+
+// Any active row that can't be costed? (drives the "set avg weight" warnings.)
+function anyUncostable(rows) {
+  return rows.some(r => isUncostable(calcIngredientLineCost(r)));
+}
+
+// Format a line/total cost cell; uncostable → a red warning marker.
+function fmtLineCost(v) {
+  return isUncostable(v)
+    ? '<span style="color:#dc2626" title="Set an Average Weight per Unit on this product to cost it by weight">⚠&nbsp;n/a</span>'
+    : fmt(v);
 }
 
 // ── Save Recipe ────────────────────────────────────────────────
@@ -719,10 +884,11 @@ async function saveRecipe() {
   const items = activeRows();
   if (!items.length) { showToast('Add at least one ingredient.', 'error'); return; }
 
-  let total = 0;
-  items.forEach(r => {
-    total += calcIngredientLineCost(r);
-  });
+  if (anyUncostable(items)) {
+    showToast('Some ingredients can’t be costed — set an Average Weight per Unit on those products. Saving with those lines counted as $0.', 'warning');
+  }
+
+  const total = sumLineCosts(items);
 
   const btn = document.getElementById('saveRecipeBtn');
   btn.disabled = true;
@@ -756,7 +922,7 @@ async function saveRecipe() {
         product_name: r.product_name,
         quantity:     r.quantity,
         unit:         r.unit,
-        line_cost:    (r.unit_cost || 0) * (r.quantity || 1),
+        line_cost:    calcIngredientLineCost(r) || 0,   // unit-converted; uncostable → 0
       });
     }
 
@@ -859,7 +1025,8 @@ async function openRecipeDetail(id) {
         sub_unit_name: prod?.sub_unit_name || '',
         sub_unit_qty:  prod?.sub_unit_qty  || 0,
       };
-      totalCost += calcIngredientLineCost(row);
+      const c = calcIngredientLineCost(row);
+      totalCost += isUncostable(c) ? 0 : c;
     });
   } else {
     totalCost = recipe.total_cost || 0; // fallback to saved value
@@ -907,7 +1074,7 @@ async function openRecipeDetail(id) {
           <td><strong>${esc(it.product_name)}</strong></td>
           <td>${it.quantity}</td>
           <td>${esc(it.unit || 'unit')}</td>
-          <td><strong>${fmt(lineCost)}</strong></td>
+          <td><strong>${fmtLineCost(lineCost)}</strong></td>
         </tr>
       `;
     });
@@ -1078,9 +1245,9 @@ function updatePbPreview() {
       };
       lineCost = calcIngredientLineCost(row);
     }
-    totalBatchCost += lineCost;
+    totalBatchCost += isUncostable(lineCost) ? 0 : lineCost;
 
-    const costStr = prod ? ` <span style="color:var(--text-muted);font-size:.78rem">(${fmt(lineCost)})</span>` : '';
+    const costStr = prod ? ` <span style="color:var(--text-muted);font-size:.78rem">(${fmtLineCost(lineCost)})</span>` : '';
 
     html += `<div class="pb-deduction-row">
       <span><i class="fas fa-minus-circle" style="color:#dc2626"></i> ${esc(it.product_name)}${costStr}</span>
