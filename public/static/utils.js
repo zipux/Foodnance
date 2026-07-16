@@ -139,6 +139,20 @@ const DEFAULT_CATEGORIES = [
   'Other',
 ];
 
+// Cost-group type per built-in category. Source of truth is the DB
+// `categories.type` column (migration 0020); this mirrors it for the frontend
+// fallback when the DB list is unavailable. 4th taxonomy sync point — keep
+// aligned with DEFAULT_CATEGORIES, the .cat-<slug> CSS, and inferCategory.
+const DEFAULT_CATEGORY_TYPES = {
+  'Produce': 'food', 'Meat & Poultry': 'food', 'Seafood': 'food', 'Dairy & Eggs': 'food',
+  'Dry Goods & Pantry': 'food', 'Bakery': 'food', 'Frozen': 'food',
+  'Oils, Sauces & Condiments': 'food', 'Spices & Seasonings': 'food',
+  'Alcohol': 'beverage', 'Non-Alcoholic Beverages': 'beverage',
+  'Packaging': 'supplies', 'Disposables': 'supplies', 'Cleaning & Sanitation': 'supplies',
+  'Linen & Uniforms': 'supplies', 'Smallwares & Equipment': 'supplies', 'Office & Admin': 'supplies',
+  'Other': 'food',
+};
+
 // Sentinel option values for the dropdown's action rows.
 const NEW_CATEGORY_SENTINEL    = '__new_category__';
 const MANAGE_CATEGORY_SENTINEL = '__manage_categories__';
@@ -416,9 +430,15 @@ async function renderManageCategoriesList() {
       container.innerHTML = '<div style="color:var(--text-muted);font-size:.85rem;padding:.5rem 0">No categories defined yet.</div>';
       return;
     }
+    const typeOpts = (sel) => ['food', 'beverage', 'supplies']
+      .map(t => `<option value="${t}"${(sel || 'food') === t ? ' selected' : ''}>${t.charAt(0).toUpperCase() + t.slice(1)}</option>`)
+      .join('');
     container.innerHTML = _manageCategoriesCache.map(c => `
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:.45rem .65rem;border:1px solid var(--border);border-radius:6px;margin-bottom:.35rem;background:#fafbff">
-        <span style="font-weight:500;font-size:.92rem">${esc(c.name)}</span>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;padding:.45rem .65rem;border:1px solid var(--border);border-radius:6px;margin-bottom:.35rem;background:#fafbff">
+        <span style="font-weight:500;font-size:.92rem;flex:1">${esc(c.name)}</span>
+        <select onchange="editCategoryType(${c.id}, this.value)" title="Category type" style="font-size:.8rem;padding:.2rem .4rem">
+          ${typeOpts(c.type)}
+        </select>
         <button class="btn btn-danger btn-icon" onclick="deleteCategory(${c.id},'${esc(c.name).replace(/'/g, "\\'")}')" title="Delete category" style="padding:.3rem .55rem;font-size:.78rem">
           <i class="fas fa-trash"></i>
         </button>
@@ -447,14 +467,28 @@ async function addCategory() {
     return;
   }
 
+  const type = document.getElementById('newCategoryType')?.value || 'food';
+
   try {
-    await apiPost('tables/categories', { name, sort_order: 100 });
+    await apiPost('tables/categories', { name, type, sort_order: 100 });
     input.value = '';
     await renderManageCategoriesList();
     await _refreshAllCategoriesAndDropdowns();
   } catch (e) {
     errEl.textContent = e.message || 'Failed to add category.';
     errEl.style.display = '';
+  }
+}
+
+// Change a category's cost-group type (Food / Beverage / Supplies).
+async function editCategoryType(id, type) {
+  try {
+    await apiPatch(`tables/categories/${id}`, { type });
+    const row = _manageCategoriesCache.find(c => c.id === id);
+    if (row) row.type = type;
+    await _refreshAllCategoriesAndDropdowns();
+  } catch (e) {
+    showToast('Failed to update category type.', 'error');
   }
 }
 
@@ -491,4 +525,5 @@ async function deleteCategory(id, name) {
 
 window.openManageCategoriesModal = openManageCategoriesModal;
 window.addCategory = addCategory;
+window.editCategoryType = editCategoryType;
 window.deleteCategory = deleteCategory;

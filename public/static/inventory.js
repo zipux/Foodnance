@@ -4,26 +4,20 @@ const INV_TABLE  = 'inventory';
 const LOG_TABLE  = 'stock_log';
 
 let allInventory   = [];   // full inventory rows
-let activeFilter   = 'raw_material';
+let activeFilter   = null;  // null = All; else 'raw_material' | 'batch' | 'finished_product' | 'out_of_stock'
+let activeCategory = null;  // sub-filter, only applies when activeFilter === 'raw_material'
 let invSearchQuery = '';
 let priceMap       = {};   // keyed by item_id → price info object
 let stockTakeStatusMap = {}; // keyed by inventory.id → 'counted' | 'not_counted'
+let allGenericInv  = [];   // generic_products cache (for the in-place product editor)
+let invCategories  = [];   // category master-list names (for the in-place editor dropdown)
+let invCatType     = {};   // lowercased category name → 'food' | 'beverage' | 'supplies'
 
 // ── Bootstrap ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   if (!document.getElementById('inventory-page-marker')) return;
 
   await loadInventory();
-
-  // Filter tabs
-  document.querySelectorAll('.inv-tab').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.inv-tab').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      activeFilter = btn.dataset.type;
-      renderInventory();
-    });
-  });
 
   // Search
   document.getElementById('invSearch').addEventListener('input', e => {
@@ -57,20 +51,37 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Live preview in adjust modal
   document.getElementById('adjustQty').addEventListener('input',    updateAdjustPreview);
   document.getElementById('adjustType').addEventListener('change',  updateAdjustPreview);
+
+  // In-place product editor modal
+  document.getElementById('closeInvEditModal').addEventListener('click',  () => closeModal('invEditProductModal'));
+  document.getElementById('cancelInvEditModal').addEventListener('click', () => closeModal('invEditProductModal'));
+  document.getElementById('invEditProductModal').addEventListener('click', e => {
+    if (e.target === document.getElementById('invEditProductModal')) closeModal('invEditProductModal');
+  });
+  document.getElementById('saveInvEditBtn').addEventListener('click', saveInvEditProduct);
 });
 
 // ── Load & Render ──────────────────────────────────────────────
 async function loadInventory() {
   try {
     // Fetch inventory + all price reference tables in parallel
-    const [invData, gdData, edData, recData, fpData] = await Promise.all([
+    const [invData, gdData, edData, recData, fpData, catData] = await Promise.all([
       apiGet(`tables/${INV_TABLE}?page=1&limit=500`),
       apiGet(`tables/generic_products?page=1&limit=500`),
       apiGet(`tables/product_entries?page=1&limit=1000`),
       apiGet(`tables/recipes?page=1&limit=500`),
       apiGet(`tables/finished_products?page=1&limit=500`),
+      apiGet(`tables/categories?page=1&limit=200`),
     ]);
     allInventory = invData.data || [];
+    allGenericInv = gdData.data || [];
+    const catRows = catData.data || [];
+    invCategories = catRows
+      .slice()
+      .sort((a, b) => (a.sort_order - b.sort_order) || a.name.localeCompare(b.name))
+      .map(c => c.name);
+    invCatType = {};
+    catRows.forEach(c => { invCatType[(c.name || '').trim().toLowerCase()] = c.type || 'food'; });
     priceMap = buildPriceMap(
       allInventory,
       gdData.data  || [],
@@ -167,10 +178,53 @@ function invFifoActiveEntry(sortedEntries, invQty) {
   return sortedEntries[sortedEntries.length - 1];
 }
 
+// Cost-group type of a category name (falls back to the built-in map, then food).
+function _catType(name) {
+  const key = (name || '').trim().toLowerCase();
+  if (key && invCatType[key]) return invCatType[key];
+  if (typeof DEFAULT_CATEGORY_TYPES !== 'undefined') {
+    const hit = Object.keys(DEFAULT_CATEGORY_TYPES).find(k => k.toLowerCase() === key);
+    if (hit) return DEFAULT_CATEGORY_TYPES[hit];
+  }
+  return 'food';
+}
+// Top-level bucket for a raw-material row. 2-bucket mode: beverage folds into food.
+function _itemBucket(r) {
+  return _catType(r.category) === 'supplies' ? 'supplies' : 'food';
+}
+
+// A raw-material row is "low stock" when its product has a reorder_level set and
+// the live quantity has fallen to or below it — but is still above zero (zero is
+// the separate "Out of Stock" bucket). Only raw materials carry a reorder level.
+function _reorderInfo(r) {
+  if (r.item_type !== 'raw_material') return null;
+  const g = allGenericInv.find(p => p.id === r.item_id);
+  const lvl = g && g.reorder_level != null && g.reorder_level !== '' ? parseFloat(g.reorder_level) : NaN;
+  if (isNaN(lvl)) return null;
+  return { level: lvl, unit: g.reorder_unit || '' };
+}
+function _isLowStock(r) {
+  const info = _reorderInfo(r);
+  if (!info) return false;
+  const qty = parseFloat(r.quantity) || 0;
+  return qty > 0 && qty <= info.level;
+}
+
 function renderInventory() {
   const tbody  = document.getElementById('invBody');
   const thead  = document.querySelector('#invTable thead tr');
-  let list = allInventory.filter(r => r.item_type === activeFilter);
+  let list;
+  if (activeFilter === null)                     list = allInventory.slice();                                    // All
+  else if (activeFilter === 'out_of_stock')      list = allInventory.filter(r => (parseFloat(r.quantity) || 0) <= 0);
+  else if (activeFilter === 'low_stock')         list = allInventory.filter(_isLowStock);
+  else if (activeFilter === 'food' || activeFilter === 'supplies')
+    list = allInventory.filter(r => r.item_type === 'raw_material' && _itemBucket(r) === activeFilter);
+  else                                           list = allInventory.filter(r => r.item_type === activeFilter);
+
+  // Category sub-filter — only meaningful inside a raw-material bucket
+  if ((activeFilter === 'food' || activeFilter === 'supplies') && activeCategory) {
+    list = list.filter(r => ((r.category || '').trim() || 'Uncategorised') === activeCategory);
+  }
 
   if (invSearchQuery) {
     const q = invSearchQuery.toLowerCase();
@@ -181,17 +235,28 @@ function renderInventory() {
     );
   }
 
-  // Update price column header label to match the active tab
+  // Always show items A→Z by name (predictable ordering in every view — chips
+  // handle grouping, so "All" is just a flat alphabetical list).
+  list.sort((a, b) => (a.item_name || '').localeCompare(b.item_name || '', undefined, { sensitivity: 'base' }));
+
+  // Update price column header label to match the active filter
   const priceHeader = document.getElementById('invPriceHeader');
   if (priceHeader) {
-    if (activeFilter === 'raw_material')      priceHeader.textContent = 'Stock Value';
-    else if (activeFilter === 'batch')        priceHeader.textContent = 'Batch Cost';
+    if (activeFilter === 'food' || activeFilter === 'supplies') priceHeader.textContent = 'Stock Value';
+    else if (activeFilter === 'batch')            priceHeader.textContent = 'Batch Cost';
     else if (activeFilter === 'finished_product') priceHeader.textContent = 'Cost / Unit  |  Selling';
+    else                                          priceHeader.textContent = 'Value';   // All / Out of Stock (mixed types)
   }
 
   if (!list.length) {
+    const emptyLabel = activeFilter === null           ? 'items'
+                     : activeFilter === 'out_of_stock' ? 'out-of-stock items'
+                     : activeFilter === 'low_stock'    ? 'low-stock items'
+                     : activeFilter === 'food'         ? 'food items'
+                     : activeFilter === 'supplies'     ? 'supplies'
+                     : filterLabel(activeFilter).toLowerCase();
     tbody.innerHTML = `<tr><td colspan="7" class="empty-row">
-      <i class="fas fa-box-open"></i> No ${filterLabel(activeFilter).toLowerCase()} in inventory yet.
+      <i class="fas fa-box-open"></i> No ${emptyLabel} in inventory yet.
     </td></tr>`;
     return;
   }
@@ -202,16 +267,30 @@ function renderInventory() {
     const updated  = fmtDateTime(r.updated_at);
     const priceCell = buildPriceCell(r);
 
+    // Low-stock pill: shown when the item is at/below its reorder level (but not
+    // yet zero). Includes the threshold so it reads e.g. "Low ≤ 5 lb".
+    const lowInfo = _reorderInfo(r);
+    const lowPill = _isLowStock(r)
+      ? ` <span class="inv-low-pill" title="At or below reorder level"><i class="fas fa-triangle-exclamation"></i> Low ≤ ${lowInfo.level}${lowInfo.unit ? ' ' + esc(lowInfo.unit) : ''}</span>`
+      : '';
+
     const notCounted = stockTakeStatusMap[r.id] === 'not_counted';
     const badge = notCounted
       ? `<span class="inv-not-counted-dot" title="Not counted in the last stock take"></span>`
       : '';
 
+    // Raw materials are generic products (item_id = generic_products.id). Click
+    // opens a focused name/category editor in place (stays on the Inventory page);
+    // the href is a fallback so open-in-new-tab still lands on the full product.
+    const nameHtml = r.item_type === 'raw_material'
+      ? `<a class="inv-name-link" href="/index.html#${esc(r.item_id)}" onclick="openInvEditProduct('${esc(r.item_id)}');return false;" title="Edit name / category"><strong>${esc(r.item_name)}</strong></a>`
+      : `<strong>${esc(r.item_name)}</strong>`;
+
     return `
       <tr>
-        <td><strong>${esc(r.item_name)}</strong>${badge}</td>
+        <td>${nameHtml}${badge}</td>
         <td>${r.category ? `<span class="category-badge cat-${slugify(r.category)}">${esc(r.category)}</span>` : '—'}</td>
-        <td><span class="inv-qty ${qtyClass}">${qty % 1 === 0 ? qty : qty.toFixed(3)}</span></td>
+        <td><span class="inv-qty ${qtyClass}">${qty % 1 === 0 ? qty : qty.toFixed(3)}</span>${lowPill}</td>
         <td>${esc(r.unit || '—')}</td>
         <td>${priceCell}</td>
         <td style="color:var(--text-muted);font-size:.8rem">${updated}</td>
@@ -260,23 +339,140 @@ function buildPriceCell(r) {
   return '—';
 }
 
+// The stat chips double as the type filter (same pattern as the Products page):
+// click a chip to filter, click the active chip again — or the "All" chip — to clear.
 function renderInvStats() {
   const el  = document.getElementById('invStats');
-  const raw = allInventory.filter(r => r.item_type === 'raw_material').length;
+  const total = allInventory.length;
+  const rawRows = allInventory.filter(r => r.item_type === 'raw_material');
+  const food = rawRows.filter(r => _itemBucket(r) === 'food').length;
+  const sup  = rawRows.filter(r => _itemBucket(r) === 'supplies').length;
   const bat = allInventory.filter(r => r.item_type === 'batch').length;
   const fin = allInventory.filter(r => r.item_type === 'finished_product').length;
   const oos = allInventory.filter(r => (parseFloat(r.quantity) || 0) <= 0).length;
+  const low = allInventory.filter(_isLowStock).length;
+  const sel = t => activeFilter === t ? ' stat-chip-selected' : '';
 
-  el.innerHTML = `
-    <div class="stat-chip"><i class="fas fa-seedling"></i> ${raw} Raw Materials</div>
-    <div class="stat-chip" style="background:#e0e7ff;color:#3730a3"><i class="fas fa-blender"></i> ${bat} Batches</div>
-    <div class="stat-chip" style="background:#dcfce7;color:#166534"><i class="fas fa-box-open"></i> ${fin} Finished Products</div>
-    ${oos > 0 ? `<div class="stat-chip" style="background:#fee2e2;color:#991b1b"><i class="fas fa-exclamation-circle"></i> ${oos} Out of Stock</div>` : ''}
-  `;
+  const mainRow = `
+    <div class="inv-chip-row">
+      <div class="stat-chip${sel(null)}" style="cursor:pointer" onclick="setInvFilter(null)" title="Show all items"><i class="fas fa-layer-group"></i> ${total} All</div>
+      <div class="stat-chip${sel('food')}" style="cursor:pointer;background:#ccfbf1;color:#0f766e" onclick="setInvFilter('food')" title="Show food ingredients"><i class="fas fa-carrot"></i> ${food} Food</div>
+      <div class="stat-chip${sel('supplies')}" style="cursor:pointer;background:#fef3c7;color:#92400e" onclick="setInvFilter('supplies')" title="Show supplies (packaging, disposables, linen…)"><i class="fas fa-box"></i> ${sup} Supplies</div>
+      <div class="stat-chip${sel('batch')}" style="cursor:pointer;background:#e0e7ff;color:#3730a3" onclick="setInvFilter('batch')" title="Show batches"><i class="fas fa-blender"></i> ${bat} Batches</div>
+      <div class="stat-chip${sel('finished_product')}" style="cursor:pointer;background:#dcfce7;color:#166534" onclick="setInvFilter('finished_product')" title="Show finished products"><i class="fas fa-box-open"></i> ${fin} Finished Products</div>
+      <div class="stat-chip${sel('low_stock')}" style="cursor:pointer;${low > 0 ? 'background:#fef3c7;color:#92400e' : 'background:#f1f5f9;color:#94a3b8'}" onclick="setInvFilter('low_stock')" title="Show items at or below their reorder level"><i class="fas fa-triangle-exclamation"></i> ${low} Low Stock</div>
+      <div class="stat-chip${sel('out_of_stock')}" style="cursor:pointer;${oos > 0 ? 'background:#fee2e2;color:#991b1b' : 'background:#f1f5f9;color:#94a3b8'}" onclick="setInvFilter('out_of_stock')" title="Show out-of-stock items"><i class="fas fa-exclamation-circle"></i> ${oos} Out of Stock</div>
+    </div>`;
+
+  // Category sub-chips: only while viewing a raw-material bucket (Food/Supplies),
+  // only categories in that bucket that hold stock, taxonomy order (Uncat last).
+  let subRow = '';
+  if (activeFilter === 'food' || activeFilter === 'supplies') {
+    const byCat = new Map();
+    rawRows.filter(r => _itemBucket(r) === activeFilter).forEach(r => {
+      const key = (r.category || '').trim() || 'Uncategorised';
+      byCat.set(key, (byCat.get(key) || 0) + 1);
+    });
+    let cats = mergeCategories([...byCat.keys()]).filter(c => byCat.has(c));
+    if (cats.includes('Uncategorised')) { cats = cats.filter(c => c !== 'Uncategorised'); cats.push('Uncategorised'); }
+    if (cats.length) {
+      const chips = cats.map(c => {
+        const active = activeCategory === c ? ' cat-chip-active' : '';
+        const isUncat = c === 'Uncategorised';
+        const cls   = isUncat ? 'stat-chip inv-subchip' : `stat-chip inv-subchip cat-chip cat-${slugify(c)}`;
+        const style = isUncat ? 'cursor:pointer;background:#f1f5f9;color:#64748b' : 'cursor:pointer';
+        return `<div class="${cls}${active}" style="${style}" onclick="setInvCategory('${c.replace(/'/g, "\\'")}')" title="Filter by ${esc(c)}">${esc(c)} ${byCat.get(c)}</div>`;
+      }).join('');
+      subRow = `<div class="inv-subchip-row">${chips}</div>`;
+    }
+  }
+
+  el.innerHTML = mainRow + subRow;
+}
+
+// Toggle the active type filter: same chip again (or "All") clears back to All.
+// Any type change resets the category sub-filter (categories only apply to raw materials).
+function setInvFilter(type) {
+  activeFilter = (activeFilter === type) ? null : type;
+  activeCategory = null;
+  renderInvStats();
+  renderInventory();
+}
+
+// Toggle the category sub-filter within raw materials; same chip again clears it.
+function setInvCategory(cat) {
+  activeCategory = (activeCategory === cat) ? null : cat;
+  renderInvStats();
+  renderInventory();
 }
 
 function filterLabel(type) {
   return { raw_material: 'Raw Materials', batch: 'Batches', finished_product: 'Finished Products' }[type] || type;
+}
+
+// ── In-place product editor (name + category) ──────────────────
+// Lets you fix a raw-material's name/category without leaving the Inventory
+// page. Saves through PUT /api/generic_products/:id (same endpoint the Products
+// page uses), so the name/category sync to inventory & everywhere else applies.
+let _invEditProduct = null;   // the full generic_products row being edited
+
+function _fillInvCategorySelect(select, selected) {
+  const names = invCategories.length ? invCategories
+              : (typeof DEFAULT_CATEGORIES !== 'undefined' ? DEFAULT_CATEGORIES : []);
+  select.innerHTML = '<option value="">— Select category —</option>' +
+    names.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  if (selected) {
+    let opt = Array.from(select.options).find(o => o.value.toLowerCase() === String(selected).toLowerCase());
+    if (!opt) {   // legacy/custom value not in the master list — inject so it stays selected
+      opt = document.createElement('option');
+      opt.value = selected; opt.textContent = selected;
+      select.appendChild(opt);
+    }
+    select.value = opt.value;
+  }
+}
+
+function openInvEditProduct(itemId) {
+  const g = allGenericInv.find(p => p.id === itemId);
+  if (!g) { showToast('Could not load that product.', 'error'); return; }
+  _invEditProduct = g;
+  document.getElementById('invEditProductId').value = g.id;
+  document.getElementById('invEditName').value      = g.name || '';
+  _fillInvCategorySelect(document.getElementById('invEditCategory'), g.category || '');
+  document.getElementById('invEditFullLink').href   = `/index.html#${g.id}`;
+  openModal('invEditProductModal');
+}
+
+async function saveInvEditProduct() {
+  if (!_invEditProduct) return;
+  const id       = _invEditProduct.id;
+  const name     = document.getElementById('invEditName').value.trim();
+  const category = document.getElementById('invEditCategory').value;
+  if (!name)     { showToast('Product name is required.', 'error'); return; }
+  if (!category) { showToast('Please select a category.', 'error'); return; }
+
+  const btn = document.getElementById('saveInvEditBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
+  try {
+    // Preserve the product's other fields — the cascade endpoint overwrites all
+    // of them, so passing only name/category would blank sub-unit / avg-weight.
+    await apiPut(`generic_products/${id}`, {
+      name,
+      category,
+      sub_unit_name:       _invEditProduct.sub_unit_name ?? null,
+      sub_unit_qty:        _invEditProduct.sub_unit_qty ?? null,
+      avg_weight_per_unit: _invEditProduct.avg_weight_per_unit ?? null,
+    });
+    showToast('Product updated!', 'success');
+    closeModal('invEditProductModal');
+    await loadInventory();   // refresh names, badges & category chips
+  } catch (e) {
+    showToast('Save failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-save"></i> Save';
+  }
 }
 
 // ── Manual Adjust Modal ────────────────────────────────────────

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Products — InvoiceDB</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260715-1" />
+  <link rel="stylesheet" href="/static/style.css?v=20260717-1" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 </head>
@@ -88,27 +88,6 @@
             <select id="pCategory">
               <option value="">— Select category —</option>
             </select>
-          </div>
-        </div>
-        <div class="sub-unit-section">
-          <div class="sub-unit-header">
-            <i class="fas fa-cubes"></i> Sub-unit Breakdown
-            <span class="sub-unit-hint">Optional — e.g. 1 Dozen = 12 Eggs</span>
-          </div>
-          <div class="form-grid">
-            <div class="form-group">
-              <label>Sub-unit Name</label>
-              <input type="text" id="pSubUnitName" placeholder="e.g. Egg, Bottle, Can" />
-            </div>
-            <div class="form-group">
-              <label>Units per Pack</label>
-              <input type="number" id="pSubUnitQty" placeholder="e.g. 12" min="1" step="1" />
-            </div>
-          </div>
-          <div class="form-group" style="margin-top:.75rem">
-            <label>Average Weight per Unit (kg)</label>
-            <input type="number" id="pAvgWeight" placeholder="e.g. 0.300" min="0" step="0.001" />
-            <small style="color:var(--text-muted);font-size:.78rem">Used for recipe costing of items sold by each (e.g. 0.300 kg per fennel)</small>
           </div>
         </div>
         <div class="sub-unit-section" style="margin-top:1.25rem;border-color:#c7d2fe">
@@ -221,6 +200,44 @@
             </div>
           </div>
         </div>
+        <div class="sub-unit-section" style="margin-top:1.25rem">
+          <div class="sub-unit-header">
+            <i class="fas fa-cubes"></i> Sub-unit Breakdown
+            <span class="sub-unit-hint">Optional — e.g. 1 Dozen = 12 Eggs</span>
+          </div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Sub-unit Name</label>
+              <input type="text" id="pSubUnitName" placeholder="e.g. Egg, Bottle, Can" />
+            </div>
+            <div class="form-group">
+              <label>Units per Pack</label>
+              <input type="number" id="pSubUnitQty" placeholder="e.g. 12" min="1" step="1" />
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:.75rem">
+            <label>Average Weight per Unit (kg)</label>
+            <input type="number" id="pAvgWeight" placeholder="e.g. 0.300" min="0" step="0.001" />
+            <small style="color:var(--text-muted);font-size:.78rem">Used for recipe costing of items sold by each (e.g. 0.300 kg per fennel)</small>
+          </div>
+        </div>
+        <div class="sub-unit-section" style="margin-top:1.25rem">
+          <div class="sub-unit-header">
+            <i class="fas fa-bell"></i> Low-stock Alert
+            <span class="sub-unit-hint">Optional — get warned when stock runs low</span>
+          </div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Reorder Level</label>
+              <input type="number" id="pReorderLevel" placeholder="e.g. 5" min="0" step="any" />
+            </div>
+            <div class="form-group">
+              <label>Unit</label>
+              <input type="text" id="pReorderUnit" placeholder="—" readonly style="background:#f1f5f9;cursor:default" />
+            </div>
+          </div>
+          <small style="color:var(--text-muted);font-size:.78rem">Unit follows the supplier entry's unit of measure. Flags this product as Low Stock on the Inventory page (and in the daily email) when its quantity falls to or below this number. Leave blank for no alert.</small>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" id="cancelModal">Cancel</button>
@@ -301,6 +318,11 @@
         <div style="display:flex;gap:.5rem;align-items:center">
           <input type="text" id="newCategoryName" placeholder="New category name…" style="flex:1"
                  onkeydown="if(event.key==='Enter') addCategory()" />
+          <select id="newCategoryType" title="Category type" style="flex:0 0 auto;padding:.4rem">
+            <option value="food">Food</option>
+            <option value="beverage">Beverage</option>
+            <option value="supplies">Supplies</option>
+          </select>
           <button class="btn btn-primary btn-sm" onclick="addCategory()">
             <i class="fas fa-plus"></i> Add
           </button>
@@ -370,10 +392,10 @@
     </div>
   </div>
 
-  <script src="/static/utils.js?v=20260715-2"></script>
-  <script src="/static/inventory.js?v=20260407-1"></script>
+  <script src="/static/utils.js?v=20260716-8"></script>
+  <script src="/static/inventory.js?v=20260717-1"></script>
   <script src="/static/suppliers.js?v=20260714-1"></script>
-  <script src="/static/products.js?v=20260715-2"></script>
+  <script src="/static/products.js?v=20260717-2"></script>
 
   <!-- ── Inline invoice-file viewer modal (shared, lightweight) ── -->
   <div class="modal-overlay hidden" id="entryFileViewModal">

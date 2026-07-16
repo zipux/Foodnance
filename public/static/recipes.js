@@ -538,6 +538,7 @@ function renderProductSuggestions(idx, rawQuery) {
       html += `<div class="product-suggestion-cat">${esc(c)}</div>`;
       for (const p of items) html += _pickerRow(idx, p, null);
     }
+    html += '<div class="psi-fade"></div>';   // bottom scroll cue for the long grouped list
   } else {
     // ── Search mode: name-only, prefix matches first, then A→Z ──
     const matches = active

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Recipe Builder</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260407-1" />
+  <link rel="stylesheet" href="/static/style.css?v=20260717-1" />
   <style>
     .product-suggestions {
       display: none;
@@ -12,12 +12,15 @@
       top: 100%;
       left: 0;
       right: 0;
+      margin-top: 6px;                        /* detach from the field */
       background: #fff;
-      border: 1px solid #d1d5db;
-      border-radius: 6px;
-      box-shadow: 0 4px 12px rgba(0,0,0,.1);
-      max-height: 300px;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      box-shadow: 0 10px 28px rgba(15,23,42,.14);
+      max-height: 320px;
       overflow-y: auto;
+      overscroll-behavior: contain;
+      padding: 4px;                           /* inset so rows read as a menu */
       z-index: 100;
     }
     .product-suggestion-item {
@@ -25,9 +28,12 @@
       justify-content: space-between;
       align-items: center;
       gap: .5rem;
-      padding: .45rem .75rem;
+      padding: .5rem .6rem;
+      min-height: 38px;                        /* consistent row height — no mid-word clipping */
+      border-radius: 7px;
       font-size: .875rem;
       cursor: pointer;
+      scroll-margin: 4px;
     }
     .product-suggestion-item:hover,
     .product-suggestion-item.active { background: #eef2ff; }   /* hover + keyboard highlight */
@@ -40,25 +46,45 @@
     .product-suggestion-item.add-new {
       color: var(--primary);
       font-weight: 600;
+      margin-top: 4px;
       border-top: 1px solid #eef2f7;
+      border-radius: 0 0 7px 7px;
     }
-    /* Sticky category header while browsing the full list */
+    /* Sticky category label with a trailing rule — lighter than a full grey band */
     .product-suggestion-cat {
       position: sticky;
       top: 0;
-      padding: .35rem .75rem .25rem;
-      font-size: .68rem;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+      padding: .5rem .6rem .3rem;
+      font-size: .66rem;
       font-weight: 700;
-      letter-spacing: .04em;
+      letter-spacing: .05em;
       text-transform: uppercase;
       color: var(--text-muted);
-      background: #f8fafc;
-      border-bottom: 1px solid #eef2f7;
+      background: #fff;                        /* solid so rows scroll cleanly underneath */
+    }
+    .product-suggestion-cat::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: #eef2f7;
     }
     .product-suggestion-empty {
-      padding: .45rem .75rem;
+      padding: .6rem;
       font-size: .875rem;
       color: var(--text-muted);
+    }
+    /* Soft fade pinned to the panel's lower edge — signals "more to scroll" */
+    .psi-fade {
+      position: sticky;
+      bottom: 0;
+      height: 22px;
+      margin: -22px 0 0;                       /* overlay the row above; adds no height */
+      pointer-events: none;
+      background: linear-gradient(rgba(255,255,255,0), #fff);
     }
     /* Keep the Unit <select> aligned with the Qty & Product inputs by lifting the
        per-unit cost hint out of flow so it no longer pushes the select upward. */
@@ -368,7 +394,7 @@
   </div>
 
   <script src="/static/utils.js?v=20260715-2"></script>
-  <script src="/static/inventory.js?v=20260407-1"></script>
-  <script src="/static/recipes.js?v=20260715-4"></script>
+  <script src="/static/inventory.js?v=20260717-1"></script>
+  <script src="/static/recipes.js?v=20260715-5"></script>
 </body>
 </html>

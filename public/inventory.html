@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Inventory — InvoiceDB</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260407-1" />
+  <link rel="stylesheet" href="/static/style.css?v=20260717-1" />
   <link rel="stylesheet" href="/static/stock-take.css?v=20260520-1" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
@@ -36,19 +36,8 @@
       <p>Track stock levels for raw materials, batches and finished products.</p>
     </div>
 
-    <!-- FILTER TABS + ACTIONS -->
+    <!-- ACTIONS (type filtering is via the clickable stat chips above the table) -->
     <div class="inv-toolbar">
-      <div class="inv-filter-tabs">
-        <button class="inv-tab active" data-type="raw_material">
-          <i class="fas fa-seedling"></i> Raw Materials
-        </button>
-        <button class="inv-tab" data-type="batch">
-          <i class="fas fa-blender"></i> Batches
-        </button>
-        <button class="inv-tab" data-type="finished_product">
-          <i class="fas fa-box-open"></i> Finished Products
-        </button>
-      </div>
       <div class="header-actions">
         <input type="text" id="invSearch" class="search-input" placeholder="Search…" />
         <a href="/stock-take.html" class="btn btn-success" id="startStockTakeBtn">
@@ -132,6 +121,34 @@
     </div>
   </div>
 
+  <!-- ── EDIT PRODUCT MODAL (in-place: name + category) ── -->
+  <div class="modal-overlay hidden" id="invEditProductModal">
+    <div class="modal" style="max-width:440px">
+      <div class="modal-header">
+        <h3><i class="fas fa-pen"></i> Edit product</h3>
+        <button class="modal-close" id="closeInvEditModal"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="invEditProductId" />
+        <div class="form-group" style="margin-bottom:1rem">
+          <label>Product name</label>
+          <input type="text" id="invEditName" placeholder="Product name" autocomplete="off" />
+        </div>
+        <div class="form-group" style="margin-bottom:.75rem">
+          <label>Category</label>
+          <select id="invEditCategory"></select>
+        </div>
+        <a id="invEditFullLink" href="/index.html" style="font-size:.82rem;color:var(--primary);text-decoration:none">
+          <i class="fas fa-external-link-alt"></i> Open full product page (pricing, suppliers…)
+        </a>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelInvEditModal">Cancel</button>
+        <button class="btn btn-success" id="saveInvEditBtn"><i class="fas fa-save"></i> Save</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ── STOCK LOG MODAL ── -->
   <div class="modal-overlay hidden" id="logModal">
     <div class="modal" style="max-width:860px">
@@ -188,7 +205,7 @@
   <!-- TOAST -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/static/utils.js?v=20260715-2"></script>
-  <script src="/static/inventory.js?v=20260407-1"></script>
+  <script src="/static/utils.js?v=20260716-8"></script>
+  <script src="/static/inventory.js?v=20260717-1"></script>
 </body>
 </html>

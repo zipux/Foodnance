@@ -310,7 +310,9 @@ app.delete('/api/tables/generic_products/:id', async (c) => {
 })
 
 // PUT /api/generic_products/:id
-// Update a product and, when the name changes, cascade it to every place the
+// Update a product. The raw-material inventory row is always re-synced with the
+// product's name + category (category is denormalized and matched by id, not
+// name). Additionally, when the NAME changes, cascade it to every other place the
 // product name is denormalized — otherwise those copies go stale and features
 // that match by name (e.g. the spending breakdown joining invoice_lines to
 // products) can no longer categorize them.
@@ -326,6 +328,7 @@ app.put('/api/generic_products/:id', async (c) => {
   const body = await c.req.json() as {
     name?: string; category?: string
     sub_unit_name?: string; sub_unit_qty?: number | null; avg_weight_per_unit?: number | null
+    reorder_level?: number | null; reorder_unit?: string
   }
   const newName = (body.name || '').trim()
   if (!newName) return c.json({ error: 'name required' }, 400)
@@ -337,7 +340,8 @@ app.put('/api/generic_products/:id', async (c) => {
 
   await c.env.DB.prepare(
     `UPDATE generic_products
-       SET name = ?, category = ?, sub_unit_name = ?, sub_unit_qty = ?, avg_weight_per_unit = ?
+       SET name = ?, category = ?, sub_unit_name = ?, sub_unit_qty = ?, avg_weight_per_unit = ?,
+           reorder_level = ?, reorder_unit = ?
      WHERE id = ?`
   ).bind(
     newName,
@@ -345,10 +349,22 @@ app.put('/api/generic_products/:id', async (c) => {
     body.sub_unit_name ?? '',
     body.sub_unit_qty ?? null,
     body.avg_weight_per_unit ?? null,
+    body.reorder_level ?? null,
+    body.reorder_unit ?? '',
     id
   ).run()
 
-  // Cascade the name only when it actually changed (ignoring case/space)
+  // Always keep the raw-material inventory row in sync with the product's live
+  // name AND category. Category is denormalized onto the inventory row and is
+  // NOT matched by name anywhere, so it must be pushed here or the Inventory
+  // page (badges + category chips) drifts from the Products page.
+  await c.env.DB.prepare(
+    "UPDATE inventory SET item_name = ?, category = ? WHERE item_id = ? AND item_type = 'raw_material'"
+  ).bind(newName, body.category ?? '', id).run()
+
+  // Cascade the name only when it actually changed (ignoring case/space) to the
+  // remaining tables where the name is denormalized. (inventory is handled above,
+  // unconditionally, since it also carries category.)
   if (oldName.trim().toLowerCase() !== newName.toLowerCase()) {
     await c.env.DB.batch([
       c.env.DB.prepare(
@@ -360,9 +376,6 @@ app.put('/api/generic_products/:id', async (c) => {
       c.env.DB.prepare(
         'UPDATE product_mappings SET corrected_name = ? WHERE LOWER(TRIM(corrected_name)) = LOWER(TRIM(?))'
       ).bind(newName, oldName),
-      c.env.DB.prepare(
-        'UPDATE inventory SET item_name = ? WHERE item_id = ?'
-      ).bind(newName, id),
       c.env.DB.prepare(
         'UPDATE recipe_items SET product_name = ? WHERE product_id = ?'
       ).bind(newName, id),

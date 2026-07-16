@@ -321,6 +321,8 @@ async function openAddProductModal() {
   document.getElementById('pSubUnitName').value = '';
   document.getElementById('pSubUnitQty').value  = '';
   document.getElementById('pAvgWeight').value   = '';
+  document.getElementById('pReorderLevel').value = '';
+  syncReorderUnit();   // unit mirrors the Pack Size unit
 
   // Show entry form immediately — user fills everything on one screen
   document.getElementById('openAddEntryBtn').style.display = 'none';
@@ -356,6 +358,9 @@ async function openEditProduct(id) {
   document.getElementById('pSubUnitName').value     = g.sub_unit_name        || '';
   document.getElementById('pSubUnitQty').value      = g.sub_unit_qty         || '';
   document.getElementById('pAvgWeight').value       = g.avg_weight_per_unit  != null ? g.avg_weight_per_unit : '';
+  document.getElementById('pReorderLevel').value    = g.reorder_level        != null ? g.reorder_level : '';
+  // pReorderUnit is derived from the supplier entry's unit via syncReorderUnit(),
+  // called by updateEntryCostPerUnit() once the entry form is populated below.
 
   await loadSupplierDropdown();
 
@@ -431,12 +436,17 @@ async function saveGenericProduct() {
   }
 
   const avgWeightRaw = parseFloat(document.getElementById('pAvgWeight').value);
+  const reorderRaw   = parseFloat(document.getElementById('pReorderLevel').value);
   const payload = {
     name,
     category,
     sub_unit_name:        document.getElementById('pSubUnitName').value.trim() || null,
     sub_unit_qty:         parseFloat(document.getElementById('pSubUnitQty').value) || null,
     avg_weight_per_unit:  isNaN(avgWeightRaw) ? null : avgWeightRaw,
+    reorder_level:        isNaN(reorderRaw) ? null : reorderRaw,
+    // Unit is derived from the supplier entry's pack unit (mirrored into the
+    // read-only pReorderUnit field), so the threshold matches the stock unit.
+    reorder_unit:         isNaN(reorderRaw) ? '' : (document.getElementById('ePackUnit').value || '').trim(),
   };
 
   const btn = document.getElementById('saveProductBtn');
@@ -695,6 +705,17 @@ function updateEntryCostPerUnit() {
   const totalUnits = packQty * qtyOrdered;
   box.classList.add('ready');
   display.textContent = `${fmt(cost / totalUnits)} / ${unit}`;
+
+  syncReorderUnit();
+}
+
+// The low-stock threshold is expressed in the product's supplier-entry unit of
+// measure, so its unit display mirrors the Pack Size unit and updates live when
+// that unit changes. Read-only in the form; the value is derived, not typed.
+function syncReorderUnit() {
+  const src = document.getElementById('ePackUnit');
+  const dst = document.getElementById('pReorderUnit');
+  if (src && dst) dst.value = src.value && src.value !== '__manage_units__' ? src.value : '';
 }
 
 // ── Unit conversion for ePackUnit dropdown ─────────────────────

@@ -977,26 +977,48 @@ body {
   margin-bottom: 1rem;
   flex-wrap: wrap;
 }
-.inv-filter-tabs { display: flex; gap: .4rem; }
-.inv-tab {
-  padding: .45rem 1rem;
-  border: 2px solid var(--border);
-  background: #fff;
-  border-radius: 20px;
-  font-size: .82rem;
-  font-weight: 600;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: var(--transition);
+/* Stat-chip filter rows: main chips wrap; category sub-chips stay on one
+   horizontally-scrollable line (mobile-friendly — never eats vertical space).
+   Scoped to the inventory page — the invoices page reuses id="invStats" for a
+   plain horizontal summary row and must keep the default .stats-row layout. */
+#inventory-page-marker #invStats { flex-direction: column; align-items: stretch; gap: .7rem; }
+.inv-chip-row { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; }
+.inv-subchip-row {
   display: flex;
+  gap: .5rem;
   align-items: center;
-  gap: .4rem;
+  overflow-x: auto;
+  padding-bottom: 3px;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
 }
-.inv-tab:hover  { border-color: var(--primary); color: var(--primary); }
-.inv-tab.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+.inv-subchip-row::-webkit-scrollbar { height: 6px; }
+.inv-subchip-row::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+.stat-chip.inv-subchip {
+  flex: 0 0 auto;            /* don't shrink — overflow scrolls instead of wrapping */
+  padding: .32rem .7rem;
+  font-size: .75rem;
+  font-weight: 500;
+}
+
+.inv-name-link { color: var(--primary); text-decoration: none; cursor: pointer; }
+.inv-name-link:hover { text-decoration: underline; }
+
 .inv-qty { font-weight: 700; font-size: .95rem; }
 .inv-qty-ok   { color: #16a34a; }
 .inv-qty-zero { color: #dc2626; }
+.inv-low-pill {
+  display: inline-block;
+  padding: .1rem .45rem;
+  margin-left: .35rem;
+  background: #fef3c7;
+  color: #92400e;
+  border-radius: 10px;
+  font-size: .72rem;
+  font-weight: 700;
+  white-space: nowrap;
+  vertical-align: middle;
+}
 .inv-change-chip {
   display: inline-block;
   padding: .15rem .5rem;
