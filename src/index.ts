@@ -199,7 +199,8 @@ const ALLOWED_TABLES = [
   'inventory', 'stock_log', 'invoices', 'invoice_lines',
   'staff', 'certification_types', 'staff_certifications',
   'product_mappings', 'units', 'categories', 'product_aliases',
-  'stock_takes', 'stock_take_items'
+  'stock_takes', 'stock_take_items',
+  'sales_monthly', 'operating_expenses', 'recurring_expenses'
 ]
 
 // ── List / query
@@ -1801,6 +1802,84 @@ app.get('/api/spending-breakdown', async (c) => {
       delivery:       round2(totalsRow?.delivery       ?? 0),
       fuel_surcharge: round2(totalsRow?.fuel_surcharge ?? 0),
     },
+  })
+})
+
+// ─── P&L: invoice-derived cost side for a month ───────────────
+// Returns the cost figures the app can compute from data it owns (invoices),
+// split by category TYPE (food / beverage / supplies via the categories table).
+// Sales + manual overheads live in sales_monthly / operating_expenses and are
+// loaded by the frontend via generic CRUD — this endpoint is only the costs.
+//
+// Cost model (Phase 1): "cost = what you purchased this month" — line totals of
+// Closed, non-voided invoices dated in the month. Not stock-take-adjusted COGS.
+app.get('/api/pnl', async (c) => {
+  const now = new Date()
+  const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
+  const monthRaw = (c.req.query('month') || '').trim()
+  const month = monthRaw || currentMonth
+  if (!/^\d{4}-\d{2}$/.test(month))
+    return c.json({ error: `Invalid 'month': "${month}". Use YYYY-MM.` }, 400)
+
+  // Cost by category TYPE. Resolve each invoice line's real category from
+  // generic_products (via product_entries name match, then direct name match,
+  // then the line's own category), map that category → its type, defaulting an
+  // unknown/unmatched category to 'food' (same convention as the Inventory
+  // buckets). Only Closed, non-voided invoices dated in the month.
+  const typeRows = await c.env.DB.prepare(`
+    WITH line_cats AS (
+      SELECT
+        il.line_total AS amt,
+        COALESCE(
+          (SELECT gp.category FROM product_entries pe
+             JOIN generic_products gp ON gp.id = pe.generic_product_id
+            WHERE LOWER(TRIM(pe.generic_product_name)) = LOWER(TRIM(il.product_name)) LIMIT 1),
+          (SELECT gp.category FROM generic_products gp
+            WHERE LOWER(TRIM(gp.name)) = LOWER(TRIM(il.product_name)) LIMIT 1),
+          il.category,
+          ''
+        ) AS category
+      FROM invoice_lines il
+      JOIN invoices i ON il.invoice_id = i.id
+      WHERE i.status = 'Closed'
+        AND i.voided_at IS NULL
+        AND substr(i.invoice_date, 1, 7) = ?
+    )
+    SELECT
+      COALESCE(
+        (SELECT c.type FROM categories c
+          WHERE LOWER(TRIM(c.name)) = LOWER(TRIM(line_cats.category)) LIMIT 1),
+        'food'
+      ) AS type,
+      SUM(COALESCE(amt, 0)) AS amount
+    FROM line_cats
+    GROUP BY type
+  `).bind(month).all<{ type: string; amount: number }>()
+
+  let food = 0, beverage = 0, supplies = 0
+  for (const r of (typeRows.results ?? [])) {
+    const amt = r.amount ?? 0
+    if (r.type === 'beverage') beverage += amt
+    else if (r.type === 'supplies') supplies += amt
+    else food += amt
+  }
+
+  // Invoice-level surcharges that are real running costs (delivery + fuel).
+  // Taxes and refundable deposits are intentionally excluded from the P&L.
+  const feeRow = await c.env.DB.prepare(`
+    SELECT SUM(COALESCE(delivery, 0) + COALESCE(fuel_surcharge, 0)) AS fees
+    FROM invoices
+    WHERE status = 'Closed' AND voided_at IS NULL
+      AND substr(invoice_date, 1, 7) = ?
+  `).bind(month).first<{ fees: number }>()
+
+  const round2 = (n: number) => Math.round((n || 0) * 100) / 100
+  return c.json({
+    month,
+    food_cost:     round2(food),
+    beverage_cost: round2(beverage),
+    supplies_cost: round2(supplies),
+    invoice_fees:  round2(feeRow?.fees ?? 0),
   })
 })
 

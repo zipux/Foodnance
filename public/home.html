@@ -364,13 +364,13 @@
       <a href="/home.html" class="active"><i class="fas fa-home"></i> Home</a>
       <a href="/upload-invoice.html"><i class="fas fa-file-invoice"></i> Upload Invoice</a>
       <a href="/invoices.html"><i class="fas fa-list-alt"></i> Invoices</a>
+      <a href="/pnl.html"><i class="fas fa-chart-pie"></i> P&amp;L</a>
       <a href="/index.html"><i class="fas fa-boxes"></i> Products</a>
       <a href="/recipes.html"><i class="fas fa-utensils"></i> Recipes</a>
       <a href="/finished-products.html"><i class="fas fa-tag"></i> Finished Products</a>
       <a href="/inventory.html"><i class="fas fa-warehouse"></i> Inventory</a>
       <a href="/suppliers.html"><i class="fas fa-truck"></i> Suppliers</a>
       <a href="/staff.html"><i class="fas fa-users"></i> Staff</a>
-      <a href="/certifications.html"><i class="fas fa-certificate"></i> Certifications</a>
     </div>
   </nav>
 
@@ -379,6 +379,22 @@
       <h1><i class="fas fa-chart-line"></i> Price Movers</h1>
       <p>Products with the biggest price swings between their two most recent purchases.</p>
     </div>
+
+    <!-- P&L summary tile → links to full P&L page -->
+    <a href="/pnl.html" id="pnlTile" style="text-decoration:none;display:block;margin-bottom:1.5rem">
+      <section class="card" style="transition:var(--transition)">
+        <div class="card-body" style="display:flex;flex-wrap:wrap;align-items:center;gap:1.25rem;justify-content:space-between">
+          <div>
+            <div style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;font-weight:700">Profit &amp; Loss</div>
+            <div id="pnlTileMonth" style="font-size:.9rem;color:var(--text);font-weight:600;margin-top:.15rem">This month</div>
+          </div>
+          <div id="pnlTileStats" style="display:flex;gap:1.75rem;flex-wrap:wrap;align-items:center">
+            <span style="color:var(--text-muted);font-size:.9rem"><i class="fas fa-spinner fa-spin"></i> Loading…</span>
+          </div>
+          <div style="color:var(--primary);font-weight:600;white-space:nowrap">View P&amp;L <i class="fas fa-arrow-right"></i></div>
+        </div>
+      </section>
+    </a>
 
     <div class="pm-layout">
       <!-- LEFT: filters + list -->
@@ -495,6 +511,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="/static/utils.js?v=20260715-2"></script>
-  <script src="/static/home.js?v=20260714-2"></script>
+  <script src="/static/home.js?v=20260717-2"></script>
 </body>
 </html>

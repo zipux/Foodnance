@@ -569,6 +569,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   loadMovers();
+  loadPnlTile();
 
   // Spending Breakdown init
   const sbRange = sbPresetRange('this-month');
@@ -602,3 +603,52 @@ document.addEventListener('DOMContentLoaded', () => {
 
   loadSpendingBreakdown();
 });
+
+// ── P&L summary tile ───────────────────────────────────────────
+// Current-month snapshot: Sales (manual) − Costs (invoices + overheads) = Profit.
+// Mirrors the P&L page math; links there for the full statement.
+async function loadPnlTile() {
+  const statsEl = document.getElementById('pnlTileStats');
+  const monthEl = document.getElementById('pnlTileMonth');
+  if (!statsEl) return;
+
+  const now = new Date();
+  const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  if (monthEl) {
+    monthEl.textContent = now.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  }
+
+  try {
+    const [costs, salesData, ohData, recData] = await Promise.all([
+      apiGet(`pnl?month=${month}`),
+      apiGet(`tables/sales_monthly?page=1&limit=500`),
+      apiGet(`tables/operating_expenses?page=1&limit=1000`),
+      apiGet(`tables/recurring_expenses?page=1&limit=500`),
+    ]);
+    const salesRow = (salesData.data || []).find(r => r.period === month);
+    const sales    = parseFloat(salesRow?.sales_total) || 0;
+    const costTotal = (parseFloat(costs.food_cost) || 0)
+      + (parseFloat(costs.beverage_cost) || 0)
+      + (parseFloat(costs.supplies_cost) || 0)
+      + (parseFloat(costs.invoice_fees) || 0)
+      + (ohData.data || []).filter(r => r.period === month)
+          .reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
+      + (recData.data || []).filter(r => r.active == null || Number(r.active) === 1)
+          .reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+    const profit = sales - costTotal;
+
+    const stat = (label, value, color) =>
+      `<span style="display:flex;flex-direction:column">
+         <span style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.03em">${label}</span>
+         <span style="font-size:1.25rem;font-weight:800;font-family:ui-monospace,monospace;color:${color}">${value}</span>
+       </span>`;
+
+    const money = n => (n < 0 ? '-$' : '$') + Math.abs(n).toFixed(2);
+    statsEl.innerHTML =
+      stat('Sales', sales ? money(sales) : '—', 'var(--text)') +
+      stat('Costs', money(costTotal), 'var(--text)') +
+      stat('Profit', sales ? money(profit) : '—', profit >= 0 ? '#15803d' : '#b91c1c');
+  } catch (e) {
+    statsEl.innerHTML = `<span style="color:var(--text-muted);font-size:.85rem">P&amp;L unavailable</span>`;
+  }
+}

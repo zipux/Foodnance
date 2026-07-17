@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>P&amp;L — InvoiceDB</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260717-2" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    #pnl-page-marker { max-width: 780px; }
+    .pnl-monthbar {
+      display: flex; align-items: center; gap: .6rem;
+      margin-bottom: 1.25rem; flex-wrap: wrap;
+    }
+    .pnl-monthbar input[type="month"] {
+      padding: .45rem .7rem; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); font-family: inherit; font-size: .95rem;
+      color: var(--text); background: #fff;
+    }
+    .pnl-nav-btn {
+      width: 36px; height: 36px; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); background: #fff; color: var(--text-muted);
+      cursor: pointer; font-size: .9rem; transition: var(--transition);
+    }
+    .pnl-nav-btn:hover { border-color: var(--primary); color: var(--primary); }
+
+    /* Statement rows */
+    .pnl-row {
+      display: grid; grid-template-columns: 1fr auto auto;
+      gap: .5rem 1rem; align-items: baseline;
+      padding: .5rem .25rem; border-bottom: 1px solid #f1f5f9;
+    }
+    .pnl-label { font-size: .95rem; color: var(--text); }
+    .pnl-sub   { font-size: .78rem; color: var(--text-muted); margin-top: .1rem; }
+    .pnl-amount {
+      font-family: ui-monospace, monospace; font-weight: 600;
+      font-size: .95rem; color: var(--text); text-align: right; white-space: nowrap;
+    }
+    .pnl-amount.neg { color: #dc2626; }
+    .pnl-pct {
+      font-size: .78rem; color: var(--text-muted);
+      font-family: ui-monospace, monospace; text-align: right;
+      min-width: 68px; white-space: nowrap;
+    }
+    .pnl-section-head {
+      font-size: .72rem; font-weight: 700; letter-spacing: .04em;
+      text-transform: uppercase; color: var(--text-muted);
+      margin: 1.25rem 0 .35rem; padding: 0 .25rem;
+    }
+    .pnl-total {
+      display: grid; grid-template-columns: 1fr auto auto;
+      gap: .5rem 1rem; align-items: baseline;
+      padding: .7rem .6rem; margin: .4rem 0;
+      border-radius: var(--radius-sm); background: #f8fafc;
+      border: 1px solid var(--border);
+    }
+    .pnl-total .pnl-label { font-weight: 700; font-size: 1rem; }
+    .pnl-total .pnl-amount { font-size: 1.1rem; font-weight: 800; }
+    .pnl-total.good { background: #f0fdf4; border-color: #bbf7d0; }
+    .pnl-total.good .pnl-amount { color: #15803d; }
+    .pnl-total.bad  { background: #fef2f2; border-color: #fecaca; }
+    .pnl-total.bad  .pnl-amount { color: #b91c1c; }
+
+    .pnl-money-in input {
+      width: 150px; padding: .35rem .55rem; text-align: right;
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      font-family: ui-monospace, monospace; font-size: .95rem; font-weight: 600;
+      color: var(--text); background: #fff;
+    }
+    .pnl-money-in input:focus {
+      outline: none; border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(79,70,229,.1);
+    }
+
+    .pnl-oh-row { display: grid; grid-template-columns: 1fr auto auto; gap: .5rem; align-items: center; padding: .3rem .25rem; }
+    .pnl-oh-row input[type="text"] {
+      padding: .35rem .55rem; border: 1px solid var(--border); border-radius: var(--radius-sm);
+      font-family: inherit; font-size: .9rem; color: var(--text); background: #fff; width: 100%;
+    }
+    .pnl-oh-row input[type="number"] {
+      width: 130px; padding: .35rem .55rem; text-align: right;
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      font-family: ui-monospace, monospace; font-size: .9rem; color: var(--text); background: #fff;
+    }
+    .pnl-oh-row input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,70,229,.1); }
+    .pnl-oh-del {
+      background: none; border: none; color: #cbd5e1; cursor: pointer;
+      font-size: .9rem; padding: .3rem; transition: var(--transition);
+    }
+    .pnl-oh-del:hover { color: #ef4444; }
+    .pnl-oh-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .6rem; }
+
+    .pnl-plain {
+      margin-top: 1.25rem; padding: .9rem 1.1rem;
+      background: #eef2ff; border-radius: var(--radius-sm);
+      font-size: .95rem; color: #3730a3; line-height: 1.5;
+    }
+    .pnl-note {
+      margin-top: 1rem; font-size: .78rem; color: var(--text-muted);
+      display: flex; gap: .4rem; align-items: flex-start;
+    }
+    .pnl-note i { margin-top: .15rem; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand"><i class="fas fa-receipt"></i> InvoiceDB</div>
+    <div class="nav-links">
+      <a href="/home.html"><i class="fas fa-home"></i> Home</a>
+      <a href="/upload-invoice.html"><i class="fas fa-file-invoice"></i> Upload Invoice</a>
+      <a href="/invoices.html"><i class="fas fa-list-alt"></i> Invoices</a>
+      <a href="/pnl.html" class="active"><i class="fas fa-chart-pie"></i> P&amp;L</a>
+      <a href="/index.html"><i class="fas fa-boxes"></i> Products</a>
+      <a href="/recipes.html"><i class="fas fa-utensils"></i> Recipes</a>
+      <a href="/finished-products.html"><i class="fas fa-tag"></i> Finished Products</a>
+      <a href="/inventory.html"><i class="fas fa-warehouse"></i> Inventory</a>
+      <a href="/suppliers.html"><i class="fas fa-truck"></i> Suppliers</a>
+      <a href="/staff.html"><i class="fas fa-users"></i> Staff</a>
+    </div>
+  </nav>
+
+  <div class="container" id="pnl-page-marker">
+    <div class="page-header">
+      <h1><i class="fas fa-chart-pie"></i> Profit &amp; Loss</h1>
+      <p>What you took in, what it cost you, and what you kept — for the month.</p>
+    </div>
+
+    <div class="pnl-monthbar">
+      <button class="pnl-nav-btn" id="pnlPrev" title="Previous month"><i class="fas fa-chevron-left"></i></button>
+      <input type="month" id="pnlMonth" />
+      <button class="pnl-nav-btn" id="pnlNext" title="Next month"><i class="fas fa-chevron-right"></i></button>
+    </div>
+
+    <section class="card">
+      <div class="card-body" id="pnlBody">
+        <div class="sb-empty" style="text-align:center;color:var(--text-muted);padding:2rem 1rem">
+          <i class="fas fa-spinner fa-spin"></i> Loading…
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/static/utils.js?v=20260717-2"></script>
+  <script src="/static/pnl.js?v=20260717-2"></script>
+</body>
+</html>
