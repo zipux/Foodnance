@@ -1,64 +1,168 @@
 /* ===== pnl.js — Profit & Loss (Phase 1) ===== */
 // Cost side comes from /api/pnl (invoices, by category type). Sales + overheads
 // are manual, stored in sales_monthly / operating_expenses via generic CRUD.
+//
+// The period is an inclusive range of WHOLE months (pnlFrom..pnlTo). Whole
+// months because sales and one-off costs are stored per month: a part-month
+// figure could only be prorated, which would invent precision. Single-month is
+// just the range collapsed (from === to), and only then are the month-scoped
+// edits (sales box, add one-off, copy last month) offered.
 
-let pnlMonth      = '';     // 'YYYY-MM'
+let pnlFrom       = '';     // 'YYYY-MM' — first month of the period (inclusive)
+let pnlTo         = '';     // 'YYYY-MM' — last month of the period (inclusive)
+// Cost basis: 'purchases' (what you bought) | 'cogs' (stock-take-adjusted true
+// cost of goods sold). Sticky per browser; falls back to purchases when the
+// bracketing stock takes for the period don't exist.
+let pnlBasis      = (localStorage.getItem('pnlBasis') === 'cogs') ? 'cogs' : 'purchases';
 let pnlCosts      = { food_cost: 0, beverage_cost: 0, supplies_cost: 0, invoice_fees: 0 };
-let pnlSalesRow   = null;   // sales_monthly row for the month (or null)
-let pnlOverheads  = [];     // operating_expenses rows for the month (one-offs)
+let pnlSalesRows  = [];     // sales_monthly rows inside the period
+let pnlOverheads  = [];     // operating_expenses rows inside the period (one-offs)
 let pnlRecurring  = [];     // recurring_expenses rows (fixed monthly costs — every month)
+let pnlSpread     = [];     // spread_expenses rows (a bill split across the months it covers)
 let pnlAllSales   = [];     // all sales_monthly rows (cache)
 let pnlAllOh      = [];     // all operating_expenses rows (cache — for copy-last-month)
+
+// ── Month helpers ──────────────────────────────────────────────
+const monthStr = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+
+// Shift a 'YYYY-MM' by n months.
+function addMonths(month, n) {
+  const [y, m] = month.split('-').map(Number);
+  return monthStr(new Date(y, m - 1 + n, 1));
+}
+
+// Whole months from `from` to `to` inclusive, e.g. ('2026-04','2026-06') →
+// ['2026-04','2026-05','2026-06']. 'YYYY-MM' sorts lexicographically.
+function monthsInRange(from, to) {
+  const out = [];
+  for (let m = from; m <= to && out.length < 600; m = addMonths(m, 1)) out.push(m);
+  return out;
+}
+
+function monthCount(from, to) { return monthsInRange(from, to).length; }
+
+function prevMonthStr(month) { return addMonths(month, -1); }
+
+// "July 2026" / "April – June 2026" / "November 2025 – February 2026"
+function periodLabel(from, to) {
+  const nice = m => new Date(m + '-01T00:00:00').toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  if (from === to) return nice(from);
+  const shortMon = m => new Date(m + '-01T00:00:00').toLocaleDateString(undefined, { month: 'long' });
+  // Same year → don't repeat it: "April – June 2026"
+  if (from.slice(0, 4) === to.slice(0, 4)) return `${shortMon(from)} – ${nice(to)}`;
+  return `${nice(from)} – ${nice(to)}`;
+}
+
+// Preset → whole-month range. "This quarter"/"Year to date" run up to the
+// current month (period-to-date), matching the Spending Breakdown's presets.
+function pnlPresetRange(preset) {
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth();
+  const thisMonth = monthStr(now);
+  switch (preset) {
+    case 'this-month':   return { from: thisMonth, to: thisMonth };
+    case 'last-month':   { const p = addMonths(thisMonth, -1); return { from: p, to: p }; }
+    case 'this-quarter': return { from: monthStr(new Date(y, Math.floor(m / 3) * 3, 1)), to: thisMonth };
+    case 'ytd':          return { from: `${y}-01`, to: thisMonth };
+  }
+}
+
+function pnlSetActivePreset(preset) {
+  document.querySelectorAll('.pnl-preset-btn').forEach(btn =>
+    btn.classList.toggle('active', btn.dataset.preset === preset));
+}
+
+// Which preset (if any) the current range corresponds to — so the chip stays lit
+// after prev/next or a manual pick that happens to match.
+function pnlMatchingPreset() {
+  for (const p of ['this-month', 'last-month', 'this-quarter', 'ytd']) {
+    const r = pnlPresetRange(p);
+    if (r.from === pnlFrom && r.to === pnlTo) return p;
+  }
+  return null;
+}
+
+function pnlSetRange(from, to, { load = true } = {}) {
+  pnlFrom = from; pnlTo = to;
+  document.getElementById('pnlFrom').value = from;
+  document.getElementById('pnlTo').value   = to;
+  pnlSetActivePreset(pnlMatchingPreset());
+  if (load) loadPnl();
+}
+
+// Prev/next move by the length of the current period: a single month steps one
+// month, a Q2 view steps to Q1.
+function shiftPeriod(direction) {
+  const span = monthCount(pnlFrom, pnlTo);
+  pnlSetRange(addMonths(pnlFrom, direction * span), addMonths(pnlTo, direction * span));
+}
+
+function pnlSetBasis(basis) {
+  pnlBasis = (basis === 'cogs') ? 'cogs' : 'purchases';
+  localStorage.setItem('pnlBasis', pnlBasis);
+  render();
+}
+
+function pnlApplyCustom() {
+  const from = document.getElementById('pnlFrom').value;
+  const to   = document.getElementById('pnlTo').value;
+  if (!/^\d{4}-\d{2}$/.test(from) || !/^\d{4}-\d{2}$/.test(to)) {
+    showToast('Pick a From and To month.', 'error'); return;
+  }
+  if (to < from) { showToast('The "To" month is before the "From" month.', 'error'); return; }
+  pnlSetRange(from, to);
+}
 
 // ── Bootstrap ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   if (!document.getElementById('pnl-page-marker')) return;
-  const now = new Date();
-  pnlMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  document.getElementById('pnlMonth').value = pnlMonth;
 
-  document.getElementById('pnlMonth').addEventListener('change', e => {
-    if (/^\d{4}-\d{2}$/.test(e.target.value)) { pnlMonth = e.target.value; loadPnl(); }
+  document.querySelectorAll('.pnl-preset-btn').forEach(btn =>
+    btn.addEventListener('click', () => {
+      const r = pnlPresetRange(btn.dataset.preset);
+      pnlSetRange(r.from, r.to);
+    }));
+  document.getElementById('pnlApply').addEventListener('click', pnlApplyCustom);
+  document.getElementById('pnlPrev').addEventListener('click', () => shiftPeriod(-1));
+  document.getElementById('pnlNext').addEventListener('click', () => shiftPeriod(1));
+
+  // Spread-cost modal
+  document.getElementById('closeSpreadModal').addEventListener('click', () => closeModal('spreadModal'));
+  document.getElementById('cancelSpreadModal').addEventListener('click', () => closeModal('spreadModal'));
+  document.getElementById('spreadModal').addEventListener('click', e => {
+    if (e.target === document.getElementById('spreadModal')) closeModal('spreadModal');
   });
-  document.getElementById('pnlPrev').addEventListener('click', () => shiftMonth(-1));
-  document.getElementById('pnlNext').addEventListener('click', () => shiftMonth(1));
+  document.getElementById('saveSpreadBtn').addEventListener('click', pnlSaveSpread);
+  ['spreadTotal', 'spreadStart', 'spreadEnd'].forEach(id =>
+    document.getElementById(id).addEventListener('input', updateSpreadPreview));
 
-  loadPnl();
+  const start = pnlPresetRange('this-month');
+  pnlSetRange(start.from, start.to);   // loads
 });
-
-function shiftMonth(delta) {
-  const [y, m] = pnlMonth.split('-').map(Number);
-  const d = new Date(y, m - 1 + delta, 1);
-  pnlMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  document.getElementById('pnlMonth').value = pnlMonth;
-  loadPnl();
-}
-
-function prevMonthStr(month) {
-  const [y, m] = month.split('-').map(Number);
-  const d = new Date(y, m - 2, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
 
 // ── Load ───────────────────────────────────────────────────────
 async function loadPnl() {
   const body = document.getElementById('pnlBody');
   body.innerHTML = `<div style="text-align:center;color:var(--text-muted);padding:2rem 1rem"><i class="fas fa-spinner fa-spin"></i> Loading…</div>`;
   try {
-    const [costs, salesData, ohData, recData] = await Promise.all([
-      apiGet(`pnl?month=${pnlMonth}`),
+    const [costs, salesData, ohData, recData, spData] = await Promise.all([
+      apiGet(`pnl?from=${pnlFrom}&to=${pnlTo}`),
       apiGet(`tables/sales_monthly?page=1&limit=500`),
       apiGet(`tables/operating_expenses?page=1&limit=1000`),
       apiGet(`tables/recurring_expenses?page=1&limit=500`),
+      apiGet(`tables/spread_expenses?page=1&limit=500`),
     ]);
+    const inPeriod = r => r.period >= pnlFrom && r.period <= pnlTo;
     pnlCosts     = costs || pnlCosts;
     pnlAllSales  = salesData.data || [];
     pnlAllOh     = ohData.data || [];
-    pnlSalesRow  = pnlAllSales.find(r => r.period === pnlMonth) || null;
-    pnlOverheads = pnlAllOh.filter(r => r.period === pnlMonth)
-      .sort((a, b) => (a.created_at || '') < (b.created_at || '') ? -1 : 1);
+    pnlSalesRows = pnlAllSales.filter(inPeriod).sort((a, b) => a.period < b.period ? -1 : 1);
+    pnlOverheads = pnlAllOh.filter(inPeriod)
+      .sort((a, b) => (a.period + (a.created_at || '')) < (b.period + (b.created_at || '')) ? -1 : 1);
     pnlRecurring = (recData.data || [])
       .filter(r => r.active == null || Number(r.active) === 1)
+      .sort((a, b) => (a.created_at || '') < (b.created_at || '') ? -1 : 1);
+    pnlSpread    = (spData.data || [])
       .sort((a, b) => (a.created_at || '') < (b.created_at || '') ? -1 : 1);
     render();
   } catch (e) {
@@ -72,18 +176,88 @@ function fmtMoney(n) {
   return (num < 0 ? '-$' : '$') + Math.abs(num).toFixed(2);
 }
 
+// Whole-day number for a 'YYYY-MM-DD' string (UTC-based, DST-safe).
+function _dayNum(ymd) {
+  const [y, m, d] = String(ymd || '').split('-').map(Number);
+  if (!y || !m || !d) return NaN;
+  return Math.floor(Date.UTC(y, m - 1, d) / 86400000);
+}
+
+// Fair share of a spread cost that falls inside `month` ('YYYY-MM'): the total
+// prorated by how many days of [start_date, end_date] land in that month.
+// Returns { allocated, overlapDays, totalDays }.
+function spreadAllocation(row, month) {
+  const startN = _dayNum(row.start_date);
+  const endN   = _dayNum(row.end_date);
+  const total  = parseFloat(row.total_amount) || 0;
+  if (isNaN(startN) || isNaN(endN) || endN < startN) return { allocated: 0, overlapDays: 0, totalDays: 0 };
+
+  const [y, m]  = month.split('-').map(Number);
+  const mStartN = Math.floor(Date.UTC(y, m - 1, 1) / 86400000);
+  const mEndN   = Math.floor(Date.UTC(y, m, 1) / 86400000) - 1;   // last day of month
+
+  const oStart = Math.max(startN, mStartN);
+  const oEnd   = Math.min(endN, mEndN);
+  const overlapDays = oEnd >= oStart ? (oEnd - oStart + 1) : 0;
+  const totalDays   = endN - startN + 1;
+  return { allocated: totalDays > 0 ? total * overlapDays / totalDays : 0, overlapDays, totalDays };
+}
+
+// A spread cost's share of a whole period = the sum of its monthly shares.
+function spreadAllocationRange(row, from, to) {
+  let allocated = 0, overlapDays = 0, totalDays = 0;
+  for (const m of monthsInRange(from, to)) {
+    const a = spreadAllocation(row, m);
+    allocated += a.allocated; overlapDays += a.overlapDays; totalDays = a.totalDays;
+  }
+  return { allocated, overlapDays, totalDays };
+}
+
+// Short human range label, e.g. "13 Jun – 18 Sep 2026".
+function spreadRangeLabel(row) {
+  const fmtOne = ymd => {
+    const [y, m, d] = String(ymd || '').split('-').map(Number);
+    if (!y) return '?';
+    const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m - 1];
+    return `${d} ${mon} ${y}`;
+  };
+  return `${fmtOne(row.start_date)} – ${fmtOne(row.end_date)}`;
+}
+
 function render() {
-  const sales    = parseFloat(pnlSalesRow?.sales_total) || 0;
-  const food     = parseFloat(pnlCosts.food_cost) || 0;
-  const beverage = parseFloat(pnlCosts.beverage_cost) || 0;
+  const months   = monthsInRange(pnlFrom, pnlTo);
+  const nMonths  = months.length;
+  const single   = pnlFrom === pnlTo;     // month-scoped edits only make sense here
+  const sales    = pnlSalesRows.reduce((s, r) => s + (parseFloat(r.sales_total) || 0), 0);
+  const foodBought = parseFloat(pnlCosts.food_cost) || 0;
+  const bevBought  = parseFloat(pnlCosts.beverage_cost) || 0;
   const supplies = parseFloat(pnlCosts.supplies_cost) || 0;
+
+  // Cost basis: purchases (what you bought) vs stock-take-adjusted true COGS.
+  const cogsData  = pnlCosts.cogs || { available: false, reason: 'no_closing_take' };
+  const cogsAvail = !!cogsData.available;
+  const useCogs   = pnlBasis === 'cogs' && cogsAvail;
+  const food     = useCogs ? (parseFloat(cogsData.food_cogs) || 0) : foodBought;
+  const beverage = useCogs ? (parseFloat(cogsData.beverage_cogs) || 0) : bevBought;
   const fees     = parseFloat(pnlCosts.invoice_fees) || 0;
   const ohTotal  = pnlOverheads.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-  const fixedTotal = pnlRecurring.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+  // Fixed costs are per month, so a 3-month period carries 3× the rent.
+  const fixedPerMonth = pnlRecurring.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+  const fixedTotal    = fixedPerMonth * nMonths;
+  // Spread costs: the period's fair share of each multi-month bill.
+  const spreadThisMonth = pnlSpread
+    .map(r => ({ row: r, ...spreadAllocationRange(r, pnlFrom, pnlTo) }))
+    .filter(x => x.allocated > 0.0049);
+  const spreadTotal = spreadThisMonth.reduce((s, x) => s + x.allocated, 0);
+  // Months with no sales entered — a period total silently understates without this.
+  const missingSales = months.filter(m => !pnlSalesRows.some(r => r.period === m));
+  // Expense invoices (utilities/rent/etc.) uploaded and classified as expenses.
+  const expenseInv = pnlCosts.expense_invoices || [];
+  const expenseInvTotal = expenseInv.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
 
-  const cogs    = food + beverage;
-  const gross   = sales - cogs;
-  const running = supplies + fees + fixedTotal + ohTotal;
+  const cogsTotal = food + beverage;
+  const gross   = sales - cogsTotal;
+  const running = supplies + fees + expenseInvTotal + fixedTotal + spreadTotal + ohTotal;
   const net     = gross - running;
   const hasSales = sales > 0;
 
@@ -103,6 +277,8 @@ function render() {
       <div class="pnl-pct">${pct(amount)}</div>
     </div>`;
 
+  const monthShort = m => new Date(m + '-01T00:00:00').toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+
   // Fixed monthly cost rows (recurring — same every month, editable)
   const fixedRowsHtml = pnlRecurring.map(r => `
     <div class="pnl-oh-row">
@@ -113,61 +289,157 @@ function render() {
       <button class="pnl-oh-del" title="Remove" onclick="pnlDeleteRecurring('${esc(r.id)}')"><i class="fas fa-times"></i></button>
     </div>`).join('');
 
-  // Manual one-off overhead rows (editable)
+  // Manual one-off overhead rows (editable). Over a multi-month period each row
+  // is tagged with the month it belongs to.
   const ohRowsHtml = pnlOverheads.map(r => `
     <div class="pnl-oh-row">
-      <input type="text" value="${esc(r.name || '')}" placeholder="Expense name"
-             onchange="pnlUpdateOverhead('${esc(r.id)}','name',this.value)" />
+      <div>
+        ${single ? '' : `<div class="pnl-sub" style="margin:0 0 .15rem .1rem">${esc(monthShort(r.period))}</div>`}
+        <input type="text" value="${esc(r.name || '')}" placeholder="Expense name"
+               onchange="pnlUpdateOverhead('${esc(r.id)}','name',this.value)" />
+      </div>
       <input type="number" step="0.01" min="0" value="${r.amount != null ? r.amount : ''}" placeholder="0.00"
              onchange="pnlUpdateOverhead('${esc(r.id)}','amount',this.value)" />
       <button class="pnl-oh-del" title="Remove" onclick="pnlDeleteOverhead('${esc(r.id)}')"><i class="fas fa-times"></i></button>
     </div>`).join('');
 
-  const lastMonth = prevMonthStr(pnlMonth);
+  // Spread cost rows for this month (click to edit; fair-share shown)
+  const spreadRowsHtml = spreadThisMonth.map(x => {
+    const r = x.row;
+    return `
+      <div class="pnl-row" style="cursor:pointer" onclick="pnlEditSpread('${esc(r.id)}')" title="Edit">
+        <div>
+          <div class="pnl-label">${esc(r.name || 'Spread cost')}</div>
+          <div class="pnl-sub">${fmtMoney(x.allocated)} of ${fmtMoney(r.total_amount)} · ${esc(spreadRangeLabel(r))} · ${x.overlapDays}/${x.totalDays} days</div>
+        </div>
+        <div class="pnl-amount">${fmtMoney(x.allocated)}</div>
+        <button class="pnl-oh-del" title="Remove" onclick="event.stopPropagation();pnlDeleteSpread('${esc(r.id)}')"><i class="fas fa-times"></i></button>
+      </div>`;
+  }).join('');
+
+  const lastMonth = prevMonthStr(pnlFrom);
   const lastMonthHasOh = pnlAllOh.some(r => r.period === lastMonth);
+  const periodWord = single ? 'this month' : 'this period';
 
   // Plain-English summary
   let plain;
   if (!hasSales) {
-    plain = `<i class="fas fa-circle-info"></i> Enter your sales for this month above to see your profit.`;
+    plain = `<i class="fas fa-circle-info"></i> Enter your net sales for ${periodWord} above to see your profit.`;
   } else {
     const cents = Math.round((net / sales) * 100);
     plain = net >= 0
-      ? `You took in <strong>${fmtMoney(sales)}</strong>. After <strong>${fmtMoney(cogs + running)}</strong> in costs, you kept <strong>${fmtMoney(net)}</strong> — about <strong>${cents}¢ of every dollar</strong> you took in.`
-      : `You took in <strong>${fmtMoney(sales)}</strong>, but costs were <strong>${fmtMoney(cogs + running)}</strong> — a loss of <strong>${fmtMoney(-net)}</strong> this month.`;
+      ? `You took in <strong>${fmtMoney(sales)}</strong>. After <strong>${fmtMoney(cogsTotal + running)}</strong> in costs, you kept <strong>${fmtMoney(net)}</strong> — about <strong>${cents}¢ of every dollar</strong> you took in.`
+      : `You took in <strong>${fmtMoney(sales)}</strong>, but costs were <strong>${fmtMoney(cogsTotal + running)}</strong> — a loss of <strong>${fmtMoney(-net)}</strong> over ${periodWord}.`;
   }
 
+  // Net sales: editable for a single month (one sales_monthly row), read-only
+  // sum over a longer period — you can't type one number into several months.
+  const salesCell = single
+    ? `<div style="grid-column:2/4;text-align:right">
+         <input type="number" step="0.01" min="0" id="pnlSalesInput"
+                value="${sales ? sales : ''}" placeholder="0.00"
+                onchange="pnlSaveSales(this.value)" />
+       </div>`
+    : `<div style="grid-column:2/4;text-align:right">
+         <div class="pnl-amount">${fmtMoney(sales)}</div>
+         <div class="pnl-sub">Total of ${nMonths} months · open a single month to edit</div>
+       </div>`;
+
+  const missingSalesNote = (!single && missingSales.length)
+    ? `<div class="pnl-sub" style="color:#b45309;padding:.1rem .25rem .5rem">
+         <i class="fas fa-triangle-exclamation"></i> No sales entered for
+         ${missingSales.map(m => esc(monthShort(m))).join(', ')} — this total is only as complete as what's been entered.
+       </div>`
+    : '';
+
+  // ── Cost-basis toggle (Purchases vs stock-take-adjusted True COGS) ──
+  const niceDate = ymd => {
+    const [y, m, d] = String(ymd || '').split('-').map(Number);
+    if (!y) return '?';
+    return `${d} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m - 1]} ${y}`;
+  };
+  let basisNote;
+  if (useCogs) {
+    basisNote = `<div class="pnl-basis-note"><i class="fas fa-scale-balanced"></i>
+      <span>True cost of what you <strong>used</strong>: purchases adjusted by your stock counts from
+      <strong>${esc(niceDate(cogsData.opening_date))}</strong> to <strong>${esc(niceDate(cogsData.closing_date))}</strong>.
+      Raw-material inventory only.</span></div>`;
+  } else if (cogsAvail) {
+    basisNote = `<div class="pnl-basis-note"><i class="fas fa-circle-info"></i>
+      <span>Showing what you <strong>bought</strong> this period. Switch to True COGS to adjust for stock you had on hand.</span></div>`;
+  } else {
+    const need = cogsData.reason === 'no_opening_take'
+      ? `a submitted stock take dated before <strong>${esc(niceDate(pnlFrom + '-01'))}</strong>`
+      : `a submitted stock take dated within this period`;
+    basisNote = `<div class="pnl-basis-note warn"><i class="fas fa-circle-info"></i>
+      <span>True COGS needs ${need}. Showing purchases until then.</span></div>`;
+  }
+
+  const basisHtml = `
+    <div class="pnl-basis">
+      <span class="pnl-basis-label">Cost basis:</span>
+      <div class="pnl-basis-seg">
+        <button class="pnl-basis-btn ${!useCogs ? 'active' : ''}" onclick="pnlSetBasis('purchases')">Purchases</button>
+        <button class="pnl-basis-btn ${useCogs ? 'active' : ''}" ${cogsAvail ? '' : 'disabled'}
+                title="${cogsAvail ? 'Adjust purchases by stock-take inventory changes' : 'Needs bracketing stock takes'}"
+                onclick="pnlSetBasis('cogs')">True COGS</button>
+      </div>
+      ${basisNote}
+    </div>`;
+
+  // COGS section heading + per-line detail reflect the active basis.
+  const cogsHeading = useCogs ? 'Cost of goods sold — what you used' : 'Cost of goods — what you bought';
+  const cogsSub = (bought, openV, closV) => useCogs
+    ? `Bought ${fmtMoney(bought)} + opening ${fmtMoney(openV)} − closing ${fmtMoney(closV)}`
+    : 'From invoices';
+
   document.getElementById('pnlBody').innerHTML = `
+    <div class="pnl-period-label">Showing: <strong>${esc(periodLabel(pnlFrom, pnlTo))}</strong>${single ? '' : ` · ${nMonths} months`}</div>
+
     <!-- Money in -->
     <div class="pnl-row pnl-money-in">
-      <div><div class="pnl-label"><strong>Sales</strong> (money in)</div><div class="pnl-sub">What you took in this month — enter it here</div></div>
-      <div style="grid-column:2/4;text-align:right">
-        <input type="number" step="0.01" min="0" id="pnlSalesInput"
-               value="${sales ? sales : ''}" placeholder="0.00"
-               onchange="pnlSaveSales(this.value)" />
-      </div>
+      <div><div class="pnl-label"><strong>Net sales</strong> (money in)</div><div class="pnl-sub">What you took in after tax, discounts and refunds${single ? ' — enter it here' : ''}</div></div>
+      ${salesCell}
     </div>
+    ${missingSalesNote}
 
-    <div class="pnl-section-head">Cost of goods — what you sold</div>
-    ${costRow('Food (ingredients)', '', food)}
-    ${costRow('Drinks (beverage)', '', beverage)}
+    ${basisHtml}
+
+    <div class="pnl-section-head">${cogsHeading}</div>
+    ${costRow('Food (ingredients)', cogsSub(foodBought, cogsData.opening_food, cogsData.closing_food), food)}
+    ${costRow('Drinks (beverage)', cogsSub(bevBought, cogsData.opening_beverage, cogsData.closing_beverage), beverage)}
     ${totalRow('Gross profit', gross, gross >= 0 ? 'good' : 'bad')}
 
     <div class="pnl-section-head">Running costs</div>
     ${costRow('Packaging &amp; supplies', 'From invoices', supplies)}
     ${fees ? costRow('Delivery &amp; surcharges', 'From invoices', fees) : ''}
+    ${expenseInv.map(r => costRow(esc(r.category), 'From an uploaded bill', parseFloat(r.amount) || 0)).join('')}
 
     <div class="pnl-sub" style="margin:.9rem .25rem .1rem;font-weight:600;color:var(--text)">Fixed monthly costs <span style="font-weight:400;color:var(--text-muted)">— same every month</span></div>
     <div>${fixedRowsHtml || '<div class="pnl-sub" style="padding:.25rem">None set yet — add rent, wages, insurance…</div>'}</div>
+    ${(!single && fixedPerMonth) ? `
+    <div class="pnl-row" style="border-bottom:none;padding-top:.15rem">
+      <div class="pnl-sub">${fmtMoney(fixedPerMonth)} a month × ${nMonths} months</div>
+      <div class="pnl-amount">${fmtMoney(fixedTotal)}</div>
+      <div class="pnl-pct">${pct(fixedTotal)}</div>
+    </div>` : ''}
     <div class="pnl-oh-actions">
       <button class="btn btn-secondary btn-sm" onclick="pnlAddRecurring()"><i class="fas fa-repeat"></i> Add fixed monthly cost</button>
     </div>
 
-    <div class="pnl-sub" style="margin:1rem .25rem .1rem;font-weight:600;color:var(--text)">One-off costs this month</div>
-    <div>${ohRowsHtml || '<div class="pnl-sub" style="padding:.25rem">None this month.</div>'}</div>
+    <div class="pnl-sub" style="margin:1rem .25rem .1rem;font-weight:600;color:var(--text)">Spread costs <span style="font-weight:400;color:var(--text-muted)">— split fairly across the months they cover</span></div>
+    <div>${spreadRowsHtml || '<div class="pnl-sub" style="padding:.25rem">None active this month.</div>'}</div>
     <div class="pnl-oh-actions">
-      <button class="btn btn-secondary btn-sm" onclick="pnlAddOverhead()"><i class="fas fa-plus"></i> Add one-off cost</button>
-      ${lastMonthHasOh ? `<button class="btn btn-secondary btn-sm" onclick="pnlCopyLastMonth()"><i class="fas fa-copy"></i> Copy last month's one-offs</button>` : ''}
+      <button class="btn btn-secondary btn-sm" onclick="pnlAddSpread()"><i class="fas fa-calendar-week"></i> Add spread cost (bill covering several months)</button>
+    </div>
+
+    <div class="pnl-sub" style="margin:1rem .25rem .1rem;font-weight:600;color:var(--text)">One-off costs ${single ? 'this month' : 'in this period'}</div>
+    <div>${ohRowsHtml || `<div class="pnl-sub" style="padding:.25rem">None ${single ? 'this month' : 'in this period'}.</div>`}</div>
+    <div class="pnl-oh-actions">
+      ${single ? `
+        <button class="btn btn-secondary btn-sm" onclick="pnlAddOverhead()"><i class="fas fa-plus"></i> Add one-off cost</button>
+        ${lastMonthHasOh ? `<button class="btn btn-secondary btn-sm" onclick="pnlCopyLastMonth()"><i class="fas fa-copy"></i> Copy last month's one-offs</button>` : ''}
+      ` : `<div class="pnl-sub" style="padding:.25rem">Open a single month to add a one-off cost.</div>`}
     </div>
 
     ${totalRow('Net profit — what you keep', net, net >= 0 ? 'good' : 'bad')}
@@ -175,24 +447,28 @@ function render() {
     <div class="pnl-plain">${plain}</div>
     <div class="pnl-note">
       <i class="fas fa-circle-info"></i>
-      <span>Costs are based on what you <strong>purchased</strong> this month (from your invoices), not a stock-take-adjusted cost of goods sold. Taxes and refundable deposits are excluded.</span>
+      <span>${useCogs
+        ? `Food &amp; drink costs are your <strong>true cost of goods sold</strong> — purchases adjusted by the change in raw-material stock between your counts. Other running costs are what you paid in ${periodWord}. Taxes and refundable deposits are excluded.`
+        : `Costs are based on what you <strong>purchased</strong> in ${periodWord} (from your invoices), not a stock-take-adjusted cost of goods sold. Taxes and refundable deposits are excluded.`}</span>
     </div>
   `;
 }
 
-// ── Sales (upsert one row per month) ───────────────────────────
+// ── Net sales (upsert one row per month; single-month view only) ─
 async function pnlSaveSales(value) {
   const amount = parseFloat(value);
   if (isNaN(amount) || amount < 0) { showToast('Enter a valid sales amount.', 'error'); return; }
+  const existing = pnlSalesRows.find(r => r.period === pnlFrom);
   try {
-    if (pnlSalesRow) {
-      await apiPatch(`tables/sales_monthly/${pnlSalesRow.id}`, { sales_total: amount });
-      pnlSalesRow.sales_total = amount;
+    if (existing) {
+      await apiPatch(`tables/sales_monthly/${existing.id}`, { sales_total: amount });
+      existing.sales_total = amount;
     } else {
-      pnlSalesRow = await apiPost(`tables/sales_monthly`, { period: pnlMonth, sales_total: amount });
-      pnlAllSales.push(pnlSalesRow);
+      const row = await apiPost(`tables/sales_monthly`, { period: pnlFrom, sales_total: amount });
+      pnlSalesRows.push(row);
+      pnlAllSales.push(row);
     }
-    showToast('Sales saved.', 'success');
+    showToast('Net sales saved.', 'success');
     render();
   } catch (e) {
     showToast('Save failed: ' + e.message, 'error');
@@ -202,7 +478,7 @@ async function pnlSaveSales(value) {
 // ── Overheads ──────────────────────────────────────────────────
 async function pnlAddOverhead() {
   try {
-    const row = await apiPost(`tables/operating_expenses`, { period: pnlMonth, name: '', amount: 0 });
+    const row = await apiPost(`tables/operating_expenses`, { period: pnlFrom, name: '', amount: 0 });
     pnlOverheads.push(row);
     pnlAllOh.push(row);
     render();
@@ -289,14 +565,92 @@ async function pnlDeleteRecurring(id) {
   }
 }
 
+// ── Spread costs (one bill split across the months it covers) ──
+function pnlAddSpread() {
+  document.getElementById('spreadModalTitle').innerHTML = '<i class="fas fa-calendar-week"></i> Add spread cost';
+  document.getElementById('spreadId').value    = '';
+  document.getElementById('spreadName').value  = '';
+  document.getElementById('spreadTotal').value = '';
+  document.getElementById('spreadStart').value = '';
+  document.getElementById('spreadEnd').value   = '';
+  updateSpreadPreview();
+  openModal('spreadModal');
+}
+
+function pnlEditSpread(id) {
+  const r = pnlSpread.find(x => x.id === id);
+  if (!r) return;
+  document.getElementById('spreadModalTitle').innerHTML = '<i class="fas fa-calendar-week"></i> Edit spread cost';
+  document.getElementById('spreadId').value    = r.id;
+  document.getElementById('spreadName').value  = r.name || '';
+  document.getElementById('spreadTotal').value = r.total_amount != null ? r.total_amount : '';
+  document.getElementById('spreadStart').value = r.start_date || '';
+  document.getElementById('spreadEnd').value   = r.end_date || '';
+  updateSpreadPreview();
+  openModal('spreadModal');
+}
+
+// Live "this month's share" hint inside the modal.
+function updateSpreadPreview() {
+  const el    = document.getElementById('spreadPreview');
+  const total = parseFloat(document.getElementById('spreadTotal').value);
+  const start = document.getElementById('spreadStart').value;
+  const end   = document.getElementById('spreadEnd').value;
+  if (isNaN(total) || !start || !end || _dayNum(end) < _dayNum(start)) { el.textContent = ''; return; }
+  const a = spreadAllocationRange({ total_amount: total, start_date: start, end_date: end }, pnlFrom, pnlTo);
+  const label = periodLabel(pnlFrom, pnlTo);
+  el.innerHTML = a.allocated > 0
+    ? `<i class="fas fa-scale-balanced"></i> ${label} share: <strong>${fmtMoney(a.allocated)}</strong> (${a.overlapDays} of ${a.totalDays} days)`
+    : `<i class="fas fa-circle-info"></i> This range doesn't cover ${label} — it'll show in the months it does.`;
+}
+
+async function pnlSaveSpread() {
+  const id    = document.getElementById('spreadId').value;
+  const name  = document.getElementById('spreadName').value.trim();
+  const total = parseFloat(document.getElementById('spreadTotal').value);
+  const start = document.getElementById('spreadStart').value;
+  const end   = document.getElementById('spreadEnd').value;
+  if (!name)                         { showToast('Enter what the cost is.', 'error'); return; }
+  if (isNaN(total) || total < 0)     { showToast('Enter a valid total amount.', 'error'); return; }
+  if (!start || !end)                { showToast('Enter the start and end dates.', 'error'); return; }
+  if (_dayNum(end) < _dayNum(start)) { showToast('End date must be on or after the start date.', 'error'); return; }
+
+  const payload = { name, total_amount: total, start_date: start, end_date: end };
+  const btn = document.getElementById('saveSpreadBtn');
+  btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
+  try {
+    if (id) await apiPatch(`tables/spread_expenses/${id}`, payload);
+    else    await apiPost(`tables/spread_expenses`, payload);
+    showToast('Spread cost saved.', 'success');
+    closeModal('spreadModal');
+    await loadPnl();
+  } catch (e) {
+    showToast('Save failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false; btn.innerHTML = '<i class="fas fa-save"></i> Save';
+  }
+}
+
+async function pnlDeleteSpread(id) {
+  const r = pnlSpread.find(x => x.id === id);
+  if (!confirm(`Remove "${r ? (r.name || 'this spread cost') : 'this spread cost'}"? It will be removed from every month it covered.`)) return;
+  try {
+    await apiDelete(`tables/spread_expenses/${id}`);
+    pnlSpread = pnlSpread.filter(x => x.id !== id);
+    render();
+  } catch (e) {
+    showToast('Delete failed: ' + e.message, 'error');
+  }
+}
+
 async function pnlCopyLastMonth() {
-  const lastMonth = prevMonthStr(pnlMonth);
+  const lastMonth = prevMonthStr(pnlFrom);
   const prev = pnlAllOh.filter(r => r.period === lastMonth);
   if (!prev.length) { showToast('No expenses to copy from last month.', 'warning'); return; }
   try {
     for (const r of prev) {
       const row = await apiPost(`tables/operating_expenses`, {
-        period: pnlMonth, name: r.name || '', amount: parseFloat(r.amount) || 0,
+        period: pnlFrom, name: r.name || '', amount: parseFloat(r.amount) || 0,
       });
       pnlOverheads.push(row);
       pnlAllOh.push(row);

@@ -200,7 +200,7 @@ const ALLOWED_TABLES = [
   'staff', 'certification_types', 'staff_certifications',
   'product_mappings', 'units', 'categories', 'product_aliases',
   'stock_takes', 'stock_take_items',
-  'sales_monthly', 'operating_expenses', 'recurring_expenses'
+  'sales_monthly', 'operating_expenses', 'recurring_expenses', 'spread_expenses'
 ]
 
 // ── List / query
@@ -330,6 +330,8 @@ app.put('/api/generic_products/:id', async (c) => {
     name?: string; category?: string
     sub_unit_name?: string; sub_unit_qty?: number | null; avg_weight_per_unit?: number | null
     reorder_level?: number | null; reorder_unit?: string
+    base_unit?: string; mid_name?: string; mid_lb?: number | null
+    top_name?: string; top_lb?: number | null
   }
   const newName = (body.name || '').trim()
   if (!newName) return c.json({ error: 'name required' }, 400)
@@ -342,7 +344,8 @@ app.put('/api/generic_products/:id', async (c) => {
   await c.env.DB.prepare(
     `UPDATE generic_products
        SET name = ?, category = ?, sub_unit_name = ?, sub_unit_qty = ?, avg_weight_per_unit = ?,
-           reorder_level = ?, reorder_unit = ?
+           reorder_level = ?, reorder_unit = ?,
+           base_unit = ?, mid_name = ?, mid_lb = ?, top_name = ?, top_lb = ?
      WHERE id = ?`
   ).bind(
     newName,
@@ -352,6 +355,11 @@ app.put('/api/generic_products/:id', async (c) => {
     body.avg_weight_per_unit ?? null,
     body.reorder_level ?? null,
     body.reorder_unit ?? '',
+    body.base_unit ?? '',
+    body.mid_name ?? '',
+    body.mid_lb ?? null,
+    body.top_name ?? '',
+    body.top_lb ?? null,
     id
   ).run()
 
@@ -1805,21 +1813,34 @@ app.get('/api/spending-breakdown', async (c) => {
   })
 })
 
-// ─── P&L: invoice-derived cost side for a month ───────────────
+// ─── P&L: invoice-derived cost side for a period ──────────────
 // Returns the cost figures the app can compute from data it owns (invoices),
 // split by category TYPE (food / beverage / supplies via the categories table).
 // Sales + manual overheads live in sales_monthly / operating_expenses and are
 // loaded by the frontend via generic CRUD — this endpoint is only the costs.
 //
-// Cost model (Phase 1): "cost = what you purchased this month" — line totals of
-// Closed, non-voided invoices dated in the month. Not stock-take-adjusted COGS.
+// Cost model (Phase 1): "cost = what you purchased in the period" — line totals
+// of Closed, non-voided invoices dated in it. Not stock-take-adjusted COGS.
 app.get('/api/pnl', async (c) => {
   const now = new Date()
   const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
   const monthRaw = (c.req.query('month') || '').trim()
-  const month = monthRaw || currentMonth
-  if (!/^\d{4}-\d{2}$/.test(month))
-    return c.json({ error: `Invalid 'month': "${month}". Use YYYY-MM.` }, 400)
+  const fromRaw  = (c.req.query('from')  || '').trim()
+  const toRaw    = (c.req.query('to')    || '').trim()
+
+  // The period is an inclusive range of WHOLE months (YYYY-MM..YYYY-MM). Whole
+  // months because sales and one-off overheads are stored per month — a partial
+  // month could only be prorated, which would invent precision. `month=` (a
+  // single month) is still accepted: the Home tile uses it.
+  const from = fromRaw || toRaw || monthRaw || currentMonth
+  const to   = toRaw   || fromRaw || monthRaw || currentMonth
+  for (const [name, value] of [['from', from], ['to', to]] as const) {
+    if (!/^\d{4}-\d{2}$/.test(value))
+      return c.json({ error: `Invalid '${name}': "${value}". Use YYYY-MM.` }, 400)
+  }
+  // 'YYYY-MM' sorts lexicographically, so a plain string compare orders months.
+  if (to < from)
+    return c.json({ error: `'to' (${to}) is before 'from' (${from}).` }, 400)
 
   // Cost by category TYPE. Resolve each invoice line's real category from
   // generic_products (via product_entries name match, then direct name match,
@@ -1843,7 +1864,7 @@ app.get('/api/pnl', async (c) => {
       JOIN invoices i ON il.invoice_id = i.id
       WHERE i.status = 'Closed'
         AND i.voided_at IS NULL
-        AND substr(i.invoice_date, 1, 7) = ?
+        AND substr(i.invoice_date, 1, 7) BETWEEN ? AND ?
     )
     SELECT
       COALESCE(
@@ -1854,7 +1875,7 @@ app.get('/api/pnl', async (c) => {
       SUM(COALESCE(amt, 0)) AS amount
     FROM line_cats
     GROUP BY type
-  `).bind(month).all<{ type: string; amount: number }>()
+  `).bind(from, to).all<{ type: string; amount: number }>()
 
   let food = 0, beverage = 0, supplies = 0
   for (const r of (typeRows.results ?? [])) {
@@ -1870,16 +1891,125 @@ app.get('/api/pnl', async (c) => {
     SELECT SUM(COALESCE(delivery, 0) + COALESCE(fuel_surcharge, 0)) AS fees
     FROM invoices
     WHERE status = 'Closed' AND voided_at IS NULL
-      AND substr(invoice_date, 1, 7) = ?
-  `).bind(month).first<{ fees: number }>()
+      AND substr(invoice_date, 1, 7) BETWEEN ? AND ?
+  `).bind(from, to).first<{ fees: number }>()
+
+  // Expense invoices (utilities, rent, insurance…): total by expense_category
+  // for the month. These are operating costs, not COGS, and have no line items.
+  const expRows = await c.env.DB.prepare(`
+    SELECT COALESCE(NULLIF(TRIM(expense_category), ''), 'Other') AS category,
+           SUM(COALESCE(total, 0)) AS amount
+    FROM invoices
+    WHERE invoice_kind = 'expense' AND status = 'Closed' AND voided_at IS NULL
+      AND substr(invoice_date, 1, 7) BETWEEN ? AND ?
+    GROUP BY category
+    ORDER BY amount DESC
+  `).bind(from, to).all<{ category: string; amount: number }>()
 
   const round2 = (n: number) => Math.round((n || 0) * 100) / 100
+
+  // ── True COGS (stock-take adjusted) ──────────────────────────
+  // Optional, "accurate mode" cost basis. Classic retail formula, per category
+  // type: COGS = opening stock + purchases − closing stock. Turns lumpy
+  // purchases into the cost of what was actually consumed.
+  //   opening = value of the latest submitted stock take BEFORE the period start
+  //   closing = value of the latest submitted stock take WITHIN/at the period end
+  // A snapshot is valued from raw-material counts × each product's cost per unit
+  // as of that take's date (falling back to the latest known cost). Batches and
+  // finished goods are not valued here (raw materials only) — kept honest in the
+  // UI. If either bracketing take is missing, `cogs.available` is false and the
+  // frontend stays on the purchases basis.
+  const periodStart = `${from}-01`                             // first day of first month
+  const [ty, tm] = to.split('-').map(Number)
+  const periodEnd = `${to}-${String(new Date(Date.UTC(ty, tm, 0)).getUTCDate()).padStart(2, '0')}`  // last day of last month
+
+  const closingTake = await c.env.DB.prepare(`
+    SELECT id, date(submitted_at) AS d FROM stock_takes
+    WHERE status = 'submitted' AND submitted_at IS NOT NULL AND date(submitted_at) <= ?
+    ORDER BY submitted_at DESC LIMIT 1
+  `).bind(periodEnd).first<{ id: string; d: string }>()
+
+  const openingTake = await c.env.DB.prepare(`
+    SELECT id, date(submitted_at) AS d FROM stock_takes
+    WHERE status = 'submitted' AND submitted_at IS NOT NULL AND date(submitted_at) < ?
+    ORDER BY submitted_at DESC LIMIT 1
+  `).bind(periodStart).first<{ id: string; d: string }>()
+
+  // Value one stock take's raw-material counts, grouped into food/beverage.
+  // asOfDate prices each product at its most recent purchase on/before that date.
+  const valueTake = async (takeId: string, asOfDate: string) => {
+    const rows = await c.env.DB.prepare(`
+      WITH valued AS (
+        SELECT
+          COALESCE(
+            (SELECT c.type FROM categories c
+              WHERE LOWER(TRIM(c.name)) = LOWER(TRIM(sti.category)) LIMIT 1),
+            'food'
+          ) AS type,
+          sti.counted_qty * COALESCE(
+            (SELECT pe.cost_per_unit FROM product_entries pe
+              WHERE pe.generic_product_id = sti.item_id AND pe.voided_at IS NULL
+                AND pe.purchase_date != '' AND pe.purchase_date <= ?
+              ORDER BY pe.purchase_date DESC, pe.created_at DESC LIMIT 1),
+            (SELECT pe.cost_per_unit FROM product_entries pe
+              WHERE pe.generic_product_id = sti.item_id AND pe.voided_at IS NULL
+              ORDER BY pe.purchase_date DESC, pe.created_at DESC LIMIT 1),
+            0
+          ) AS val
+        FROM stock_take_items sti
+        WHERE sti.stock_take_id = ? AND sti.item_type = 'raw_material'
+          AND sti.counted_qty IS NOT NULL
+      )
+      SELECT type, SUM(COALESCE(val, 0)) AS amount FROM valued GROUP BY type
+    `).bind(asOfDate, takeId).all<{ type: string; amount: number }>()
+    let f = 0, b = 0
+    for (const r of (rows.results ?? [])) {
+      if (r.type === 'beverage') b += r.amount ?? 0
+      else if (r.type === 'supplies') { /* supplies aren't part of COGS */ }
+      else f += r.amount ?? 0
+    }
+    return { food: f, beverage: b }
+  }
+
+  // Available only when we have a beginning count (before the period) AND an
+  // ending count that actually falls inside the period (not one from before it).
+  const cogsAvailable = !!openingTake && !!closingTake && closingTake.d >= periodStart
+  let cogs: Record<string, unknown> = {
+    available: false,
+    reason: !closingTake || (closingTake && closingTake.d < periodStart)
+      ? 'no_closing_take'                       // no stock take within the period
+      : !openingTake ? 'no_opening_take'        // none before the period start
+      : 'ok',
+  }
+  if (cogsAvailable) {
+    const opening = await valueTake(openingTake!.id, openingTake!.d)
+    const closing = await valueTake(closingTake!.id, closingTake!.d)
+    cogs = {
+      available:     true,
+      opening_date:  openingTake!.d,
+      closing_date:  closingTake!.d,
+      opening_food:     round2(opening.food),
+      opening_beverage: round2(opening.beverage),
+      closing_food:     round2(closing.food),
+      closing_beverage: round2(closing.beverage),
+      food_cogs:     round2(food + opening.food - closing.food),
+      beverage_cogs: round2(beverage + opening.beverage - closing.beverage),
+    }
+  }
+
   return c.json({
-    month,
+    from,
+    to,
+    month: from === to ? from : undefined,
     food_cost:     round2(food),
     beverage_cost: round2(beverage),
     supplies_cost: round2(supplies),
     invoice_fees:  round2(feeRow?.fees ?? 0),
+    expense_invoices: (expRows.results ?? []).map(r => ({
+      category: r.category ?? 'Other',
+      amount:   round2(r.amount ?? 0),
+    })),
+    cogs,
   })
 })
 

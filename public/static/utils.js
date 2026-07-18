@@ -112,6 +112,15 @@ function esc(s) {
 function openModal(id)  { document.getElementById(id).classList.remove('hidden'); }
 function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 
+// If the nav has more tabs than fit, keep the current (active) tab — and its
+// neighbours — in view by scrolling the nav-links strip to it on load.
+document.addEventListener('DOMContentLoaded', () => {
+  const active = document.querySelector('.nav-links a.active');
+  if (active && active.scrollIntoView) {
+    try { active.scrollIntoView({ inline: 'center', block: 'nearest' }); } catch (_) {}
+  }
+});
+
 // Slugify a string to CSS-safe class name
 function slugify(str) {
   return (str || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');

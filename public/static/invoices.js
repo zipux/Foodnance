@@ -381,6 +381,15 @@ async function openInvDetail(id) {
   document.getElementById('detailStatus').value        = inv.status          || 'In Processing';
   document.getElementById('detailNotes').value         = inv.notes           || '';
 
+  // Expense-bill classification (utilities/rent/etc.). Only editable while
+  // reviewing (Action Required); shown read-only afterwards so the label stays visible.
+  const isExpense = inv.invoice_kind === 'expense';
+  const expChk = document.getElementById('detailIsExpense');
+  const expSel = document.getElementById('detailExpenseCategory');
+  if (expChk) { expChk.checked = isExpense; expChk.disabled = !isActionRequired; }
+  if (expSel) { expSel.value = inv.expense_category || 'Utilities'; expSel.disabled = !isActionRequired; }
+  toggleExpenseMode();
+
   // Additional cost fields — prefer parsed_data when in Action Required, else stored values
   const taxPstStored    = parseFloat(src.tax_pst    ?? inv.tax_pst)    || 0;
   const taxGstStored    = parseFloat(src.tax_gst    ?? inv.tax_gst)    || 0;
@@ -1297,6 +1306,57 @@ function _initInvImgZoom() {
 // applies (find-or-create supplier, find-or-create generic_product,
 // pack_size parsing, cost_per_unit, product mappings, etc.).
 // ══════════════════════════════════════════════════════════════
+// Show/hide the goods-only sections (line items, additional costs) when the
+// "expense bill" toggle is flipped, and reveal the expense-category picker.
+function toggleExpenseMode() {
+  const on = !!document.getElementById('detailIsExpense')?.checked;
+  document.getElementById('expenseCategoryWrap')?.classList.toggle('hidden', !on);
+  document.getElementById('goodsLineItems')?.classList.toggle('hidden', on);
+  document.getElementById('goodsAdditionalCosts')?.classList.toggle('hidden', on);
+}
+window.toggleExpenseMode = toggleExpenseMode;
+
+// Save path for expense bills: record vendor/date/total/category and post to
+// Closed. Creates NO line items, products, or inventory. The P&L reads the total
+// by expense_category for the invoice_date's month.
+async function confirmExpenseInvoice(id, inv) {
+  const vendor      = (document.getElementById('detailVendorInput').value || '').trim();
+  const invoiceNum  = (document.getElementById('detailNumberInput').value || '').trim();
+  const invoiceDate = (document.getElementById('detailDateInput').value   || '').trim();
+  const total       = parseFloat(document.getElementById('detailTotalInput').value) || 0;
+  const notes       = (document.getElementById('detailNotes').value || '').trim();
+  const category    = document.getElementById('detailExpenseCategory').value || 'Other';
+
+  if (!invoiceDate) { showToast('Enter the bill date so it lands in the right month.', 'error'); return; }
+  if (total <= 0)   { showToast('Enter the bill total.', 'error'); return; }
+
+  const btn = document.getElementById('confirmInvSaveBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
+  try {
+    await apiPatch(`tables/${INV_LIST_TABLE}/${id}`, {
+      vendor,
+      invoice_number:   invoiceNum,
+      invoice_date:     invoiceDate,
+      total,
+      notes,
+      status:           'Closed',
+      parsed_data:      '',
+      invoice_kind:     'expense',
+      expense_category: category,
+    });
+    showToast(`Expense bill saved — ${category} $${total.toFixed(2)} added to the P&L.`, 'success');
+    _cleanInvImgZoom();
+    closeModal('invDetailModal');
+    await loadInvoices();
+  } catch (e) {
+    showToast('Save failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-check-circle"></i> Confirm & Save';
+  }
+}
+
 async function confirmAndSaveInvoice() {
   const id  = document.getElementById('detailInvId').value;
   const inv = allInvoices.find(i => i.id === id);
@@ -1304,6 +1364,11 @@ async function confirmAndSaveInvoice() {
   if (inv.status !== 'Action Required') {
     showToast('This invoice is no longer in Action Required state.', 'warning');
     return;
+  }
+  // Expense bills (utilities/rent/etc.) save via a separate path — no line items,
+  // no products, no inventory; the total flows straight into the P&L.
+  if (document.getElementById('detailIsExpense')?.checked) {
+    return confirmExpenseInvoice(id, inv);
   }
   if (hasMissingPageWarning()) {
     showToast('A page appears to be missing — add it, or click "It\'s complete" to proceed.', 'error');

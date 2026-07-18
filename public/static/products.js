@@ -48,6 +48,13 @@ document.getElementById('saveProductBtn').addEventListener('click', saveGenericP
   document.getElementById('eQtyOrdered').addEventListener('input', updateEntryCostPerUnit);
   document.getElementById('ePackUnit').addEventListener('change',  onPackUnitChange);
 
+  // Pack-sizes section — live preview + reactive labels
+  ['pBaseUnit', 'pMidName', 'pMidLb', 'pTopName', 'pTopLb'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', updatePackPreview);
+    if (el) el.addEventListener('change', updatePackPreview);
+  });
+
   // Inventory prompt modal (after saving a supplier entry)
   document.getElementById('closeEntryInvModal').addEventListener('click', () => closeModal('entryInvModal'));
   document.getElementById('skipEntryInvBtn').addEventListener('click',    () => closeModal('entryInvModal'));
@@ -321,6 +328,12 @@ async function openAddProductModal() {
   document.getElementById('pSubUnitName').value = '';
   document.getElementById('pSubUnitQty').value  = '';
   document.getElementById('pAvgWeight').value   = '';
+  document.getElementById('pBaseUnit').value    = 'lb';
+  document.getElementById('pMidName').value     = '';
+  document.getElementById('pMidLb').value       = '';
+  document.getElementById('pTopName').value     = '';
+  document.getElementById('pTopLb').value       = '';
+  updatePackPreview();
   document.getElementById('pReorderLevel').value = '';
   syncReorderUnit();   // unit mirrors the Pack Size unit
 
@@ -358,6 +371,12 @@ async function openEditProduct(id) {
   document.getElementById('pSubUnitName').value     = g.sub_unit_name        || '';
   document.getElementById('pSubUnitQty').value      = g.sub_unit_qty         || '';
   document.getElementById('pAvgWeight').value       = g.avg_weight_per_unit  != null ? g.avg_weight_per_unit : '';
+  document.getElementById('pBaseUnit').value        = g.base_unit            || 'lb';
+  document.getElementById('pMidName').value         = g.mid_name             || '';
+  document.getElementById('pMidLb').value           = g.mid_lb               != null ? g.mid_lb : '';
+  document.getElementById('pTopName').value         = g.top_name             || '';
+  document.getElementById('pTopLb').value           = g.top_lb               != null ? g.top_lb : '';
+  updatePackPreview();
   document.getElementById('pReorderLevel').value    = g.reorder_level        != null ? g.reorder_level : '';
   // pReorderUnit is derived from the supplier entry's unit via syncReorderUnit(),
   // called by updateEntryCostPerUnit() once the entry form is populated below.
@@ -436,17 +455,57 @@ async function saveGenericProduct() {
   }
 
   const avgWeightRaw = parseFloat(document.getElementById('pAvgWeight').value);
-  const reorderRaw   = parseFloat(document.getElementById('pReorderLevel').value);
+  const newUnit      = (document.getElementById('ePackUnit').value || '').trim();
+  let   reorderRaw   = parseFloat(document.getElementById('pReorderLevel').value);
+
+  // If the stocking unit changed, the reorder threshold (stored as a bare number
+  // in the old unit) must convert too, or the low-stock alert compares mismatched
+  // units. Only convert when the user left the prefilled number untouched — if
+  // they retyped it they're thinking in the new unit already (the field's label
+  // follows the new unit). g is the pre-save product (null for new products).
+  const gPrev = id ? allGeneric.find(x => x.id === id) : null;
+  if (gPrev && !isNaN(reorderRaw) && gPrev.reorder_level != null
+      && parseFloat(gPrev.reorder_level) === reorderRaw
+      && gPrev.reorder_unit && newUnit && !_sameUnit(gPrev.reorder_unit, newUnit)) {
+    const rc = _convertQuantity(reorderRaw, gPrev.reorder_unit, newUnit, isNaN(avgWeightRaw) ? null : avgWeightRaw);
+    if (!rc.error) reorderRaw = Math.round(rc.qty * 1e6) / 1e6;
+  }
+
+  // ── Pack sizes (multi-level counting) ──────────────────────────
+  // A pack level is "set" when its weight is a positive number; the name is a
+  // display label. Base unit is only stored when at least one level is in use,
+  // keeping '' as the clean "feature off" signal.
+  const midName = document.getElementById('pMidName').value.trim();
+  const topName = document.getElementById('pTopName').value.trim();
+  const midLb   = parseFloat(document.getElementById('pMidLb').value);
+  const topLb   = parseFloat(document.getElementById('pTopLb').value);
+  const baseUnit = (document.getElementById('pBaseUnit').value || 'lb').trim();
+  const hasMid  = !isNaN(midLb) && midLb > 0;
+  const hasTop  = !isNaN(topLb) && topLb > 0;
+  const packInUse = hasMid || hasTop;
+
+  if ((!isNaN(midLb) && midLb <= 0) || (!isNaN(topLb) && topLb <= 0)) {
+    showToast('Pack weights must be greater than zero.', 'error'); return;
+  }
+  if (hasTop && hasMid && topLb <= midLb) {
+    showToast(`The top pack (${topName || 'case'}) must weigh more than the middle pack (${midName || 'bag'}).`, 'error'); return;
+  }
+
   const payload = {
     name,
     category,
     sub_unit_name:        document.getElementById('pSubUnitName').value.trim() || null,
     sub_unit_qty:         parseFloat(document.getElementById('pSubUnitQty').value) || null,
     avg_weight_per_unit:  isNaN(avgWeightRaw) ? null : avgWeightRaw,
+    base_unit:            packInUse ? baseUnit : '',
+    mid_name:             hasMid ? (midName || 'bag')  : '',
+    mid_lb:               hasMid ? midLb : null,
+    top_name:             hasTop ? (topName || 'case') : '',
+    top_lb:               hasTop ? topLb : null,
     reorder_level:        isNaN(reorderRaw) ? null : reorderRaw,
     // Unit is derived from the supplier entry's pack unit (mirrored into the
     // read-only pReorderUnit field), so the threshold matches the stock unit.
-    reorder_unit:         isNaN(reorderRaw) ? '' : (document.getElementById('ePackUnit').value || '').trim(),
+    reorder_unit:         isNaN(reorderRaw) ? '' : newUnit,
   };
 
   const btn = document.getElementById('saveProductBtn');
@@ -475,7 +534,13 @@ async function saveGenericProduct() {
     if (entryHasData || entryId) {
       // _saveEntryForGeneric handles toast + inventory prompt; returns true on success
       const ok = await _saveEntryForGeneric(savedId, name, category);
-      if (ok) closeModal('productModal');
+      if (ok) {
+        // Editing an existing entry (no new-stock prompt) may have changed the
+        // stocking unit — bring on-hand inventory into the new unit. New entries
+        // create their inventory row fresh with the right unit via the prompt.
+        if (entryId) await _reconcileInventoryUnit(savedId, newUnit);
+        closeModal('productModal');
+      }
     } else {
       showToast(id ? 'Product updated!' : 'Product saved!', 'success');
       closeModal('productModal');
@@ -718,6 +783,46 @@ function syncReorderUnit() {
   if (src && dst) dst.value = src.value && src.value !== '__manage_units__' ? src.value : '';
 }
 
+// Keep the Pack Sizes section's echoed labels and the plain-language preview in
+// sync as the user types. Base is always a weight; middle/top are optional packs
+// whose weight (in the base unit) is what wires them into stock takes.
+function updatePackPreview() {
+  const base    = (document.getElementById('pBaseUnit').value || 'lb').trim();
+  const midName = document.getElementById('pMidName').value.trim();
+  const topName = document.getElementById('pTopName').value.trim();
+  const midLb   = parseFloat(document.getElementById('pMidLb').value);
+  const topLb   = parseFloat(document.getElementById('pTopLb').value);
+  const hasMid  = !isNaN(midLb) && midLb > 0;
+  const hasTop  = !isNaN(topLb) && topLb > 0;
+
+  // Reactive labels next to the weight inputs
+  document.getElementById('pMidNameEcho').textContent = midName || 'middle pack';
+  document.getElementById('pTopNameEcho').textContent = topName || 'top pack';
+  document.getElementById('pMidUnitEcho').textContent = base;
+  document.getElementById('pTopUnitEcho').textContent = base;
+
+  const preview = document.getElementById('pPackPreview');
+  const parts = [];
+  if (hasTop) parts.push(`1 ${topName || 'case'} = ${fmtNum(topLb)} ${base}`);
+  if (hasMid) parts.push(`1 ${midName || 'bag'} = ${fmtNum(midLb)} ${base}`);
+  if (hasTop && hasMid) {
+    const per = topLb / midLb;
+    parts.push(`so 1 ${topName || 'case'} ≈ ${fmtNum(Math.round(per * 100) / 100)} ${midName || 'bag'}`);
+  }
+  if (parts.length) {
+    preview.innerHTML = `<i class="fas fa-circle-info"></i> ${parts.map(esc).join(' &nbsp;·&nbsp; ')}`;
+    preview.style.display = '';
+  } else {
+    preview.style.display = 'none';
+  }
+}
+
+// Trim trailing zeros for tidy display (2.50 -> 2.5, 5.00 -> 5)
+function fmtNum(n) {
+  if (n == null || isNaN(n)) return '';
+  return (Math.round(n * 1000) / 1000).toString();
+}
+
 // ── Unit conversion for ePackUnit dropdown ─────────────────────
 // Convertible units, matched case-insensitively. `factor` = amount of the
 // dimension's base unit (weight base = kg, volume base = L) in one of this unit.
@@ -955,6 +1060,59 @@ async function _flushEntryConversions(genericId, skipEntryId) {
   _entrySnapshots = null;
 }
 
+// When a product's stocking unit changes, its inventory row keeps the OLD unit:
+// inventory.unit is copied only when the row is created and is never cascaded.
+// That leaves an on-hand quantity whose number still means the old unit sitting
+// next to per-new-unit costs — silently corrupting valuation, True COGS and
+// low-stock alerts. Reconcile the on-hand inventory to the product's current
+// unit: convert the quantity when the units are compatible (logging the
+// re-expression for audit), otherwise relabel and warn. Submitted stock takes
+// are left as-recorded (a historical count in the unit used at the time).
+async function _reconcileInventoryUnit(genericId, newUnit) {
+  newUnit = (newUnit || '').trim();
+  if (!genericId || !newUnit || !window.invHelpers) return;
+
+  let row;
+  try { row = await window.invHelpers.findInvRow(genericId, 'raw_material'); }
+  catch (_) { return; }
+  if (!row) return;                                    // nothing on hand to reconcile
+
+  const oldUnit = (row.unit || '').trim();
+  if (_sameUnit(oldUnit, newUnit)) return;             // already in sync
+  if (!oldUnit) {                                       // no prior unit — just label it
+    try { await apiPatch(`tables/inventory/${row.id}`, { unit: newUnit }); } catch (_) {}
+    return;
+  }
+
+  const g      = allGeneric.find(x => x.id === genericId);
+  const avgW   = parseFloat(g?.avg_weight_per_unit) || null;
+  const oldQty = parseFloat(row.quantity) || 0;
+  const conv   = _convertQuantity(oldQty, oldUnit, newUnit, avgW);
+
+  try {
+    if (conv.error) {
+      // Incompatible (e.g. kg -> L): relabel only — don't fabricate a quantity.
+      await apiPatch(`tables/inventory/${row.id}`, { unit: newUnit });
+      showToast(`Inventory unit set to ${newUnit}. Couldn't auto-convert the on-hand amount (${oldUnit}→${newUnit}) — please recount.`, 'warning');
+    } else {
+      const newQty = Math.round(conv.qty * 1e6) / 1e6;
+      await apiPatch(`tables/inventory/${row.id}`, { quantity: newQty, unit: newUnit });
+      // Audit note (a unit re-expression, not a real physical movement).
+      try {
+        await window.invHelpers.logStockMove({
+          inventory_id: row.id, item_id: genericId, item_type: 'raw_material',
+          item_name: row.item_name || g?.name || '',
+          change: Math.round((newQty - oldQty) * 1e6) / 1e6,
+          reason: `Unit changed ${oldUnit} → ${newUnit} (quantity auto-converted)`,
+        });
+      } catch (_) {}
+      if (oldQty > 0) showToast(`Inventory converted: ${oldQty} ${oldUnit} → ${newQty} ${newUnit}.`, 'success');
+    }
+  } catch (e) {
+    showToast('Could not update inventory unit: ' + e.message, 'error');
+  }
+}
+
 // Called by the inline "Save Entry" button (editing an existing product)
 async function saveEntry() {
   const genericId = document.getElementById('editProductId').value;
@@ -964,7 +1122,8 @@ async function saveEntry() {
     return;
   }
   await _flushEntryConversions(genericId, document.getElementById('editEntryId').value);
-  await _saveEntryForGeneric(genericId, null, null);
+  const ok = await _saveEntryForGeneric(genericId, null, null);
+  if (ok) await _reconcileInventoryUnit(genericId, document.getElementById('ePackUnit').value);
 }
 
 // Core entry-save logic — shared by saveGenericProduct (new) and saveEntry (existing)

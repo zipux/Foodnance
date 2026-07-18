@@ -4,26 +4,86 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>P&amp;L — InvoiceDB</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260717-2" />
+  <link rel="stylesheet" href="/static/style.css?v=20260717-6" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     #pnl-page-marker { max-width: 780px; }
-    .pnl-monthbar {
-      display: flex; align-items: center; gap: .6rem;
-      margin-bottom: 1.25rem; flex-wrap: wrap;
+
+    /* Period picker — presets + a whole-month From/To range (mirrors the
+       Home page's Spending Breakdown controls). */
+    .pnl-periodbar {
+      display: flex; flex-wrap: wrap; gap: .5rem .75rem;
+      align-items: flex-end; margin-bottom: 1.25rem;
     }
-    .pnl-monthbar input[type="month"] {
-      padding: .45rem .7rem; border: 1px solid var(--border);
-      border-radius: var(--radius-sm); font-family: inherit; font-size: .95rem;
+    .pnl-presets { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+    .pnl-preset-btn {
+      padding: .28rem .65rem; font-size: .8rem; font-family: inherit; font-weight: 500;
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      background: #fff; color: var(--text-muted); cursor: pointer;
+      transition: var(--transition); white-space: nowrap;
+    }
+    .pnl-preset-btn:hover { border-color: var(--primary); color: var(--primary); }
+    .pnl-preset-btn.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .pnl-custom {
+      display: flex; flex-wrap: wrap; gap: .4rem;
+      align-items: flex-end; margin-left: auto;
+    }
+    .pnl-custom .form-group { gap: .15rem; min-width: 0; }
+    .pnl-custom .form-group label { font-size: .72rem; color: var(--text-muted); }
+    .pnl-custom input[type="month"] {
+      padding: .28rem .55rem; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); font-family: inherit; font-size: .8rem;
       color: var(--text); background: #fff;
     }
+    .pnl-custom input[type="month"]:focus {
+      outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,70,229,.1);
+    }
+    .pnl-apply-btn {
+      padding: .28rem .75rem; font-size: .8rem; font-family: inherit; font-weight: 500;
+      border: 1px solid var(--primary); border-radius: var(--radius-sm);
+      background: var(--primary); color: #fff; cursor: pointer;
+      white-space: nowrap; transition: var(--transition);
+    }
+    .pnl-apply-btn:hover { filter: brightness(1.08); }
     .pnl-nav-btn {
-      width: 36px; height: 36px; border: 1px solid var(--border);
+      width: 30px; height: 30px; border: 1px solid var(--border);
       border-radius: var(--radius-sm); background: #fff; color: var(--text-muted);
-      cursor: pointer; font-size: .9rem; transition: var(--transition);
+      cursor: pointer; font-size: .8rem; transition: var(--transition);
     }
     .pnl-nav-btn:hover { border-color: var(--primary); color: var(--primary); }
+    .pnl-period-label {
+      font-size: .8rem; color: var(--text-muted);
+      margin-bottom: .9rem; padding-bottom: .6rem;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .pnl-period-label strong { color: var(--text); font-weight: 600; }
+
+    /* Cost-basis toggle (Purchases vs stock-take-adjusted True COGS) */
+    .pnl-basis {
+      display: flex; align-items: center; flex-wrap: wrap; gap: .5rem;
+      margin: .1rem 0 1.1rem;
+    }
+    .pnl-basis-label { font-size: .78rem; color: var(--text-muted); font-weight: 600; }
+    .pnl-basis-seg {
+      display: inline-flex; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); overflow: hidden;
+    }
+    .pnl-basis-btn {
+      padding: .3rem .7rem; font-size: .8rem; font-family: inherit; font-weight: 500;
+      border: none; background: #fff; color: var(--text-muted);
+      cursor: pointer; transition: var(--transition); white-space: nowrap;
+    }
+    .pnl-basis-btn + .pnl-basis-btn { border-left: 1px solid var(--border); }
+    .pnl-basis-btn:hover:not(.active):not(:disabled) { color: var(--primary); }
+    .pnl-basis-btn.active { background: var(--primary); color: #fff; }
+    .pnl-basis-btn:disabled { color: #cbd5e1; cursor: not-allowed; }
+    .pnl-basis-note {
+      font-size: .74rem; color: var(--text-muted);
+      display: flex; gap: .35rem; align-items: flex-start; flex-basis: 100%;
+    }
+    .pnl-basis-note i { margin-top: .12rem; }
+    .pnl-basis-note.warn { color: #b45309; }
 
     /* Statement rows */
     .pnl-row {
@@ -123,13 +183,29 @@
   <div class="container" id="pnl-page-marker">
     <div class="page-header">
       <h1><i class="fas fa-chart-pie"></i> Profit &amp; Loss</h1>
-      <p>What you took in, what it cost you, and what you kept — for the month.</p>
+      <p>What you took in, what it cost you, and what you kept — for any period.</p>
     </div>
 
-    <div class="pnl-monthbar">
-      <button class="pnl-nav-btn" id="pnlPrev" title="Previous month"><i class="fas fa-chevron-left"></i></button>
-      <input type="month" id="pnlMonth" />
-      <button class="pnl-nav-btn" id="pnlNext" title="Next month"><i class="fas fa-chevron-right"></i></button>
+    <div class="pnl-periodbar">
+      <div class="pnl-presets">
+        <button class="pnl-preset-btn" data-preset="this-month">This Month</button>
+        <button class="pnl-preset-btn" data-preset="last-month">Last Month</button>
+        <button class="pnl-preset-btn" data-preset="this-quarter">This Quarter</button>
+        <button class="pnl-preset-btn" data-preset="ytd">Year to Date</button>
+      </div>
+      <div class="pnl-custom">
+        <button class="pnl-nav-btn" id="pnlPrev" title="Previous period"><i class="fas fa-chevron-left"></i></button>
+        <div class="form-group">
+          <label>From</label>
+          <input type="month" id="pnlFrom" />
+        </div>
+        <div class="form-group">
+          <label>To</label>
+          <input type="month" id="pnlTo" />
+        </div>
+        <button class="pnl-apply-btn" id="pnlApply">Apply</button>
+        <button class="pnl-nav-btn" id="pnlNext" title="Next period"><i class="fas fa-chevron-right"></i></button>
+      </div>
     </div>
 
     <section class="card">
@@ -141,9 +217,45 @@
     </section>
   </div>
 
+  <!-- SPREAD COST MODAL -->
+  <div class="modal-overlay hidden" id="spreadModal">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header">
+        <h3 id="spreadModalTitle"><i class="fas fa-calendar-week"></i> Add spread cost</h3>
+        <button class="modal-close" id="closeSpreadModal"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="spreadId" />
+        <div class="form-group">
+          <label>What is it? *</label>
+          <input type="text" id="spreadName" placeholder="e.g. Waste disposal service" />
+        </div>
+        <div class="form-group" style="margin-top:.75rem">
+          <label>Total amount ($) *</label>
+          <input type="number" id="spreadTotal" step="0.01" min="0" placeholder="e.g. 400.00" />
+        </div>
+        <div class="form-grid" style="margin-top:.75rem">
+          <div class="form-group">
+            <label>Covers from *</label>
+            <input type="date" id="spreadStart" />
+          </div>
+          <div class="form-group">
+            <label>Covers to *</label>
+            <input type="date" id="spreadEnd" />
+          </div>
+        </div>
+        <div id="spreadPreview" style="margin-top:.9rem;font-size:.85rem;color:var(--text-muted)"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelSpreadModal">Cancel</button>
+        <button class="btn btn-success" id="saveSpreadBtn"><i class="fas fa-save"></i> Save</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/static/utils.js?v=20260717-2"></script>
-  <script src="/static/pnl.js?v=20260717-2"></script>
+  <script src="/static/utils.js?v=20260717-6"></script>
+  <script src="/static/pnl.js?v=20260718-2"></script>
 </body>
 </html>

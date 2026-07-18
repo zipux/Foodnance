@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Products — InvoiceDB</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260717-1" />
+  <link rel="stylesheet" href="/static/style.css?v=20260717-6" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 </head>
@@ -223,6 +223,52 @@
         </div>
         <div class="sub-unit-section" style="margin-top:1.25rem">
           <div class="sub-unit-header">
+            <i class="fas fa-boxes-stacked"></i> Pack Sizes
+            <span class="sub-unit-hint">Optional — count this item by case / bag as well as by weight</span>
+          </div>
+          <small style="display:block;color:var(--text-muted);font-size:.78rem;margin-bottom:.6rem">
+            For items bought in packs (e.g. a case of pepperoni = 25&nbsp;lb = 5 bags × 5&nbsp;lb). Enter the
+            weight of one pack at each level and the stock-take screen will let you count cases, bags and loose
+            weight, adding them up automatically. Leave blank to count this item by weight only.
+          </small>
+          <div class="form-grid" style="grid-template-columns:1fr 1fr">
+            <div class="form-group">
+              <label>Base weight unit</label>
+              <select id="pBaseUnit">
+                <option value="lb">lb</option>
+                <option value="kg">kg</option>
+                <option value="g">g</option>
+                <option value="oz">oz</option>
+              </select>
+            </div>
+            <div></div>
+            <div class="form-group">
+              <label>Middle pack name</label>
+              <input type="text" id="pMidName" placeholder="e.g. bag, can, bottle" />
+            </div>
+            <div class="form-group">
+              <label>Weight per <span id="pMidNameEcho">middle pack</span></label>
+              <div class="pack-size-row" style="align-items:center">
+                <input type="number" id="pMidLb" placeholder="e.g. 5" min="0" step="any" style="max-width:100px;flex:none" />
+                <span id="pMidUnitEcho" style="color:var(--text-muted)">lb</span>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Top pack name</label>
+              <input type="text" id="pTopName" placeholder="e.g. case, box, flat" />
+            </div>
+            <div class="form-group">
+              <label>Weight per <span id="pTopNameEcho">top pack</span></label>
+              <div class="pack-size-row" style="align-items:center">
+                <input type="number" id="pTopLb" placeholder="e.g. 25" min="0" step="any" style="max-width:100px;flex:none" />
+                <span id="pTopUnitEcho" style="color:var(--text-muted)">lb</span>
+              </div>
+            </div>
+          </div>
+          <div id="pPackPreview" style="margin-top:.6rem;font-size:.82rem;color:var(--text-muted);display:none"></div>
+        </div>
+        <div class="sub-unit-section" style="margin-top:1.25rem">
+          <div class="sub-unit-header">
             <i class="fas fa-bell"></i> Low-stock Alert
             <span class="sub-unit-hint">Optional — get warned when stock runs low</span>
           </div>
@@ -392,10 +438,10 @@
     </div>
   </div>
 
-  <script src="/static/utils.js?v=20260716-8"></script>
+  <script src="/static/utils.js?v=20260717-6"></script>
   <script src="/static/inventory.js?v=20260717-1"></script>
   <script src="/static/suppliers.js?v=20260714-1"></script>
-  <script src="/static/products.js?v=20260717-2"></script>
+  <script src="/static/products.js?v=20260718-2"></script>
 
   <!-- ── Inline invoice-file viewer modal (shared, lightweight) ── -->
   <div class="modal-overlay hidden" id="entryFileViewModal">

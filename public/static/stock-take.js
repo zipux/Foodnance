@@ -7,6 +7,38 @@ const inputState = new Map();
 // Debounce timers for autosave per snapshot id
 const saveTimers = new Map();
 
+// Pack-size config per raw_material product id (only products that use pack
+// levels): { base_unit, mid_name, mid_lb, top_name, top_lb }. Lets a product be
+// counted by case / bag / loose weight, all summed to one base-weight figure.
+const packByProductId = new Map();
+// Per-snapshot box entries for pack items: { top: string, mid: string, base: string }
+const packBoxState = new Map();
+
+// Weight conversion (base is always a weight; convert the summed base total into
+// the inventory row's own unit so the stored count stays in that unit).
+const _WT_FACTOR = { lb: 0.45359237, lbs: 0.45359237, kg: 1, g: 0.001, oz: 0.0283495231 };
+function _wtFactor(u) { return _WT_FACTOR[String(u || '').trim().toLowerCase()]; }
+function _sameUnit(a, b) { return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase(); }
+// Returns converted qty, or null if the units aren't both convertible weights.
+function convWeight(qty, from, to) {
+  if (_sameUnit(from, to)) return qty;
+  const f = _wtFactor(from), t = _wtFactor(to);
+  if (f && t) return qty * (f / t);
+  return null;
+}
+
+// Pack config for a snapshot row, but only when it can be safely reconciled to
+// the row's stored unit (same unit, or both convertible weights). Otherwise the
+// row falls back to the plain single-count input.
+function packInfoFor(it) {
+  if (it.item_type !== 'raw_material') return null;
+  const p = packByProductId.get(it.item_id);
+  if (!p) return null;
+  const base = p.base_unit || 'lb';
+  if (!_sameUnit(base, it.unit) && convWeight(1, base, it.unit) === null) return null;
+  return { ...p, base_unit: base };
+}
+
 const TYPE_META = {
   raw_material:     { label: 'Raw Materials',     icon: 'fa-seedling' },
   batch:            { label: 'Batches',           icon: 'fa-blender' },
@@ -20,6 +52,31 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('stSubmitBtn').addEventListener('click', submitStockTake);
   await loadOrStart();
 });
+
+function round6(n) { return Math.round(n * 1e6) / 1e6; }
+
+// Fetch generic products and record pack-size config for those that use it.
+async function loadPackConfig() {
+  try {
+    const res = await fetch('/api/tables/generic_products?page=1&limit=1000');
+    if (!res.ok) return;
+    const data = await res.json();
+    for (const g of (data.data || [])) {
+      const midLb = g.mid_lb != null ? Number(g.mid_lb) : null;
+      const topLb = g.top_lb != null ? Number(g.top_lb) : null;
+      const hasMid = midLb != null && midLb > 0;
+      const hasTop = topLb != null && topLb > 0;
+      if (!hasMid && !hasTop) continue;   // no pack levels → count as today
+      packByProductId.set(g.id, {
+        base_unit: g.base_unit || 'lb',
+        mid_name: g.mid_name || 'bag', mid_lb: hasMid ? midLb : null,
+        top_name: g.top_name || 'case', top_lb: hasTop ? topLb : null,
+      });
+    }
+  } catch (_) {
+    // Non-fatal — pack items just fall back to single-count entry.
+  }
+}
 
 function todayYMD() {
   const d = new Date();
@@ -38,6 +95,9 @@ async function loadOrStart() {
     stockTake = data.stock_take;
     snapshotItems = data.items || [];
 
+    // Load pack-size config for products that use multi-level counting.
+    await loadPackConfig();
+
     // Seed inputState from any previously-entered values on resume
     for (const it of snapshotItems) {
       const hasCount = it.counted_qty !== null && it.counted_qty !== undefined;
@@ -45,6 +105,17 @@ async function loadOrStart() {
         counted: hasCount ? String(it.counted_qty) : '',
         reason:  it.reason || '',
       });
+      // For pack items on resume, put the whole saved amount in the loose box
+      // (converted back to the base unit) so the boxes re-sum to the same total.
+      const pack = packInfoFor(it);
+      if (pack) {
+        let baseLoose = '';
+        if (hasCount) {
+          const conv = convWeight(Number(it.counted_qty), it.unit, pack.base_unit);
+          baseLoose = conv === null ? String(it.counted_qty) : String(round6(conv));
+        }
+        packBoxState.set(it.id, { top: '', mid: '', base: baseLoose });
+      }
     }
 
     if (data.resumed) {
@@ -137,6 +208,13 @@ function rowHtml(it) {
   const rowCls = hasC
     ? (variance !== 0 ? 'has-variance' : 'has-count')
     : '';
+  const pack = packInfoFor(it);
+  const countedCell = pack
+    ? packInputsHtml(it, pack)
+    : `<input type="number" step="any" class="st-input st-count-input"
+               data-snap-id="${esc(it.id)}"
+               value="${esc(counted)}"
+               placeholder="0" />`;
   return `
     <tr class="${rowCls}" data-snap-id="${esc(it.id)}">
       <td>
@@ -144,16 +222,60 @@ function rowHtml(it) {
         ${it.category ? `<div class="st-cat">${esc(it.category)}</div>` : ''}
       </td>
       <td><span class="st-expected">${fmtQty(it.expected_qty)}<span class="unit">${esc(it.unit || '')}</span></span></td>
-      <td>
-        <input type="number" step="any" class="st-input st-count-input"
-               data-snap-id="${esc(it.id)}"
-               value="${esc(counted)}"
-               placeholder="0" />
-      </td>
+      <td>${countedCell}</td>
       <td>${varianceHtml(variance, it.unit)}</td>
       <td>${reasonHtml(it.id, reason, hasC && variance !== 0)}</td>
     </tr>
   `;
+}
+
+// Multi-box entry for a pack item: one box per active level (top → mid → base),
+// with a live total shown in the row's stored unit.
+function packInputsHtml(it, pack) {
+  const bs = packBoxState.get(it.id) || { top: '', mid: '', base: '' };
+  const boxes = [];
+  if (pack.top_lb != null) boxes.push(packBox(it.id, 'top',  pack.top_name, bs.top, `${fmtQty(pack.top_lb)} ${pack.base_unit}`));
+  if (pack.mid_lb != null) boxes.push(packBox(it.id, 'mid',  pack.mid_name, bs.mid, `${fmtQty(pack.mid_lb)} ${pack.base_unit}`));
+  boxes.push(packBox(it.id, 'base', `loose ${pack.base_unit}`, bs.base, ''));
+  const total = packTotalCounted(it, pack);
+  return `
+    <div class="st-pack">
+      ${boxes.join('')}
+      <div class="st-pack-total">= <strong data-pack-total="${esc(it.id)}">${total === null ? '0' : fmtQty(total)}</strong> ${esc(it.unit || pack.base_unit)}</div>
+    </div>`;
+}
+
+function packBox(snapId, level, label, val, hint) {
+  return `
+    <label class="st-pack-box">
+      <input type="number" step="any" class="st-input st-pack-input"
+             data-snap-id="${esc(snapId)}" data-level="${esc(level)}"
+             value="${esc(val)}" placeholder="0" />
+      <span class="st-pack-lbl">${esc(label)}${hint ? `<span class="st-pack-hint"> · ${esc(hint)} ea</span>` : ''}</span>
+    </label>`;
+}
+
+// Total in the base weight unit (top·top_lb + mid·mid_lb + loose base).
+function packTotalBase(it, pack) {
+  const bs = packBoxState.get(it.id) || { top: '', mid: '', base: '' };
+  let total = parseFloat(bs.base) || 0;
+  if (pack.top_lb != null) total += (parseFloat(bs.top) || 0) * pack.top_lb;
+  if (pack.mid_lb != null) total += (parseFloat(bs.mid) || 0) * pack.mid_lb;
+  return total;
+}
+
+function packAnyEntered(snapId) {
+  const bs = packBoxState.get(snapId) || { top: '', mid: '', base: '' };
+  return ['top', 'mid', 'base'].some(k => (bs[k] || '').trim() !== '' && !isNaN(parseFloat(bs[k])));
+}
+
+// Total converted into the row's stored unit (what gets saved as counted_qty).
+// null when nothing has been entered yet (= not counted).
+function packTotalCounted(it, pack) {
+  if (!packAnyEntered(it.id)) return null;
+  const base = packTotalBase(it, pack);
+  const conv = convWeight(base, pack.base_unit, it.unit);
+  return round6(conv === null ? base : conv);
 }
 
 function renderCards(items) {
@@ -173,6 +295,13 @@ function cardHtml(it) {
   const cardCls = hasC
     ? (variance !== 0 ? 'has-variance' : 'has-count')
     : '';
+  const pack = packInfoFor(it);
+  const countedInput = pack
+    ? packInputsHtml(it, pack)
+    : `<input type="number" step="any" class="st-input st-count-input"
+                 data-snap-id="${esc(it.id)}"
+                 value="${esc(counted)}"
+                 placeholder="0" />`;
   return `
     <div class="st-card ${cardCls}" data-snap-id="${esc(it.id)}">
       <div class="st-card-head">
@@ -187,10 +316,7 @@ function cardHtml(it) {
       <div class="st-card-row">
         <div>
           <label>Counted</label>
-          <input type="number" step="any" class="st-input st-count-input"
-                 data-snap-id="${esc(it.id)}"
-                 value="${esc(counted)}"
-                 placeholder="0" />
+          ${countedInput}
         </div>
         <div>
           <label>Reason</label>
@@ -239,9 +365,38 @@ function attachInputListeners() {
   document.querySelectorAll('.st-count-input').forEach(el => {
     el.addEventListener('input', onCountChange);
   });
+  document.querySelectorAll('.st-pack-input').forEach(el => {
+    el.addEventListener('input', onPackBoxChange);
+  });
   document.querySelectorAll('.st-reason-select').forEach(el => {
     el.addEventListener('change', onReasonChange);
   });
+}
+
+// A pack box changed: recompute the row's total (in the stored unit), push it
+// into inputState.counted so variance/progress/autosave all keep working, and
+// refresh the live total shown next to the boxes.
+function onPackBoxChange(e) {
+  const snapId = e.target.dataset.snapId;
+  const level  = e.target.dataset.level;
+  const bs = packBoxState.get(snapId) || { top: '', mid: '', base: '' };
+  bs[level] = e.target.value;
+  packBoxState.set(snapId, bs);
+
+  const it   = snapshotItems.find(s => s.id === snapId);
+  const pack = it ? packInfoFor(it) : null;
+  const total = pack ? packTotalCounted(it, pack) : null;
+
+  const state = inputState.get(snapId) || { counted: '', reason: '' };
+  state.counted = total === null ? '' : String(total);
+  inputState.set(snapId, state);
+
+  document.querySelectorAll(`[data-pack-total="${cssEscape(snapId)}"]`).forEach(el => {
+    el.textContent = total === null ? '0' : fmtQty(total);
+  });
+
+  updateRow(snapId);
+  scheduleAutosave(snapId);
 }
 
 function onCountChange(e) {

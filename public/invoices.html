@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Invoices — InvoiceDB</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260717-1" />
+  <link rel="stylesheet" href="/static/style.css?v=20260717-6" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <style>
@@ -128,6 +128,7 @@
       <a href="/home.html"><i class="fas fa-home"></i> Home</a>
       <a href="/upload-invoice.html"><i class="fas fa-file-invoice"></i> Upload Invoice</a>
       <a href="/invoices.html" class="active"><i class="fas fa-list-alt"></i> Invoices</a>
+      <a href="/pnl.html"><i class="fas fa-chart-pie"></i> P&amp;L</a>
       <a href="/index.html"><i class="fas fa-boxes"></i> Products</a>
       <a href="/recipes.html"><i class="fas fa-utensils"></i> Recipes</a>
       <a href="/finished-products.html"><i class="fas fa-tag"></i> Finished Products</a>
@@ -294,8 +295,31 @@
           </div>
         </div>
 
+        <!-- ── Expense-bill toggle (utilities/rent/etc. — not goods) ── -->
+        <div style="margin-bottom:1rem;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:.7rem .9rem">
+          <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;font-size:.9rem;font-weight:600;color:#92400e">
+            <input type="checkbox" id="detailIsExpense" onchange="toggleExpenseMode()" />
+            This is an expense bill (utilities, rent, insurance…) — not goods for resale
+          </label>
+          <div id="expenseCategoryWrap" class="hidden" style="margin-top:.6rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+            <label style="font-size:.82rem;color:#92400e;font-weight:600">Expense category:</label>
+            <select id="detailExpenseCategory" style="padding:.35rem .6rem;border:1px solid var(--border);border-radius:6px;font-size:.85rem;background:#fff">
+              <option value="Utilities">Utilities</option>
+              <option value="Rent">Rent</option>
+              <option value="Wages">Wages</option>
+              <option value="Insurance">Insurance</option>
+              <option value="Repairs &amp; Maintenance">Repairs &amp; Maintenance</option>
+              <option value="Marketing">Marketing</option>
+              <option value="Professional Fees">Professional Fees</option>
+              <option value="Bank &amp; Card Fees">Bank &amp; Card Fees</option>
+              <option value="Other">Other</option>
+            </select>
+            <span style="font-size:.78rem;color:#92400e">→ counts in the P&amp;L for the invoice date's month</span>
+          </div>
+        </div>
+
         <!-- ── Line items table ── -->
-        <div style="margin-bottom:1rem">
+        <div style="margin-bottom:1rem" id="goodsLineItems">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
             <span style="font-weight:600;font-size:.88rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">
               <i class="fas fa-list-ul"></i> Line Items
@@ -326,7 +350,7 @@
         </div>
 
         <!-- ── Additional costs breakdown ── -->
-        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:.85rem 1rem;margin-bottom:1rem">
+        <div id="goodsAdditionalCosts" style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:.85rem 1rem;margin-bottom:1rem">
           <div style="font-weight:600;font-size:.82rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:.65rem">
             <i class="fas fa-receipt"></i> Additional Costs
           </div>
@@ -449,8 +473,8 @@
   <!-- TOAST -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/static/utils.js?v=20260715-2"></script>
+  <script src="/static/utils.js?v=20260717-6"></script>
   <script src="/static/inventory.js?v=20260717-1"></script>
-  <script src="/static/invoices.js?v=20260715-1"></script>
+  <script src="/static/invoices.js?v=20260717-4"></script>
 </body>
 </html>

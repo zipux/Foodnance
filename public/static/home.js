@@ -605,7 +605,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── P&L summary tile ───────────────────────────────────────────
-// Current-month snapshot: Sales (manual) − Costs (invoices + overheads) = Profit.
+// Current-month snapshot: Net sales (manual) − Costs (invoices + overheads) = Profit.
 // Mirrors the P&L page math; links there for the full statement.
 async function loadPnlTile() {
   const statsEl = document.getElementById('pnlTileStats');
@@ -619,22 +619,37 @@ async function loadPnlTile() {
   }
 
   try {
-    const [costs, salesData, ohData, recData] = await Promise.all([
+    const [costs, salesData, ohData, recData, spData] = await Promise.all([
       apiGet(`pnl?month=${month}`),
       apiGet(`tables/sales_monthly?page=1&limit=500`),
       apiGet(`tables/operating_expenses?page=1&limit=1000`),
       apiGet(`tables/recurring_expenses?page=1&limit=500`),
+      apiGet(`tables/spread_expenses?page=1&limit=500`),
     ]);
+    // This month's fair share of each multi-month "spread" bill (prorated by days).
+    const dayNum = ymd => { const [y, m, d] = String(ymd || '').split('-').map(Number); return (y && m && d) ? Math.floor(Date.UTC(y, m - 1, d) / 86400000) : NaN; };
+    const [yy, mm] = month.split('-').map(Number);
+    const mStart = Math.floor(Date.UTC(yy, mm - 1, 1) / 86400000);
+    const mEnd   = Math.floor(Date.UTC(yy, mm, 1) / 86400000) - 1;
+    const spreadTotal = (spData.data || []).reduce((s, r) => {
+      const a = dayNum(r.start_date), b = dayNum(r.end_date);
+      if (isNaN(a) || isNaN(b) || b < a) return s;
+      const overlap = Math.max(0, Math.min(b, mEnd) - Math.max(a, mStart) + 1);
+      return s + (parseFloat(r.total_amount) || 0) * overlap / (b - a + 1);
+    }, 0);
+
     const salesRow = (salesData.data || []).find(r => r.period === month);
     const sales    = parseFloat(salesRow?.sales_total) || 0;
     const costTotal = (parseFloat(costs.food_cost) || 0)
       + (parseFloat(costs.beverage_cost) || 0)
       + (parseFloat(costs.supplies_cost) || 0)
       + (parseFloat(costs.invoice_fees) || 0)
+      + (costs.expense_invoices || []).reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
       + (ohData.data || []).filter(r => r.period === month)
           .reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
       + (recData.data || []).filter(r => r.active == null || Number(r.active) === 1)
-          .reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+          .reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
+      + spreadTotal;
     const profit = sales - costTotal;
 
     const stat = (label, value, color) =>
@@ -645,7 +660,7 @@ async function loadPnlTile() {
 
     const money = n => (n < 0 ? '-$' : '$') + Math.abs(n).toFixed(2);
     statsEl.innerHTML =
-      stat('Sales', sales ? money(sales) : '—', 'var(--text)') +
+      stat('Net Sales', sales ? money(sales) : '—', 'var(--text)') +
       stat('Costs', money(costTotal), 'var(--text)') +
       stat('Profit', sales ? money(profit) : '—', profit >= 0 ? '#15803d' : '#b91c1c');
   } catch (e) {

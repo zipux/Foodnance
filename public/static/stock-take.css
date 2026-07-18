@@ -123,6 +123,33 @@
   box-shadow: 0 0 0 3px rgba(79, 70, 229, .12);
 }
 
+/* ── Multi-level pack entry ──────────────────────────────── */
+.st-pack {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: .5rem .7rem;
+}
+.st-pack-box {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+}
+.st-pack-box .st-input { width: 78px; }
+.st-pack-lbl {
+  font-size: .72rem;
+  color: var(--text-muted);
+  text-transform: capitalize;
+}
+.st-pack-hint { text-transform: none; opacity: .8; }
+.st-pack-total {
+  align-self: center;
+  font-size: .85rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.st-pack-total strong { color: var(--text); }
+
 .st-variance {
   font-weight: 600;
   font-size: .88rem;
