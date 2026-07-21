@@ -2,6 +2,8 @@
   "name": "webapp",
   "type": "module",
   "scripts": {
+    "test": "node tests/run.mjs",
+    "test:integration": "node tests/integration/inventory-conversion.test.mjs",
     "dev": "vite",
     "dev:sandbox": "wrangler pages dev dist --d1=invoicedb-production --local --ip 0.0.0.0 --port 3000",
     "build": "vite build",
