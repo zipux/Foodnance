@@ -463,7 +463,7 @@ async function openInvDetail(id) {
   if (fileUrl) {
     let preview = '';
     if (isPdf) {
-      const h = isActionRequired ? '55vh' : '420px';
+      const h = isActionRequired ? '55vh' : 'min(78vh,1000px)';
       preview = `
         <div style="margin-top:.5rem">
           <iframe id="invPageFrame" src="${esc(fileUrl)}" style="width:100%;height:${h};border:1px solid var(--border);border-radius:8px" title="Invoice PDF"></iframe>
@@ -477,10 +477,13 @@ async function openInvDetail(id) {
               draggable="false" />
           </div>`;
       } else {
+        // Saved mode: render the image at natural container width (sharp) and let
+        // it scroll vertically for tall pages. Do NOT use object-fit + a CSS
+        // transform to fill width — upscaling a downsampled raster blurs the text.
         preview = `
-          <div id="invImgZoomWrap" style="margin-top:.5rem;overflow:hidden;height:420px;border-radius:8px;border:1px solid var(--border);position:relative;background:#f1f5f9;cursor:zoom-in">
+          <div id="invImgZoomWrap" style="margin-top:.5rem;overflow:auto;max-height:min(82vh,1100px);border-radius:8px;border:1px solid var(--border);position:relative;background:#f1f5f9">
             <img id="invZoomImg" src="${esc(fileUrl)}" alt="Invoice"
-              style="width:100%;height:420px;object-fit:contain;display:block;transform-origin:0 0;user-select:none"
+              style="width:100%;height:auto;display:block;transform-origin:0 0;user-select:none"
               draggable="false" />
           </div>`;
       }
@@ -849,7 +852,24 @@ function renderLinesTable() {
 
   tbody.innerHTML = currentLines.map((l, i) => `
     <tr data-idx="${i}">
-      <td><input type="text"   class="line-input" data-idx="${i}" data-f="product_name" value="${esc(l.product_name||'')}" title="${esc(l.product_name||'')}" placeholder="Product" style="width:110px"/></td>
+      <td>
+        <div style="display:flex;align-items:center;gap:.2rem">
+          <input type="text" class="line-input" data-idx="${i}" data-f="product_name" value="${esc(l.product_name||'')}" title="${esc(l.product_name||'')}" placeholder="Product" style="width:110px"/>
+          <button class="btn btn-icon" style="padding:.2rem .35rem;font-size:.7rem;background:#e0e7ff;color:#4338ca"
+                  onclick="openLinkProductModal(${i})" title="This is one of my existing products">
+            <i class="fas fa-link"></i>
+          </button>
+        </div>
+        ${l._link_product_id ? `
+          <div style="font-size:.68rem;color:#4338ca;margin-top:.15rem;display:flex;align-items:center;gap:.25rem;white-space:nowrap">
+            <i class="fas fa-arrow-turn-up" style="transform:rotate(90deg)"></i>
+            <span title="Files under this product; the vendor's wording is remembered">${esc(l._link_product_name || '')}</span>
+            <button onclick="unlinkProduct(${i})" title="Undo link"
+                    style="border:none;background:none;color:#94a3b8;cursor:pointer;padding:0 .1rem">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>` : ''}
+      </td>
       <td><input type="text"   class="line-input" data-idx="${i}" data-f="vendor_item"  value="${esc(l.vendor_item ||'')}" placeholder="Vendor item" style="width:110px"/></td>
       <td><input type="text"   class="line-input" data-idx="${i}" data-f="item_code"    value="${esc(l.item_code   ||'')}" placeholder="Code" style="width:72px"/></td>
       <td style="white-space:nowrap">
@@ -900,6 +920,114 @@ function renderLinesTable() {
   document.getElementById('linesSubtotal').innerHTML =
     `<span style="color:var(--text-muted)">Items subtotal:</span> <strong>$${subtotal.toFixed(2)}</strong>`;
 }
+
+// ── Link an invoice line to an existing product ────────────────
+// The vendor's wording ("Grape Tomatoes") often isn't what you call the item
+// ("Small Tomatoes"), so import would create a duplicate. Linking files this
+// purchase under the existing product AND registers the vendor's wording as a
+// supplier-scoped alias, so the next invoice routes itself.
+// The alias is written after approval (see approveInvoice), because it needs
+// the supplier id that the bulk import resolves or creates.
+
+let _linkProducts   = [];    // generic_products, loaded lazily
+let _linkChosenId   = null;
+let _linkChosenName = '';
+
+async function openLinkProductModal(idx) {
+  const line = currentLines[idx];
+  if (!line) return;
+
+  document.getElementById('linkLineIdx').value       = String(idx);
+  document.getElementById('linkLineName').textContent = line.product_name || '(unnamed line)';
+  document.getElementById('linkVendorName').textContent =
+    (document.getElementById('detailVendorInput')?.value || '').trim() || 'this vendor';
+
+  _linkChosenId = null; _linkChosenName = '';
+  document.getElementById('linkSearch').value       = '';
+  document.getElementById('linkDropdown').style.display = 'none';
+  document.getElementById('linkChosen').style.display   = 'none';
+  document.getElementById('confirmLinkBtn').disabled    = true;
+
+  if (!_linkProducts.length) {
+    try {
+      const d = await apiGet('tables/generic_products?page=1&limit=1000');
+      // Archived products stay out of the picker — linking to one would file
+      // purchases against an item that no longer appears in any list.
+      _linkProducts = (d.data || []).filter(p => !p.deleted_at);
+    } catch (_) { _linkProducts = []; }
+  }
+
+  openModal('linkProductModal');
+  document.getElementById('linkSearch').focus();
+}
+
+function onLinkSearchInput() {
+  const q  = (document.getElementById('linkSearch').value || '').trim().toLowerCase();
+  const dd = document.getElementById('linkDropdown');
+  _linkChosenId = null; _linkChosenName = '';
+  document.getElementById('linkChosen').style.display = 'none';
+  document.getElementById('confirmLinkBtn').disabled  = true;
+
+  if (!q) { dd.style.display = 'none'; return; }
+
+  const hits = _linkProducts
+    .filter(p => (p.name || '').toLowerCase().includes(q))
+    .slice(0, 20);
+
+  if (!hits.length) {
+    dd.innerHTML = `<div style="padding:.5rem .75rem;font-size:.85rem;color:var(--text-muted)">No matching products.</div>`;
+    dd.style.display = '';
+    return;
+  }
+
+  dd.innerHTML = hits.map(p => `
+    <div style="padding:.45rem .75rem;cursor:pointer;font-size:.88rem;border-bottom:1px solid var(--border)"
+         onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='#fff'"
+         onclick="selectLinkProduct('${esc(p.id)}')">
+      <strong>${esc(p.name)}</strong>
+      <span style="color:var(--text-muted);font-size:.78rem"> · ${esc(p.category || 'Uncategorised')}</span>
+    </div>`).join('');
+  dd.style.display = '';
+}
+
+function selectLinkProduct(id) {
+  const p = _linkProducts.find(x => x.id === id);
+  if (!p) return;
+  _linkChosenId   = p.id;
+  _linkChosenName = p.name;
+  document.getElementById('linkDropdown').style.display = 'none';
+  document.getElementById('linkSearch').value = p.name;
+  const chosen = document.getElementById('linkChosen');
+  chosen.innerHTML = `<i class="fas fa-check"></i> Will file under <strong>${esc(p.name)}</strong>`;
+  chosen.style.display = '';
+  document.getElementById('confirmLinkBtn').disabled = false;
+}
+
+function confirmLinkProduct() {
+  const idx  = parseInt(document.getElementById('linkLineIdx').value);
+  const line = currentLines[idx];
+  if (!line || !_linkChosenId) return;
+
+  line._link_product_id   = _linkChosenId;
+  line._link_product_name = _linkChosenName;
+  closeModal('linkProductModal');
+  renderLinesTable();
+  showToast(`Line linked to "${_linkChosenName}".`, 'success');
+}
+
+function unlinkProduct(idx) {
+  const line = currentLines[idx];
+  if (!line) return;
+  delete line._link_product_id;
+  delete line._link_product_name;
+  renderLinesTable();
+}
+
+window.openLinkProductModal = openLinkProductModal;
+window.onLinkSearchInput    = onLinkSearchInput;
+window.selectLinkProduct    = selectLinkProduct;
+window.confirmLinkProduct   = confirmLinkProduct;
+window.unlinkProduct        = unlinkProduct;
 
 function addLineRow() {
   currentLines.push({ product_name:'', vendor_item:'', category:'', item_code:'', pack_qty:'', pack_unit:'', price:'', qty:'' });
@@ -1294,8 +1422,14 @@ function _initInvImgZoom() {
       applyTransform(false);
     }
   }
-  if (img.complete) fitToWidth();
-  else img.addEventListener('load', fitToWidth, { once: true });
+  // Only the review pane letterboxes a portrait page (fixed-height, object-fit
+  // container), so only it needs the fit-to-width transform. In saved mode the
+  // image already renders at full container width natively — applying the scale
+  // there would upscale a downsampled raster and blur the text.
+  if (inReviewMode) {
+    if (img.complete) fitToWidth();
+    else img.addEventListener('load', fitToWidth, { once: true });
+  }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1475,7 +1609,10 @@ async function confirmAndSaveInvoice() {
     // 3. Bulk-create suppliers / generic_products / product_entries
     //    — same backend route used by the old upload flow.
     const productsForBulk = validLines.map(l => ({
-      name:        l.product_name,
+      // A linked line imports under the product the user picked, so THIS
+      // invoice files correctly. The vendor's wording is registered as an
+      // alias just below, which is what routes FUTURE invoices.
+      name:        l._link_product_name || l.product_name,
       brand:       l.category,           // category column doubles as brand on the line
       sku:         l.item_code,
       pack_size:   l.packaging,
@@ -1495,6 +1632,38 @@ async function confirmAndSaveInvoice() {
       products:    productsForBulk,
     });
 
+
+    // 3b. Register vendor wording for any line the user linked to an existing
+    //     product, scoped to the supplier the bulk import just resolved (or
+    //     created). Next invoice, the alias match links it with no prompting.
+    const linkedLines = validLines.filter(l => l._link_product_id && l.product_name);
+    if (linkedLines.length && bulkResult?.supplier_id) {
+      for (const l of linkedLines) {
+        const wording = l.product_name.trim();
+        // Wording identical to the product's own name already matches by name.
+        if (!wording || wording.toLowerCase() === (l._link_product_name || '').trim().toLowerCase()) continue;
+        try {
+          const existing = await apiGet(
+            `tables/product_aliases?generic_product_id=${encodeURIComponent(l._link_product_id)}`
+          );
+          const dup = (existing.data || []).some(a =>
+            (a.alias_name || '').trim().toLowerCase() === wording.toLowerCase() &&
+            (a.supplier_id || null) === bulkResult.supplier_id);
+          if (dup) continue;
+
+          await apiPost('tables/product_aliases', {
+            alias_name:         wording,
+            generic_product_id: l._link_product_id,
+            supplier_id:        bulkResult.supplier_id,
+          });
+        } catch (e) {
+          // Non-fatal: the invoice is already filed correctly. Only the
+          // remembering failed, so say so rather than failing the approval.
+          console.warn('alias save failed:', e.message);
+          showToast(`Filed correctly, but couldn't remember "${wording}" for next time.`, 'warning');
+        }
+      }
+    }
 
     // 4. Save product mappings so future uploads benefit from corrections
     if (vendor) {
@@ -1553,8 +1722,9 @@ async function confirmAndSaveInvoice() {
     populateVendorFilter();
     applyFilters();
 
-    // Offer to add items to inventory
-    openInvPrompt(validLines, invoiceNum);
+    // Offer to add items to inventory. The supplier id lets stock-in resolve
+    // vendor wording through supplier-scoped aliases, same as the import did.
+    openInvPrompt(validLines, invoiceNum, bulkResult?.supplier_id || null);
   } catch (e) {
     console.error('Confirm & Save failed:', e);
     showToast('Confirm failed: ' + e.message, 'error');
@@ -1567,23 +1737,85 @@ async function confirmAndSaveInvoice() {
 // ── Add-to-Inventory prompt (shown after confirming an invoice) ──
 let _invPromptRows = [];
 
-function openInvPrompt(lines, invoiceRef) {
+// Resolve an invoice line to one of your products, using the SAME precedence as
+// the invoice import (/api/bulk/upsert-products): an explicit link chosen on the
+// review screen, then exact name, then an alias registered for this supplier,
+// then a global alias. Without this, stock-in silently skipped any line that
+// arrived under the vendor's own wording — the exact opposite of the point.
+function _resolveRowProduct(row, products, aliases, supplierId) {
+  const name = (row.product_name || '').trim().toLowerCase();
+
+  // The user already told us on the review screen.
+  if (row._link_product_id) {
+    const p = products.find(x => x.id === row._link_product_id);
+    if (p) return p;
+  }
+  if (!name) return null;
+
+  // Exact name. Trimmed + case-insensitive: the old code used a strict ===,
+  // so "potato " or "Potato" against "potato" simply didn't stock in.
+  const byName = products
+    .filter(p => (p.name || '').trim().toLowerCase() === name)
+    .sort((a, b) => (b.created_at || 0) - (a.created_at || 0))[0];
+  if (byName) return byName;
+
+  const aliasHit = (supId) => aliases.find(a =>
+    (a.alias_name || '').trim().toLowerCase() === name &&
+    (a.supplier_id || null) === supId);
+
+  // Supplier-specific beats global, so two vendors can use the same wording.
+  const scoped = supplierId ? aliasHit(supplierId) : null;
+  const global = aliasHit(null);
+  const hit    = scoped || global;
+  if (!hit) return null;
+
+  const p = products.find(x => x.id === hit.generic_product_id);
+  return p && !p.deleted_at ? p : null;
+}
+
+async function openInvPrompt(lines, invoiceRef, supplierId = null) {
   if (!lines || !lines.length) return;
   if (!document.getElementById('invPromptModal')) return;
 
   _invPromptRows = lines.filter(l => l.product_name);
+
+  // Resolve every row up front so the modal can show where each will land,
+  // rather than silently dropping the ones it can't place.
+  let products = [], aliases = [];
+  try {
+    const [pd, ad] = await Promise.all([
+      apiGet('tables/generic_products?page=1&limit=500'),
+      apiGet('tables/product_aliases?page=1&limit=500'),
+    ]);
+    products = (pd.data || []).filter(p => !p.deleted_at);
+    aliases  = ad.data || [];
+  } catch (_) { /* fall through — rows resolve to null and are flagged below */ }
+
+  _invPromptRows.forEach(r => {
+    r._resolved = _resolveRowProduct(r, products, aliases, supplierId);
+  });
+
   const listEl = document.getElementById('invPromptList');
   listEl.innerHTML = _invPromptRows.map((r, i) => {
     const packaging = r.packaging || '';
     const unitMatch = packaging.match(/[\d.]+\s*(.+)$/);
     const unit = unitMatch ? unitMatch[1].trim() : 'unit';
     const defaultQty = calcInventoryQty(packaging, r.qty);
+    const target = r._resolved;
+    // Show the destination when the vendor's wording differs from your product
+    // name, so an alias-resolved line is visible rather than surprising.
+    const note = !target
+      ? `<div style="font-size:.74rem;color:#b45309"><i class="fas fa-triangle-exclamation"></i> No matching product — won't be stocked in</div>`
+      : ((target.name || '').trim().toLowerCase() !== (r.product_name || '').trim().toLowerCase()
+          ? `<div style="font-size:.74rem;color:#4338ca"><i class="fas fa-arrow-right"></i> ${esc(target.name)}</div>`
+          : '');
     return `
       <div style="display:flex;align-items:center;gap:.75rem;padding:.5rem 0;border-bottom:1px solid var(--border)">
-        <input type="checkbox" id="inv-chk-${i}" checked style="width:16px;height:16px;cursor:pointer" />
+        <input type="checkbox" id="inv-chk-${i}" ${target ? 'checked' : 'disabled'} style="width:16px;height:16px;cursor:pointer" />
         <div style="flex:1">
           <div style="font-weight:600;font-size:.9rem">${esc(r.product_name)}</div>
           <div style="font-size:.78rem;color:var(--text-muted)">${esc(packaging)}</div>
+          ${note}
         </div>
         <div style="display:flex;align-items:center;gap:.4rem">
           <input type="number" id="inv-qty-${i}" value="${defaultQty}" min="0.001" step="0.001"
@@ -1605,21 +1837,17 @@ async function confirmInvPrompt(invoiceRef) {
   btn.disabled = true;
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Adding…';
 
-  let savedProducts = [];
-  try {
-    const data = await apiGet('tables/generic_products?page=1&limit=1000');
-    savedProducts = data.data || [];
-  } catch (_) {}
-
   let added = 0;
+  const failures = [];   // unit mismatches etc. — surfaced, never swallowed
   for (let i = 0; i < _invPromptRows.length; i++) {
     const chk = document.getElementById(`inv-chk-${i}`);
     if (!chk?.checked) continue;
     const qty = parseFloat(document.getElementById(`inv-qty-${i}`)?.value) || 1;
     const row = _invPromptRows[i];
-    const match = savedProducts
-      .filter(p => p.name === row.product_name)
-      .sort((a, b) => (b.created_at || 0) - (a.created_at || 0))[0];
+    // Resolved when the modal opened (exact name → supplier alias → global
+    // alias), and shown on the row, so what's stocked in matches what was
+    // displayed. Unresolved rows are disabled in the UI and skipped here.
+    const match = row._resolved;
     const packaging = row.packaging || '';
     const unitMatch = packaging.match(/[\d.]+\s*(.+)$/);
     const unit = unitMatch ? unitMatch[1].trim() : 'unit';
@@ -1635,12 +1863,24 @@ async function confirmInvPrompt(invoiceRef) {
           reason:   `Invoice stock-in: ${invoiceRef || 'manual'}`,
         });
         added++;
-      } catch (_) {}
+      } catch (e) {
+        failures.push(e.message || `Couldn't stock in ${row.product_name}`);
+      }
     }
   }
 
   btn.disabled = false;
   btn.innerHTML = '<i class="fas fa-warehouse"></i> Add to Inventory';
+
+  // A unit that can't be converted is a real problem the user has to resolve
+  // (usually by setting the product's stocking unit or its average weight), so
+  // keep the modal open and say what went wrong rather than silently skipping.
+  if (failures.length) {
+    if (added) showToast(`${added} item(s) added. ${failures.length} could not be stocked in.`, 'warning');
+    failures.slice(0, 3).forEach(msg => showToast(msg, 'error'));
+    return;
+  }
+
   closeModal('invPromptModal');
   showToast(`${added} item(s) added to inventory!`, 'success');
 }

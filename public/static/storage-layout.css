@@ -1,0 +1,190 @@
+/* ===== storage-layout.css ===== */
+
+.sl-container { padding-bottom: 4rem; }
+
+.sl-toolbar {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.1rem;
+}
+.sl-save-state {
+  margin-left: auto;
+  font-size: .82rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.sl-save-state.saving { color: var(--text-muted); }
+.sl-save-state.saved  { color: #16a34a; }
+.sl-save-state.error  { color: #dc2626; }
+.sl-save-state i { margin-right: .3rem; }
+
+.sl-loading {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2rem;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+/* ── Section ─────────────────────────────────────────────── */
+.sl-section {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: .9rem;
+  overflow: hidden;
+}
+.sl-section.is-unassigned { border-style: dashed; background: #fcfcfd; }
+
+.sl-section-header {
+  background: #f8faff;
+  padding: .7rem .9rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+.sl-section.is-unassigned .sl-section-header { background: #fafafa; }
+
+.sl-section-name {
+  font-weight: 600;
+  font-size: .98rem;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sl-section-count {
+  font-size: .78rem;
+  color: var(--text-muted);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.sl-section-actions { display: flex; gap: .25rem; }
+.sl-icon-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 6px;
+  /* 44px touch target — these sit close together on a phone. */
+  min-width: 44px;
+  min-height: 44px;
+  font-size: .95rem;
+}
+.sl-icon-btn:hover { background: #eef2ff; color: var(--primary); }
+.sl-icon-btn.danger:hover { background: #fef2f2; color: var(--danger); }
+
+.sl-items { list-style: none; margin: 0; padding: .35rem; min-height: 52px; }
+.sl-items.is-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: .82rem;
+  font-style: italic;
+  padding: 1rem;
+}
+
+/* ── Item row ────────────────────────────────────────────── */
+.sl-item {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .55rem .6rem;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid transparent;
+}
+.sl-item + .sl-item { margin-top: .2rem; }
+.sl-item:hover { background: #f8faff; }
+
+.sl-handle {
+  /* touch-action:none is what lets a drag start without the page scrolling. */
+  touch-action: none;
+  cursor: grab;
+  color: var(--border);
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 6px;
+}
+.sl-handle:hover { color: var(--text-muted); background: #eef2ff; }
+.sl-handle:active { cursor: grabbing; }
+
+.sl-item-name {
+  font-size: .9rem;
+  color: var(--text);
+  font-weight: 500;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sl-item-meta {
+  font-size: .72rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.sl-type-badge {
+  font-size: .66rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  padding: .12rem .35rem;
+  border-radius: 4px;
+  background: #eef2ff;
+  color: var(--primary);
+  white-space: nowrap;
+}
+
+/* The row left behind while its copy follows the pointer. */
+.sl-item.is-dragging { opacity: .35; }
+
+/* Where the row will land. */
+.sl-drop-marker {
+  height: 2px;
+  background: var(--primary);
+  border-radius: 2px;
+  margin: .15rem .6rem;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, .12);
+}
+
+/* Floating copy that tracks the pointer. */
+.sl-ghost {
+  position: fixed;
+  z-index: 999;
+  pointer-events: none;
+  background: #fff;
+  border: 1px solid var(--primary);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, .18);
+  padding: .55rem .7rem;
+  font-size: .9rem;
+  font-weight: 500;
+  color: var(--text);
+  max-width: 78vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Section being dragged over. */
+.sl-section.is-drop-target { border-color: var(--primary); }
+
+@media (max-width: 767px) {
+  .sl-toolbar .btn { flex: 1 1 auto; justify-content: center; }
+  .sl-save-state { margin-left: 0; width: 100%; text-align: right; }
+  .sl-item-meta { display: none; }   /* keep the row readable on a phone */
+  .sl-item-name { font-size: .95rem; }
+}

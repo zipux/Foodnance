@@ -110,9 +110,22 @@ function classifySupplierMatch(
 //   "1/5 KG CS"   → { packQty: 5, packUnit: "KG" }     (fraction: qty/size)
 //   "5L"          → { packQty: 5, packUnit: "L" }
 //   "35 LB"       → { packQty: 35, packUnit: "LB" }
+// ─── Helper: canonical casing for a unit of measure ────────────
+// Cosmetic normalization only — every unit conversion elsewhere is already
+// case-insensitive, so this changes display casing, never math. Lowercases the
+// unit, except litre which uses the SI symbol 'L' (a lowercase 'l' reads as a 1).
+// Applied to parsed invoice units so imports stay consistent (e.g. "LB" → "lb",
+// "KG" → "kg", "Each" → "each"). Custom multi-word units pass through lowercased.
+function normalizeUnit(u: string): string {
+  const t = (u || '').trim()
+  if (!t) return t
+  if (t.toLowerCase() === 'l') return 'L'
+  return t.toLowerCase()
+}
+
 function parsePackSize(raw: string): { packQty: number; packUnit: string } {
   const s = (raw || '').trim()
-  if (!s) return { packQty: 1, packUnit: 'Each' }
+  if (!s) return { packQty: 1, packUnit: normalizeUnit('each') }
 
   // Known measurable unit pattern (case-insensitive)
   const unitPat = '(?:kg|g|lb|lbs|l|ml|oz|fl\\s*oz|gal)'
@@ -124,7 +137,7 @@ function parsePackSize(raw: string): { packQty: number; packUnit: string } {
   if (multMatch) {
     const a = parseFloat(multMatch[1]) || 1
     const b = parseFloat(multMatch[2]) || 1
-    return { packQty: Math.round(a * b * 1000) / 1000, packUnit: multMatch[3].trim() }
+    return { packQty: Math.round(a * b * 1000) / 1000, packUnit: normalizeUnit(multMatch[3]) }
   }
 
   // Pattern 2: "N/N UNIT" fraction notation (e.g. "1/5 KG CS" → 5 KG)
@@ -133,19 +146,19 @@ function parsePackSize(raw: string): { packQty: number; packUnit: string } {
     new RegExp(`^([\\d.]+)\\s*/\\s*([\\d.]+)\\s*(${unitPat})\\b`, 'i')
   )
   if (fracMatch) {
-    return { packQty: parseFloat(fracMatch[2]) || 1, packUnit: fracMatch[3].trim() }
+    return { packQty: parseFloat(fracMatch[2]) || 1, packUnit: normalizeUnit(fracMatch[3]) }
   }
 
   // Pattern 3: simple "N UNIT" or "NUNIT" (e.g. "12 LB", "500g", "5L", "1.89 L")
   const simpleMatch = s.match(/^([\d.]+)\s*(.*)$/)
   if (simpleMatch) {
     const qty  = parseFloat(simpleMatch[1]) || 1
-    const unit = (simpleMatch[2] || 'Each').trim()
+    const unit = normalizeUnit(simpleMatch[2] || 'each')
     return { packQty: qty, packUnit: unit }
   }
 
   // Fallback: no number found — treat entire string as unit
-  return { packQty: 1, packUnit: s || 'Each' }
+  return { packQty: 1, packUnit: normalizeUnit(s || 'each') }
 }
 
 // ─── Helper: infer product category from name via keyword matching ─
@@ -184,6 +197,193 @@ function inferCategory(name: string): string {
   }
   return 'Other'
 }
+
+// ─── Storage layout (sections + item placement) ───────────────
+// Lets the user describe their physical storage so the stock take can be
+// walked place by place. See migration 0030. Declared before the generic
+// /api/tables/* routes — Hono matches in registration order.
+
+// GET /api/storage-layout
+// Returns every section in walk order with the items placed in it, plus an
+// "unassigned" list. Items come from the inventory rows, so this is exactly
+// the set a stock take would cover.
+app.get('/api/storage-layout', async (c) => {
+  const [sections, placements, inv] = await Promise.all([
+    c.env.DB.prepare(`SELECT * FROM storage_sections ORDER BY sort_order, name`).all<{
+      id: string; name: string; sort_order: number
+    }>(),
+    c.env.DB.prepare(`SELECT * FROM item_placements`).all<{
+      item_id: string; item_type: string; section_id: string; sort_order: number
+    }>(),
+    c.env.DB.prepare(
+      `SELECT item_id, item_type, item_name, category, unit FROM inventory ORDER BY item_name`
+    ).all<{ item_id: string; item_type: string; item_name: string; category: string; unit: string }>(),
+  ])
+
+  const placedBy = new Map(
+    (placements.results || []).map(p => [`${p.item_type}:${p.item_id}`, p])
+  )
+  const sectionRows = sections.results || []
+  const byId = new Map(sectionRows.map(s => [s.id, { ...s, items: [] as unknown[] }]))
+  const unassigned: unknown[] = []
+
+  for (const it of (inv.results || [])) {
+    const p = placedBy.get(`${it.item_type}:${it.item_id}`)
+    const target = p ? byId.get(p.section_id) : null
+    // A placement pointing at a deleted section falls back to unassigned.
+    if (target) target.items.push({ ...it, sort_order: p!.sort_order })
+    else unassigned.push({ ...it, sort_order: 0 })
+  }
+
+  for (const s of byId.values()) {
+    (s.items as Array<{ sort_order: number }>).sort((a, b) => a.sort_order - b.sort_order)
+  }
+
+  return c.json({
+    sections: [...byId.values()],
+    unassigned,
+  })
+})
+
+// POST /api/storage-layout/sections   Body: { name }
+app.post('/api/storage-layout/sections', async (c) => {
+  const { name } = await c.req.json() as { name?: string }
+  const clean = (name || '').trim()
+  if (!clean) return c.json({ error: 'Section name is required' }, 400)
+
+  const dupe = await c.env.DB.prepare(
+    `SELECT id FROM storage_sections WHERE LOWER(name) = LOWER(?)`
+  ).bind(clean).first()
+  if (dupe) return c.json({ error: 'A section with that name already exists' }, 409)
+
+  const max = await c.env.DB.prepare(
+    `SELECT COALESCE(MAX(sort_order), -1) AS m FROM storage_sections`
+  ).first<{ m: number }>()
+
+  const id = uid()
+  await c.env.DB.prepare(
+    `INSERT INTO storage_sections (id, name, sort_order) VALUES (?, ?, ?)`
+  ).bind(id, clean, (max?.m ?? -1) + 1).run()
+
+  return c.json({ id, name: clean, sort_order: (max?.m ?? -1) + 1 }, 201)
+})
+
+// PATCH /api/storage-layout/sections/:id   Body: { name }
+app.patch('/api/storage-layout/sections/:id', async (c) => {
+  const id = c.req.param('id')
+  const { name } = await c.req.json() as { name?: string }
+  const clean = (name || '').trim()
+  if (!clean) return c.json({ error: 'Section name is required' }, 400)
+
+  const dupe = await c.env.DB.prepare(
+    `SELECT id FROM storage_sections WHERE LOWER(name) = LOWER(?) AND id != ?`
+  ).bind(clean, id).first()
+  if (dupe) return c.json({ error: 'A section with that name already exists' }, 409)
+
+  await c.env.DB.prepare(`UPDATE storage_sections SET name = ? WHERE id = ?`).bind(clean, id).run()
+  return c.json({ ok: true })
+})
+
+// DELETE /api/storage-layout/sections/:id
+// Deletes the section and its placements only — the products themselves are
+// untouched and simply fall back to "Unassigned".
+app.delete('/api/storage-layout/sections/:id', async (c) => {
+  const id = c.req.param('id')
+  await c.env.DB.batch([
+    c.env.DB.prepare(`DELETE FROM item_placements WHERE section_id = ?`).bind(id),
+    c.env.DB.prepare(`DELETE FROM storage_sections WHERE id = ?`).bind(id),
+  ])
+  return c.json({ ok: true })
+})
+
+// PUT /api/storage-layout/order
+// Body: { sections: [id, …], placements: [{ item_id, item_type, section_id, sort_order }] }
+//
+// Saves the whole arrangement in one batch: section walk order plus every
+// item's section and position. Sending the full picture (rather than diffing)
+// keeps drag-and-drop simple and makes the write atomic — a half-applied
+// reorder would leave the counting screen in a nonsense order.
+app.put('/api/storage-layout/order', async (c) => {
+  const body = await c.req.json() as {
+    sections?: string[]
+    placements?: Array<{ item_id: string; item_type: string; section_id: string; sort_order: number }>
+  }
+
+  const statements: D1PreparedStatement[] = []
+
+  for (const [i, sectionId] of (body.sections || []).entries()) {
+    statements.push(
+      c.env.DB.prepare(`UPDATE storage_sections SET sort_order = ? WHERE id = ?`).bind(i, sectionId)
+    )
+  }
+
+  if (body.placements) {
+    // Replace wholesale: anything not in the payload is unassigned by omission.
+    statements.push(c.env.DB.prepare(`DELETE FROM item_placements`))
+    for (const p of body.placements) {
+      if (!p.item_id || !p.item_type || !p.section_id) continue
+      statements.push(
+        c.env.DB.prepare(
+          `INSERT INTO item_placements (id, item_id, item_type, section_id, sort_order)
+           VALUES (?, ?, ?, ?, ?)`
+        ).bind(uid(), p.item_id, p.item_type, p.section_id, Number(p.sort_order) || 0)
+      )
+    }
+  }
+
+  if (statements.length) await c.env.DB.batch(statements)
+  return c.json({ ok: true })
+})
+
+// ─── Manual stock adjustment ──────────────────────────────────
+// POST /api/inventory/:id/adjust
+// Body: { new_quantity, change, reason_code, reason, note? }
+//
+// Applies the quantity change AND writes the stock_log line in one batch, so a
+// movement can never land without its audit trail (the two used to be separate
+// client-side calls). Declared before the generic /api/tables/* routes — Hono
+// matches in registration order.
+app.post('/api/inventory/:id/adjust', async (c) => {
+  const invId = c.req.param('id')
+  const body = await c.req.json() as {
+    new_quantity: number; change: number
+    reason_code?: string; reason?: string; note?: string
+  }
+
+  const newQty = Number(body.new_quantity)
+  const change = Number(body.change)
+  if (!isFinite(newQty) || !isFinite(change)) {
+    return c.json({ error: 'new_quantity and change must be numbers' }, 400)
+  }
+
+  const row = await c.env.DB.prepare(
+    `SELECT id, item_id, item_type, item_name FROM inventory WHERE id = ?`
+  ).bind(invId).first<{ id: string; item_id: string; item_type: string; item_name: string }>()
+  if (!row) return c.json({ error: 'Inventory row not found' }, 404)
+
+  const now = new Date().toISOString()
+  const statements = [
+    c.env.DB.prepare(`UPDATE inventory SET quantity = ? WHERE id = ?`).bind(newQty, invId),
+  ]
+
+  // A zero-change adjustment is a no-op worth recording nothing for.
+  if (change !== 0) {
+    statements.push(
+      c.env.DB.prepare(
+        `INSERT INTO stock_log
+           (id, inventory_id, item_id, item_type, item_name, change, reason, reason_code, note, lot_number, moved_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?)`
+      ).bind(
+        uid(), invId, row.item_id, row.item_type, row.item_name,
+        change, (body.reason || '').trim() || 'Manual adjustment',
+        (body.reason_code || '').trim(), (body.note || '').trim(), now
+      )
+    )
+  }
+
+  await c.env.DB.batch(statements)
+  return c.json({ ok: true, quantity: newQty, change })
+})
 
 // ─── Generic table CRUD helper ────────────────────────────────
 // GET /api/tables/:table  – list all rows (or filtered)
@@ -797,19 +997,48 @@ app.post('/api/bulk/upsert-products', async (c) => {
     if (!name) continue
 
     // 1. Find existing generic_product by name (case-insensitive, skip soft-deleted)
+    // The product's OWN name comes back too: when a line matches via an alias,
+    // the entry must be stored under the product's name, not the vendor's
+    // wording — product_entries.generic_product_name is what Price Movers and
+    // the product views display. The vendor's wording is kept in
+    // vendor_item_name below, so nothing is lost.
     let existing = await c.env.DB.prepare(
-      `SELECT id FROM generic_products WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND deleted_at IS NULL`
-    ).bind(name).first<{ id: string }>()
+      `SELECT id, name FROM generic_products WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND deleted_at IS NULL`
+    ).bind(name).first<{ id: string; name: string }>()
 
-    // 1b. If not found by name, check product_aliases (merges leave old names here)
+    // 1b. Not found by name — try the aliases, most specific rule first.
+    //
+    //   a) an alias registered for THIS supplier ("Grape Tomatoes" from
+    //      Neptune means my Small Tomatoes), then
+    //   b) a global alias (supplier_id IS NULL) — how every alias behaved
+    //      before migration 0033, and what a merge still leaves behind.
+    //
+    // Supplier-specific wins so two vendors can use the same wording for
+    // different items without one silently mislinking to the other.
+    if (!existing && supplierId) {
+      const scoped = await c.env.DB.prepare(
+        `SELECT pa.generic_product_id AS id, gp.name AS name FROM product_aliases pa
+         JOIN generic_products gp ON gp.id = pa.generic_product_id
+         WHERE LOWER(TRIM(pa.alias_name)) = LOWER(TRIM(?))
+           AND pa.supplier_id = ?
+           AND gp.deleted_at IS NULL`
+      ).bind(name, supplierId).first<{ id: string; name: string }>()
+      if (scoped) existing = scoped
+    }
     if (!existing) {
       const aliasMatch = await c.env.DB.prepare(
-        `SELECT pa.generic_product_id AS id FROM product_aliases pa
+        `SELECT pa.generic_product_id AS id, gp.name AS name FROM product_aliases pa
          JOIN generic_products gp ON gp.id = pa.generic_product_id
-         WHERE LOWER(TRIM(pa.alias_name)) = LOWER(TRIM(?)) AND gp.deleted_at IS NULL`
-      ).bind(name).first<{ id: string }>()
+         WHERE LOWER(TRIM(pa.alias_name)) = LOWER(TRIM(?))
+           AND pa.supplier_id IS NULL
+           AND gp.deleted_at IS NULL`
+      ).bind(name).first<{ id: string; name: string }>()
       if (aliasMatch) existing = aliasMatch
     }
+
+    // The name this purchase is filed under: the matched product's own name, or
+    // the invoice's wording when we're creating a new product from it.
+    const canonicalName = existing?.name?.trim() || name
 
     let genericId: string
     if (existing) {
@@ -879,7 +1108,7 @@ app.post('/api/bulk/upsert-products', async (c) => {
           invoice_id, invoice_file_key, invoice_file_name, qty_ordered)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
-      entryId, genericId, name,
+      entryId, genericId, canonicalName,
       rowSupplierId, rowSupplierName,
       (p.vendor_item_name as string) || name,
       (p.sku as string) || '',
@@ -907,6 +1136,66 @@ app.post('/api/bulk/upsert-products', async (c) => {
     supplier_created:  supplierCreated,
   })
 })
+
+// ─── Unit conversion (backend) ────────────────────────────────
+// Suppliers invoice the same item in different units — one bills potatoes in
+// kg, another in lb (see migration 0032). Anything that COMPARES prices across
+// purchases has to express them in one unit first, or a supplier switch reads
+// as a ~120% price move.
+//
+// NOTE: this mirrors invConvertQty()'s factor table in public/static/utils.js.
+// The worker bundle can't import from public/ (it's served as static assets,
+// not bundled), so the table exists twice by necessity. Keep them in sync.
+const UNIT_FACTORS: Record<string, { dim: 'weight' | 'volume'; factor: number }> = {
+  kg:  { dim: 'weight', factor: 1 },
+  g:   { dim: 'weight', factor: 0.001 },
+  lb:  { dim: 'weight', factor: 0.45359237 },
+  lbs: { dim: 'weight', factor: 0.45359237 },
+  oz:  { dim: 'weight', factor: 0.0283495231 },
+  l:   { dim: 'volume', factor: 1 },
+  ml:  { dim: 'volume', factor: 0.001 },
+  gal: { dim: 'volume', factor: 3.78541178 },
+}
+
+function unitInfo(u: string) {
+  return UNIT_FACTORS[String(u || '').trim().toLowerCase()] || null
+}
+function sameUnitName(a: string, b: string) {
+  return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase()
+}
+function isEachUnit(u: string) {
+  const s = String(u || '').trim().toLowerCase()
+  return s === 'each' || s === 'ea' || s === 'unit'
+}
+
+// Convert a PER-UNIT COST between units ($1.50/lb → $3.31/kg).
+// Returns null when the units aren't comparable — callers must then skip the
+// comparison rather than treating the raw numbers as equivalent.
+function convertUnitCost(
+  cost: number, fromUnit: string, toUnit: string, avgWeightKg: number | null
+): number | null {
+  if (!(cost > 0)) return null
+  if (sameUnitName(fromUnit, toUnit)) return cost
+
+  const from = unitInfo(fromUnit)
+  const to   = unitInfo(toUnit)
+
+  // $/each → $/weight, via the product's average weight per each.
+  if (isEachUnit(fromUnit) && to && to.dim === 'weight') {
+    if (!avgWeightKg || avgWeightKg <= 0) return null
+    return (cost / avgWeightKg) * to.factor
+  }
+  // $/weight → $/each.
+  if (from && from.dim === 'weight' && isEachUnit(toUnit)) {
+    if (!avgWeightKg || avgWeightKg <= 0) return null
+    return (cost / from.factor) * avgWeightKg
+  }
+  // Same dimension: $/to = $/from × (from per to).
+  if (from && to && from.dim === to.dim) {
+    return cost * (to.factor / from.factor)
+  }
+  return null
+}
 
 // ─── Product Merge ────────────────────────────────────────────
 // POST /api/products/merge
@@ -992,8 +1281,12 @@ app.get('/api/price-movers', async (c) => {
            pe.cost,
            pe.cost_per_unit,
            pe.invoice_ref,
-           pe.invoice_id
+           pe.invoice_id,
+           pe.vendor_item_name,
+           gp.base_unit           AS stock_unit,
+           gp.avg_weight_per_unit AS avg_weight
     FROM product_entries pe
+    LEFT JOIN generic_products gp ON gp.id = pe.generic_product_id
     WHERE pe.purchase_date IS NOT NULL AND pe.purchase_date != ''
       AND pe.generic_product_id IS NOT NULL AND pe.generic_product_id != ''
       AND pe.voided_at IS NULL
@@ -1012,8 +1305,17 @@ app.get('/api/price-movers', async (c) => {
     pack_unit: string
     cost: number
     cost_per_unit: number
+    // cost_per_unit expressed in the product's declared stocking unit, so
+    // purchases from suppliers billing in different units are comparable.
+    // null when the units can't be reconciled (e.g. $/each with no average
+    // weight set) — such purchases are shown but never compared.
+    cost_per_stock_unit: number | null
     invoice_ref: string
     invoice_id: string
+    // The supplier's own wording for this line. Two purchases of one product
+    // under different vendor wording usually means a substitute arrived
+    // (grape tomatoes instead of cherry), not that the price moved.
+    vendor_item: string
   }
   type Group = {
     product_id: string
@@ -1026,45 +1328,92 @@ app.get('/api/price-movers', async (c) => {
   for (const r of rows.results as Record<string, unknown>[]) {
     const pid = String(r.product_id || '')
     if (!pid) continue
+    const packUnit  = String(r.pack_unit || '')
+    // Fall back to the purchase's own unit for products predating migration
+    // 0032; then everything in the group shares one unit and behaves as before.
+    const stockUnit = String(r.stock_unit || '').trim() || packUnit
     let g = groups.get(pid)
     if (!g) {
       g = {
         product_id:   pid,
         product_name: String(r.product_name || ''),
-        unit:         String(r.pack_unit || ''),
+        unit:         stockUnit,
         purchases:    []
       }
       groups.set(pid, g)
     }
+    const cpu   = Number(r.cost_per_unit || 0)
+    const avgW  = r.avg_weight != null ? Number(r.avg_weight) : null
     g.purchases.push({
-      date:          String(r.purchase_date || ''),
-      vendor:        String(r.supplier_name || ''),
-      pack_qty:      Number(r.pack_qty || 0),
-      pack_unit:     String(r.pack_unit || ''),
-      cost:          Number(r.cost || 0),
-      cost_per_unit: Number(r.cost_per_unit || 0),
-      invoice_ref:   String(r.invoice_ref || ''),
-      invoice_id:    String(r.invoice_id || ''),
+      date:                String(r.purchase_date || ''),
+      vendor:              String(r.supplier_name || ''),
+      pack_qty:            Number(r.pack_qty || 0),
+      pack_unit:           packUnit,
+      cost:                Number(r.cost || 0),
+      cost_per_unit:       cpu,
+      cost_per_stock_unit: convertUnitCost(cpu, packUnit, stockUnit, avgW),
+      invoice_ref:         String(r.invoice_ref || ''),
+      invoice_id:          String(r.invoice_id || ''),
+      vendor_item:         String(r.vendor_item_name || ''),
     })
   }
 
   const products = Array.from(groups.values()).map(g => {
     // Already DESC sorted by the query. Take at most the latest 10.
     const purchases = g.purchases.slice(0, 10)
+
+    // Compare the two most recent purchases that can both be expressed in the
+    // stocking unit. Comparing raw cost_per_unit across units is what made a
+    // kg→lb supplier switch read as a ~120% price rise.
+    const comparable = purchases.filter(p => p.cost_per_stock_unit != null)
     let pct_change: number | null = null
-    if (purchases.length >= 2) {
-      const latest = purchases[0].cost_per_unit
-      const prev   = purchases[1].cost_per_unit
+    if (comparable.length >= 2) {
+      const latest = comparable[0].cost_per_stock_unit as number
+      const prev   = comparable[1].cost_per_stock_unit as number
       if (prev > 0) {
         pct_change = Math.round(((latest - prev) / prev) * 1000) / 10
       }
     }
+    // Surfaced so the UI can say "can't compare" rather than imply no movement.
+    const uncomparable_count = purchases.length - comparable.length
+
+    // What KIND of change is this? Comparing two purchases of the same product
+    // is only a price move when it's the same thing from the same vendor. A
+    // different supplier, or the same supplier shipping a substitute, is a
+    // switch — reporting it as "prices rose 22%" sends you chasing a vendor
+    // who never raised anything.
+    let change_kind: 'price' | 'supplier' | 'item' = 'price'
+    let change_from = ''
+    let change_to   = ''
+    if (comparable.length >= 2) {
+      const latest = comparable[0]
+      const prev   = comparable[1]
+      const vLatest = latest.vendor.trim()
+      const vPrev   = prev.vendor.trim()
+      const iLatest = latest.vendor_item.trim().toLowerCase()
+      const iPrev   = prev.vendor_item.trim().toLowerCase()
+
+      if (vLatest && vPrev && vLatest.toLowerCase() !== vPrev.toLowerCase()) {
+        change_kind = 'supplier'
+        change_from = vPrev
+        change_to   = vLatest
+      } else if (iLatest && iPrev && iLatest !== iPrev) {
+        change_kind = 'item'
+        change_from = prev.vendor_item.trim()
+        change_to   = latest.vendor_item.trim()
+      }
+    }
+
     return {
       product_id:     g.product_id,
       product_name:   g.product_name,
       unit:           g.unit,
       purchase_count: g.purchases.length,
       pct_change,
+      uncomparable_count,
+      change_kind,
+      change_from,
+      change_to,
       purchases,
     }
   })
@@ -1154,7 +1503,10 @@ app.post('/api/stock-take/start', async (c) => {
 app.post('/api/stock-take/:id/submit', async (c) => {
   const stockTakeId = c.req.param('id')
   const body = await c.req.json() as {
-    items: Array<{ stock_take_item_id: string; counted_qty: number | null; reason?: string }>
+    items: Array<{
+      stock_take_item_id: string; counted_qty: number | null
+      reason?: string; reason_code?: string
+    }>
   }
 
   const take = await c.env.DB.prepare(`SELECT * FROM stock_takes WHERE id = ?`).bind(stockTakeId).first<Record<string, unknown>>()
@@ -1179,10 +1531,11 @@ app.post('/api/stock-take/:id/submit', async (c) => {
     if (!snap) continue
     if (it.counted_qty === null || it.counted_qty === undefined) continue
 
-    const counted  = Number(it.counted_qty)
-    const expected = Number(snap.expected_qty) || 0
-    const variance = counted - expected
-    const reason   = (it.reason || '').trim()
+    const counted    = Number(it.counted_qty)
+    const expected   = Number(snap.expected_qty) || 0
+    const variance   = counted - expected
+    const reason     = (it.reason || '').trim()
+    const reasonCode = (it.reason_code || '').trim()
     countedCount++
 
     // 1. Update inventory quantity
@@ -1194,21 +1547,26 @@ app.post('/api/stock-take/:id/submit', async (c) => {
     statements.push(
       c.env.DB.prepare(
         `UPDATE stock_take_items
-           SET counted_qty = ?, variance = ?, reason = ?, counted_at = ?
+           SET counted_qty = ?, variance = ?, reason = ?, reason_code = ?, counted_at = ?
          WHERE id = ?`
-      ).bind(counted, variance, reason, now, snap.id)
+      ).bind(counted, variance, reason, reasonCode, now, snap.id)
     )
 
-    // 3. Log a stock movement (only if variance != 0)
+    // 3. Log a stock movement (only if variance != 0).
+    //    reason_code is what makes a stock-take variance show up in waste
+    //    reporting alongside manual adjustments — 'stock_take' is the fallback
+    //    when the user picked nothing (only possible for a zero variance,
+    //    which does not reach here, but kept honest rather than blank).
     if (variance !== 0) {
       statements.push(
         c.env.DB.prepare(
           `INSERT INTO stock_log
-             (id, inventory_id, item_id, item_type, item_name, change, reason, note, lot_number, moved_at, stock_take_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)`
+             (id, inventory_id, item_id, item_type, item_name, change, reason, reason_code, note, lot_number, moved_at, stock_take_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)`
         ).bind(
           uid(), snap.inventory_id, snap.item_id, snap.item_type, snap.item_name,
-          variance, reason || 'Stock take', `Stock take: expected ${expected}, counted ${counted}`,
+          variance, reason || 'Stock take', reasonCode || 'stock_take',
+          `Stock take: expected ${expected}, counted ${counted}`,
           now, stockTakeId
         )
       )
@@ -1228,18 +1586,25 @@ app.post('/api/stock-take/:id/submit', async (c) => {
 })
 
 // PATCH /api/stock-take/items/:id
-// Body: { counted_qty: number | null, reason: string }
+// Body: { counted_qty: number | null, reason_code?: string, reason?: string }
 // Persists partial counts during an in-progress session so resume works.
+// `reason_code` is the machine-readable bucket (migration 0031); `reason` is
+// the human label. The client sends both from the shared STOCK_REASONS
+// taxonomy, so the backend needs no copy of the list.
 app.patch('/api/stock-take/items/:id', async (c) => {
   const itemId = c.req.param('id')
-  const body = await c.req.json() as { counted_qty: number | null; reason?: string }
+  const body = await c.req.json() as {
+    counted_qty: number | null; reason?: string; reason_code?: string
+  }
   await c.env.DB.prepare(
     `UPDATE stock_take_items
-        SET counted_qty = ?, reason = ?, counted_at = CASE WHEN ? IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END
+        SET counted_qty = ?, reason = ?, reason_code = ?,
+            counted_at = CASE WHEN ? IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END
       WHERE id = ?`
   ).bind(
     body.counted_qty ?? null,
     body.reason ?? '',
+    (body.reason_code || '').trim(),
     body.counted_qty ?? null,
     itemId
   ).run()

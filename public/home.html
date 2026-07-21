@@ -102,6 +102,19 @@
     .pm-change.up   { color: #b91c1c; }
     .pm-change.down { color: #15803d; }
     .pm-change.flat { color: var(--text-muted); }
+    /* A supplier switch / substituted item is a comparison between two
+       different purchases, not one vendor changing price — styled neutrally so
+       it doesn't read as a red-alert price rise. */
+    .pm-row.switch    { background: #eef2ff; border-color: #c7d2fe; }
+    .pm-change.switch { color: #4338ca; }
+    .pm-switch {
+      font-size: .72rem;
+      color: #4338ca;
+      margin-top: .2rem;
+      display: flex;
+      align-items: center;
+      gap: .3rem;
+    }
     .pm-empty { text-align: center; color: var(--text-muted); font-size: .9rem; padding: 2rem 1rem; }
 
     .pm-chart-wrap {
@@ -165,6 +178,14 @@
       height: 10px;
       border-radius: 50%;
       display: inline-block;
+    }
+    /* Secondary note on a price cell — the supplier's own unit, or a warning
+       that the purchase couldn't be converted into the stocking unit. */
+    .pm-unit-note {
+      display: block;
+      font-size: .72rem;
+      color: var(--text-muted);
+      white-space: nowrap;
     }
 
     /* ── Spending Breakdown ── */
@@ -510,7 +531,7 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script src="/static/utils.js?v=20260717-6"></script>
-  <script src="/static/home.js?v=20260718-1"></script>
+  <script src="/static/utils.js?v=20260721-5"></script>
+  <script src="/static/home.js?v=20260721-9"></script>
 </body>
 </html>

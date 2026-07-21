@@ -47,6 +47,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   document.getElementById('deleteFromDetailBtn').addEventListener('click', () => deleteRecipe(currentDetailId));
   document.getElementById('produceBatchBtn').addEventListener('click', () => openProduceBatchModal(currentDetailId));
+  document.getElementById('printRecipeBtn').addEventListener('click', () => printRecipe(currentDetailId));
 
   // Produce Batch modal
   document.getElementById('closeProduceBatchModal').addEventListener('click',  () => closeModal('produceBatchModal'));
@@ -236,8 +237,13 @@ async function loadProductCatalogue() {
       const invRow   = allInventory_r.find(r => r.item_id === g.id && r.item_type === 'raw_material');
       const invQty   = parseFloat(invRow?.quantity) || 0;
 
-      // Walk entries FIFO: consume stock batch by batch to find the active price layer
-      const activeEntry = fifoActiveEntry(entries, invQty);
+      // Walk entries FIFO: consume stock batch by batch to find the active price
+      // layer. Purchases are converted into the unit the stock is counted in —
+      // the bin's own unit, falling back to the product's declared stocking unit
+      // — so suppliers billing in kg and lb can be placed on one axis.
+      const stockUnit = String(invRow?.unit || g.base_unit || '').trim();
+      const avgWKg    = g.avg_weight_per_unit != null ? parseFloat(g.avg_weight_per_unit) : null;
+      const activeEntry = fifoActiveEntry(entries, invQty, stockUnit, avgWKg);
 
       const packSz  = activeEntry.pack_size || '';
       const pqMatch = packSz.match(/^([\d.]+)/);
@@ -296,37 +302,14 @@ async function loadProductCatalogue() {
 //   pack_qty × qty_ordered  (e.g. 3 packs × 5 kg = 15 kg).
 // Prefers the pack_qty/qty_ordered columns; falls back to parsing a legacy
 // pack_size string for any rows created before those columns existed.
-function fifoEntryQty(entry) {
-  let pQty = (entry.pack_qty != null && entry.pack_qty !== '')
-    ? parseFloat(entry.pack_qty)
-    : parseFloat((String(entry.pack_size || '').match(/^([\d.]+)/) || [])[1]);
-  if (!(pQty > 0)) pQty = 1;
-  const ordered = parseFloat(entry.qty_ordered) || 1;
-  return pQty * ordered;
+// Delegates to the shared helper in utils.js — pass a unit to have purchases
+// from suppliers billing in other units converted before they're summed.
+function fifoEntryQty(entry, toUnit, avgWeightKg) {
+  return fifoEntryQtyIn(entry, toUnit || '', avgWeightKg ?? null);
 }
 
-function fifoActiveEntry(sortedEntries, invQty) {
-  if (!sortedEntries.length) return null;
-
-  // Sum all purchased quantities to find total ever bought
-  let totalPurchased = 0;
-  for (const entry of sortedEntries) {
-    totalPurchased += fifoEntryQty(entry);
-  }
-
-  // How much has already been consumed
-  const consumed = Math.max(0, totalPurchased - Math.max(0, invQty));
-
-  // Walk oldest→newest: the first entry whose running cumulative total
-  // exceeds the consumed amount is the active (currently being drawn) batch
-  let cumulative = 0;
-  for (const entry of sortedEntries) {
-    cumulative += fifoEntryQty(entry);
-    if (cumulative > consumed) return entry;
-  }
-
-  // All batches exhausted (inventory ≤ 0) → use the newest entry
-  return sortedEntries[sortedEntries.length - 1];
+function fifoActiveEntry(sortedEntries, invQty, toUnit, avgWeightKg) {
+  return fifoActiveEntryIn(sortedEntries, invQty, toUnit || '', avgWeightKg ?? null);
 }
 
 // ── Ingredient Lines ───────────────────────────────────────────
@@ -1102,6 +1085,69 @@ async function openRecipeDetail(id) {
 
   document.getElementById('recipeDetailBody').innerHTML = body;
   openModal('recipeDetailModal');
+}
+
+// ── Print Recipe ───────────────────────────────────────────────
+// Opens a clean, self-contained printable page in a new window and triggers the
+// browser print dialog. Reuses the already-rendered detail body so what prints
+// matches exactly what's shown in the modal.
+function printRecipe(id) {
+  const recipe = allRecipes.find(r => r.id === id);
+  if (!recipe) return;
+
+  const name = recipe.name || 'Recipe';
+  const bodyHtml = document.getElementById('recipeDetailBody').innerHTML;
+  const printedOn = new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+
+  const doc = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>${esc(name)}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #1f2937; margin: 32px; }
+    .print-header { border-bottom: 2px solid #4f46e5; padding-bottom: 12px; margin-bottom: 20px; }
+    .print-header h1 { margin: 0; font-size: 24px; color: #111827; }
+    .print-header .meta { margin-top: 4px; font-size: 12px; color: #6b7280; }
+    .detail-section-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #4f46e5; margin: 20px 0 8px; }
+    .detail-info-grid { display: grid; gap: 6px; margin-bottom: 8px; }
+    .detail-info-item { display: flex; justify-content: space-between; gap: 16px; font-size: 14px; padding: 4px 0; border-bottom: 1px dashed #e5e7eb; }
+    .detail-info-item span:first-child { color: #6b7280; }
+    table { width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 14px; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e5e7eb; }
+    th { background: #f3f4f6; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: #374151; }
+    td:nth-child(2), td:nth-child(3), td:nth-child(4),
+    th:nth-child(2), th:nth-child(3), th:nth-child(4) { text-align: right; white-space: nowrap; }
+    .detail-cost-box { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding: 12px 16px; border: 1px solid #c7d2fe; border-radius: 8px; background: #eef2ff; }
+    .detail-cost-box .label { font-weight: 600; font-size: 14px; }
+    .detail-cost-box .amount { font-size: 18px; font-weight: 700; }
+    .table-scroll { overflow: visible; }
+    @media print { body { margin: 0; } .print-footer { position: fixed; bottom: 0; } }
+    .print-footer { margin-top: 28px; padding-top: 10px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #9ca3af; }
+  </style>
+</head>
+<body>
+  <div class="print-header">
+    <h1>${esc(name)}</h1>
+    <div class="meta">Recipe &middot; Printed ${esc(printedOn)}</div>
+  </div>
+  ${bodyHtml}
+  <div class="print-footer">Generated by InvoiceDB</div>
+</body>
+</html>`;
+
+  const win = window.open('', '_blank');
+  if (!win) {
+    showToast('Please allow pop-ups to print the recipe.', 'error');
+    return;
+  }
+  win.document.open();
+  win.document.write(doc);
+  win.document.close();
+  // Give the new document a tick to lay out before invoking print.
+  win.focus();
+  setTimeout(() => win.print(), 300);
 }
 
 // ── Load Recipe into Form (Edit) ───────────────────────────────

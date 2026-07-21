@@ -103,20 +103,37 @@ function renderList() {
 
   listEl.innerHTML = movers.map(p => {
     const cls = changeClass(p.pct_change);
-    const latest = p.purchases[0];
-    const prev   = p.purchases[1];
+    // pct_change is computed from the two most recent purchases that could both
+    // be expressed in the stocking unit — show those same two, or the figures
+    // won't reconcile with the percentage next to them.
+    const cmp    = p.purchases.filter(x => x.cost_per_stock_unit != null);
+    const latest = cmp[0] || p.purchases[0];
+    const prev   = cmp[1] || p.purchases[1];
     const selected = p.product_id === pmSelectedId ? ' selected' : '';
     const arrow = cls === 'up' ? '▲' : cls === 'down' ? '▼' : '▸';
+
+    // A supplier switch or a substituted item isn't a price move. Say which it
+    // is, so the number doesn't read as "this vendor put their prices up".
+    const isSwitch = p.change_kind === 'supplier' || p.change_kind === 'item';
+    const switchNote = p.change_kind === 'supplier'
+      ? `<div class="pm-switch"><i class="fas fa-right-left"></i> switched vendor · ${esc(p.change_from)} → ${esc(p.change_to)}</div>`
+      : p.change_kind === 'item'
+        ? `<div class="pm-switch"><i class="fas fa-shuffle"></i> different item · ${esc(p.change_from)} → ${esc(p.change_to)}</div>`
+        : '';
+
     return `
-      <div class="pm-row ${cls}${selected}" data-id="${esc(p.product_id)}">
+      <div class="pm-row ${isSwitch ? 'switch' : cls}${selected}" data-id="${esc(p.product_id)}">
         <div>
           <div class="pm-name">${esc(p.product_name)}</div>
           <div class="pm-meta">
-            ${fmt(latest.cost_per_unit)}/${esc(latest.pack_unit || p.unit || 'unit')}
-            <span style="color:var(--text-muted)"> · prev ${fmt(prev.cost_per_unit)}</span>
+            ${fmt(latest.cost_per_stock_unit ?? latest.cost_per_unit)}/${esc(p.unit || 'unit')}
+            <span style="color:var(--text-muted)"> · prev ${fmt(prev.cost_per_stock_unit ?? prev.cost_per_unit)}</span>
           </div>
+          ${switchNote}
         </div>
-        <div class="pm-change ${cls}">${arrow} ${formatPct(p.pct_change)}</div>
+        <div class="pm-change ${isSwitch ? 'switch' : cls}" title="${isSwitch ? 'Difference between two different purchases, not a price change by one vendor' : 'Price change'}">
+          ${isSwitch ? '⇄' : arrow} ${formatPct(p.pct_change)}
+        </div>
       </div>
     `;
   }).join('');
@@ -206,7 +223,11 @@ function renderChart(chrono, unit) {
       labels: chrono.map(p => formatDate(p.date)),
       datasets: [{
         label: `Price per ${unit}`,
-        data: chrono.map(p => p.cost_per_unit),
+        // Plot the price normalized to the stocking unit, so a supplier who
+        // bills in a different unit doesn't draw a phantom step in the line.
+        // null (unconvertible) leaves a gap rather than a fabricated point.
+        data: chrono.map(p => p.cost_per_stock_unit ?? null),
+        spanGaps: false,
         borderColor: '#94a3b8',
         backgroundColor: 'rgba(148,163,184,.1)',
         borderWidth: 2,
@@ -229,10 +250,20 @@ function renderChart(chrono, unit) {
             title: (items) => items[0] ? fmtDate(chrono[items[0].dataIndex].date) : '',
             label: (item) => {
               const p = chrono[item.dataIndex];
-              return [
-                `Vendor: ${p.vendor || '—'}`,
-                `Price:  ${fmt(p.cost_per_unit)} / ${p.pack_unit || unit}`
-              ];
+              const lines = [`Vendor: ${p.vendor || '—'}`];
+              if (p.cost_per_stock_unit == null) {
+                lines.push(`Invoiced: ${fmt(p.cost_per_unit)} / ${p.pack_unit || '?'}`);
+                lines.push(`Can't convert to ${unit} — not comparable`);
+              } else {
+                lines.push(`Price:  ${fmt(p.cost_per_stock_unit)} / ${unit}`);
+                // When the supplier billed in another unit, show what they
+                // actually invoiced too — otherwise the figure won't match
+                // the paperwork.
+                if (p.pack_unit && !invSameUnit(p.pack_unit, unit)) {
+                  lines.push(`Invoiced as ${fmt(p.cost_per_unit)} / ${p.pack_unit}`);
+                }
+              }
+              return lines;
             }
           }
         }
@@ -256,25 +287,36 @@ function renderLegend(chrono) {
   document.getElementById('pmVendorLegend').innerHTML = html;
 }
 
+// Price cell: the figure normalized to the stocking unit (what the chart and
+// the % change use), plus what the supplier actually invoiced when that was in
+// a different unit — so the row still reconciles with the paperwork.
+function _pmPriceCell(p, unit) {
+  if (p.cost_per_stock_unit == null) {
+    return `<td>${fmt(p.cost_per_unit)} / ${esc(p.pack_unit || '?')}
+              <span class="pm-unit-note" title="Can't convert to ${esc(unit)}">not comparable</span></td>`;
+  }
+  const invoiced = (p.pack_unit && !invSameUnit(p.pack_unit, unit))
+    ? `<span class="pm-unit-note">invoiced ${fmt(p.cost_per_unit)}/${esc(p.pack_unit)}</span>`
+    : '';
+  return `<td>${fmt(p.cost_per_stock_unit)} / ${esc(unit)}${invoiced}</td>`;
+}
+
 function renderDetailTable(purchases, unit) {
   const bodyEl = document.getElementById('pmDetailBody');
   bodyEl.innerHTML = purchases.map(p => {
-    if (p.invoice_id) {
-      return `
-        <tr style="cursor:pointer" onclick="window.location.href='/invoices.html#${esc(p.invoice_id)}'" title="Open invoice">
+    const cells = `
           <td>${esc(p.vendor || '—')}</td>
           <td>${fmtDate(p.date)}</td>
           <td>${Number(p.pack_qty || 0)} ${esc(p.pack_unit || unit)}</td>
-          <td>${fmt(p.cost_per_unit)} / ${esc(unit)}</td>
+          ${_pmPriceCell(p, unit)}`;
+    if (p.invoice_id) {
+      return `
+        <tr style="cursor:pointer" onclick="window.location.href='/invoices.html#${esc(p.invoice_id)}'" title="Open invoice">${cells}
         </tr>
       `;
     }
     return `
-      <tr>
-        <td>${esc(p.vendor || '—')}</td>
-        <td>${fmtDate(p.date)}</td>
-        <td>${Number(p.pack_qty || 0)} ${esc(p.pack_unit || unit)}</td>
-        <td>${fmt(p.cost_per_unit)} / ${esc(unit)}</td>
+      <tr>${cells}
       </tr>
     `;
   }).join('');

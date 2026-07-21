@@ -536,3 +536,343 @@ window.openManageCategoriesModal = openManageCategoriesModal;
 window.addCategory = addCategory;
 window.editCategoryType = editCategoryType;
 window.deleteCategory = deleteCategory;
+
+/* ============================================================
+ * Stock movement reasons (shared)
+ * ============================================================
+ * ONE taxonomy for every place stock moves by hand — the Adjust Stock modal
+ * (inventory page) and stock-take variances. `code` is written to
+ * `stock_log.reason_code` (migration 0029) and `stock_take_items.reason_code`
+ * (0031) so waste is queryable; `label` is written to the free-text `reason`
+ * column for readability and back-compat with rows created before the codes
+ * existed.
+ *
+ * `types` says which direction a reason makes sense in:
+ *   add    — stock going up   (an adjustment that adds, or a POSITIVE variance)
+ *   remove — stock going down (an adjustment that removes, or a NEGATIVE one)
+ *   set    — correcting to a counted figure
+ *
+ * A stock-take variance reuses the same directions: counting MORE than expected
+ * is an 'add', counting less is a 'remove'. That is why one list serves both.
+ *
+ * Adding a code here is all that is needed — no backend change, because the
+ * client sends the code and its label together.
+ */
+const STOCK_REASONS = [
+  { code: 'received',     label: 'Received / delivery',   types: ['add'] },
+  { code: 'production',   label: 'Production / batch',    types: ['add'] },
+  { code: 'transfer_in',  label: 'Transfer in',           types: ['add'] },
+  { code: 'usage',        label: 'Kitchen usage',         types: ['remove'] },
+  { code: 'spillage',     label: 'Spillage / waste',      types: ['remove'] },
+  { code: 'breakage',     label: 'Breakage',              types: ['remove'] },
+  { code: 'staff_meal',   label: 'Staff meal',            types: ['remove'] },
+  { code: 'sample',       label: 'Sample / comp',         types: ['remove'] },
+  { code: 'theft',        label: 'Theft / loss',          types: ['remove'] },
+  { code: 'transfer_out', label: 'Transfer out',          types: ['remove'] },
+  { code: 'correction',   label: 'Stock correction',      types: ['add', 'remove', 'set'] },
+  { code: 'other',        label: 'Other',                 types: ['add', 'remove'] },
+];
+
+function stockReasonsFor(type) {
+  return STOCK_REASONS.filter(r => r.types.includes(type));
+}
+
+function stockReasonLabel(code) {
+  return (STOCK_REASONS.find(r => r.code === code) || {}).label || '';
+}
+
+// Values written before the codes existed are plain labels ("Kitchen usage").
+// Map those onto their code so old in-progress takes keep their selection.
+function stockReasonCode(stored) {
+  const v = (stored || '').trim();
+  if (!v) return '';
+  if (STOCK_REASONS.some(r => r.code === v)) return v;
+  const byLabel = STOCK_REASONS.find(r => r.label.toLowerCase() === v.toLowerCase());
+  return byLabel ? byLabel.code : v;   // unknown legacy text is preserved as-is
+}
+
+/* ============================================================
+ * Multi-level pack units (shared)
+ * ============================================================
+ * A product can be counted several ways that all reconcile to ONE on-hand
+ * figure in a base weight unit — e.g. a case of pepperoni = 25 lb = 5 bags
+ * × 5 lb. See migration 0026 for the data model.
+ *
+ * These helpers are shared by the stock take (public/static/stock-take.js) and
+ * the Adjust Stock modal (public/static/inventory.js) so both pages offer the
+ * same box-per-level entry instead of forcing base-unit mental arithmetic.
+ * The caller owns the box state; everything here is pure.
+ *
+ * Box state shape: { top: string, mid: string, base: string }
+ *
+ * Markup uses the `.st-pack*` / `.st-input` classes from stock-take.css, which
+ * both inventory.html and stock-take.html already load.
+ */
+
+// Base is always a weight, so the summed total can be converted into whatever
+// unit the inventory row itself is stored in.
+const _PK_WT_FACTOR = { lb: 0.45359237, lbs: 0.45359237, kg: 1, g: 0.001, oz: 0.0283495231 };
+
+function pkWtFactor(u) { return _PK_WT_FACTOR[String(u || '').trim().toLowerCase()]; }
+function pkSameUnit(a, b) { return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase(); }
+function pkRound6(n) { return Math.round(n * 1e6) / 1e6; }
+
+function pkFmtQty(n) {
+  const num = parseFloat(n);
+  if (isNaN(num)) return '0';
+  return num % 1 === 0 ? String(num) : num.toFixed(3).replace(/\.?0+$/, '');
+}
+
+// Returns converted qty, or null if the units aren't both convertible weights.
+function pkConvWeight(qty, from, to) {
+  if (pkSameUnit(from, to)) return qty;
+  const f = pkWtFactor(from), t = pkWtFactor(to);
+  if (f && t) return qty * (f / t);
+  return null;
+}
+
+/* ── FIFO layer selection ───────────────────────────────────────
+ * Which purchase is the stock on hand currently being drawn from? Sum every
+ * purchase, subtract what's left, and walk oldest→newest until the running
+ * total exceeds what's been consumed.
+ *
+ * Everything is converted into the product's stocking unit first. Summing a
+ * supplier's 50 lb sacks with another's 10 kg bags raw makes the total (and so
+ * the "consumed" figure, and so the chosen layer) wrong — the app would apply
+ * the newer supplier's price while you're still eating the older stock.
+ *
+ * Lives here because recipes.js, finished-products.js and inventory.js all
+ * need it; they previously each had their own copy and had already drifted.
+ */
+
+// Quantity one purchase brought into stock, expressed in `toUnit`.
+// null when it can't be converted (caller skips it rather than guessing).
+function fifoEntryQtyIn(entry, toUnit, avgWeightKg) {
+  let pQty = (entry.pack_qty != null && entry.pack_qty !== '')
+    ? parseFloat(entry.pack_qty)
+    : parseFloat((String(entry.pack_size || '').match(/^([\d.]+)/) || [])[1]);
+  if (!(pQty > 0)) pQty = 1;
+  const ordered = parseFloat(entry.qty_ordered) || 1;
+  const raw     = pQty * ordered;
+
+  const fromUnit = String(
+    entry.pack_unit || (String(entry.pack_size || '').match(/[\d.]+\s*(.+)$/) || [])[1] || ''
+  ).trim();
+
+  // No unit on either side — nothing to reconcile, use the raw figure.
+  if (!toUnit || !fromUnit) return raw;
+  const conv = invConvertQty(raw, fromUnit, toUnit, avgWeightKg);
+  return conv.error ? null : conv.qty;
+}
+
+// The entry whose batch is currently being consumed, or null for no entries.
+// Purchases that can't be expressed in `toUnit` are skipped for layer selection
+// (they can't be placed on the same axis); if none can be converted, falls back
+// to the newest entry so costing still resolves to something.
+function fifoActiveEntryIn(sortedEntries, invQty, toUnit, avgWeightKg) {
+  if (!sortedEntries || !sortedEntries.length) return null;
+
+  const usable = [];
+  for (const e of sortedEntries) {
+    const q = fifoEntryQtyIn(e, toUnit, avgWeightKg);
+    if (q != null) usable.push({ entry: e, qty: q });
+  }
+  if (!usable.length) return sortedEntries[sortedEntries.length - 1];
+
+  let totalPurchased = 0;
+  for (const u of usable) totalPurchased += u.qty;
+
+  const consumed = Math.max(0, totalPurchased - Math.max(0, invQty));
+
+  let cumulative = 0;
+  for (const u of usable) {
+    cumulative += u.qty;
+    if (cumulative > consumed) return u.entry;
+  }
+  return usable[usable.length - 1].entry;
+}
+
+/* ── Shared quantity conversion ─────────────────────────────────
+ * Products may be invoiced in a different unit than they're stocked in (one
+ * supplier bills potatoes in kg, another in lb — see migration 0032). Anything
+ * moving a physical quantity between units goes through here so there is one
+ * conversion table rather than one per page.
+ * Covers weight↔weight, volume↔volume, and each→weight via the product's
+ * average weight per unit. Returns { qty } or { error }; callers must treat an
+ * error as "cannot do this", never as a silent factor of 1.
+ */
+const _INV_UNIT_FACTORS = {
+  kg:  { dim: 'weight', factor: 1 },
+  g:   { dim: 'weight', factor: 0.001 },
+  lb:  { dim: 'weight', factor: 0.45359237 },
+  lbs: { dim: 'weight', factor: 0.45359237 },
+  oz:  { dim: 'weight', factor: 0.0283495231 },
+  l:   { dim: 'volume', factor: 1 },
+  ml:  { dim: 'volume', factor: 0.001 },
+  gal: { dim: 'volume', factor: 3.78541178 },
+};
+
+function invUnitInfo(u) {
+  return _INV_UNIT_FACTORS[String(u || '').trim().toLowerCase()] || null;
+}
+function invSameUnit(a, b) {
+  return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+}
+function invIsEachUnit(u) {
+  const s = String(u || '').trim().toLowerCase();
+  return s === 'each' || s === 'ea' || s === 'unit';
+}
+
+// Convert a PER-UNIT COST between units ($1.50/lb → $3.31/kg) — the reciprocal
+// of invConvertQty. Returns { cost } or { error }. Mirrors convertUnitCost() in
+// src/index.ts, which the worker needs its own copy of.
+function invConvertUnitCost(cost, fromUnit, toUnit, avgWeightPerUnit) {
+  if (invSameUnit(fromUnit, toUnit)) return { cost };
+
+  const from = invUnitInfo(fromUnit);
+  const to   = invUnitInfo(toUnit);
+
+  if (invIsEachUnit(fromUnit) && to && to.dim === 'weight') {
+    if (!avgWeightPerUnit || avgWeightPerUnit <= 0) {
+      return { error: 'Set "Average Weight per Unit" on the product to enable this conversion' };
+    }
+    return { cost: (cost / avgWeightPerUnit) * to.factor };
+  }
+  if (from && from.dim === 'weight' && invIsEachUnit(toUnit)) {
+    if (!avgWeightPerUnit || avgWeightPerUnit <= 0) {
+      return { error: 'Set "Average Weight per Unit" on the product to enable this conversion' };
+    }
+    return { cost: (cost / from.factor) * avgWeightPerUnit };
+  }
+  if (from && to && from.dim === to.dim) {
+    return { cost: cost * (to.factor / from.factor) };
+  }
+  return { error: `Cannot convert ${fromUnit} to ${toUnit}` };
+}
+
+function invConvertQty(qty, fromUnit, toUnit, avgWeightPerUnit) {
+  if (invSameUnit(fromUnit, toUnit)) return { qty };
+
+  const from = invUnitInfo(fromUnit);
+  const to   = invUnitInfo(toUnit);
+
+  // Each → weight: qty items × kg each, expressed in toUnit.
+  if (invIsEachUnit(fromUnit) && to && to.dim === 'weight') {
+    if (!avgWeightPerUnit || isNaN(avgWeightPerUnit) || avgWeightPerUnit <= 0) {
+      return { error: 'Set "Average Weight per Unit" on the product to enable this conversion' };
+    }
+    return { qty: (qty * avgWeightPerUnit) / to.factor };
+  }
+
+  // Weight → each: the reciprocal.
+  if (from && from.dim === 'weight' && invIsEachUnit(toUnit)) {
+    if (!avgWeightPerUnit || isNaN(avgWeightPerUnit) || avgWeightPerUnit <= 0) {
+      return { error: 'Set "Average Weight per Unit" on the product to enable this conversion' };
+    }
+    return { qty: (qty * from.factor) / avgWeightPerUnit };
+  }
+
+  if (from && to && from.dim === to.dim) {
+    return { qty: qty * (from.factor / to.factor) };
+  }
+
+  return { error: `Cannot convert ${fromUnit} to ${toUnit}` };
+}
+
+// generic_products row → pack config, or null when the product doesn't use
+// pack levels. The *presence of a level's weight* is the on/off signal.
+function pkConfigFrom(g) {
+  if (!g) return null;
+  const midLb = g.mid_lb != null ? Number(g.mid_lb) : null;
+  const topLb = g.top_lb != null ? Number(g.top_lb) : null;
+  const hasMid = midLb != null && midLb > 0;
+  const hasTop = topLb != null && topLb > 0;
+  if (!hasMid && !hasTop) return null;
+  return {
+    base_unit: g.base_unit || 'lb',
+    mid_name: g.mid_name || 'bag', mid_lb: hasMid ? midLb : null,
+    top_name: g.top_name || 'case', top_lb: hasTop ? topLb : null,
+  };
+}
+
+// Pack config for a row, but only when it can be safely reconciled to that
+// row's stored unit (same unit, or both convertible weights). Otherwise the
+// caller falls back to a plain single-quantity input.
+function pkInfoFor(config, rowUnit) {
+  if (!config) return null;
+  const base = config.base_unit || 'lb';
+  if (!pkSameUnit(base, rowUnit) && pkConvWeight(1, base, rowUnit) === null) return null;
+  return { ...config, base_unit: base };
+}
+
+function pkAnyEntered(state) {
+  const bs = state || {};
+  return ['top', 'mid', 'base'].some(k => String(bs[k] || '').trim() !== '' && !isNaN(parseFloat(bs[k])));
+}
+
+// Total in the base weight unit (top·top_lb + mid·mid_lb + loose base).
+function pkTotalBase(state, pack) {
+  const bs = state || {};
+  let total = parseFloat(bs.base) || 0;
+  if (pack.top_lb != null) total += (parseFloat(bs.top) || 0) * pack.top_lb;
+  if (pack.mid_lb != null) total += (parseFloat(bs.mid) || 0) * pack.mid_lb;
+  return total;
+}
+
+// Total converted into `unit`. null when nothing has been entered yet.
+function pkTotalIn(state, pack, unit) {
+  if (!pkAnyEntered(state)) return null;
+  const base = pkTotalBase(state, pack);
+  const conv = pkConvWeight(base, pack.base_unit, unit);
+  return pkRound6(conv === null ? base : conv);
+}
+
+// Split a base-unit amount back into whole top/mid units plus a loose
+// remainder — used to prefill the boxes from an existing quantity.
+function pkSplitBase(baseQty, pack) {
+  let rest = Math.max(0, Number(baseQty) || 0);
+  const out = { top: '', mid: '', base: '' };
+  if (pack.top_lb != null && pack.top_lb > 0) {
+    const n = Math.floor(pkRound6(rest / pack.top_lb));
+    if (n > 0) { out.top = String(n); rest = pkRound6(rest - n * pack.top_lb); }
+  }
+  if (pack.mid_lb != null && pack.mid_lb > 0) {
+    const n = Math.floor(pkRound6(rest / pack.mid_lb));
+    if (n > 0) { out.mid = String(n); rest = pkRound6(rest - n * pack.mid_lb); }
+  }
+  if (rest > 0 || (!out.top && !out.mid)) out.base = String(pkRound6(rest));
+  return out;
+}
+
+function pkBox(key, level, label, val, hint, inputClass) {
+  return `
+    <label class="st-pack-box">
+      <input type="number" step="any" inputmode="decimal" class="st-input ${inputClass}"
+             data-pack-key="${esc(key)}" data-level="${esc(level)}"
+             value="${esc(val)}" placeholder="0" />
+      <span class="st-pack-lbl">${esc(label)}${hint ? `<span class="st-pack-hint"> · ${esc(hint)} ea</span>` : ''}</span>
+    </label>`;
+}
+
+/**
+ * One box per active pack level (top → mid → base) plus a live running total.
+ *
+ * key         — identifier echoed back on each input as data-pack-key
+ * pack        — result of pkInfoFor()
+ * unit        — the unit the total should be displayed in (the row's own unit)
+ * state       — current box state
+ * inputClass  — class the caller binds its 'input' listener to
+ */
+function pkBoxesHtml({ key, pack, unit, state, inputClass = 'pk-pack-input' }) {
+  const bs = state || { top: '', mid: '', base: '' };
+  const boxes = [];
+  if (pack.top_lb != null) boxes.push(pkBox(key, 'top', pack.top_name, bs.top, `${pkFmtQty(pack.top_lb)} ${pack.base_unit}`, inputClass));
+  if (pack.mid_lb != null) boxes.push(pkBox(key, 'mid', pack.mid_name, bs.mid, `${pkFmtQty(pack.mid_lb)} ${pack.base_unit}`, inputClass));
+  boxes.push(pkBox(key, 'base', `loose ${pack.base_unit}`, bs.base, '', inputClass));
+  const total = pkTotalIn(bs, pack, unit);
+  return `
+    <div class="st-pack">
+      ${boxes.join('')}
+      <div class="st-pack-total">= <strong data-pack-total="${esc(key)}">${total === null ? '0' : pkFmtQty(total)}</strong> ${esc(unit || pack.base_unit)}</div>
+    </div>`;
+}

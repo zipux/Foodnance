@@ -8,6 +8,7 @@ const REC_TABLE      = 'recipes';
 
 let allProducts_fp  = [];   // product catalogue
 let allRecipes_fp   = [];   // recipe catalogue
+let allUnits_fp     = [];   // units table rows, sorted by sort_order (same set as product/recipe pages)
 let allInventory_fp = [];   // inventory snapshot (refreshed on page load & pack-run open)
 let fpRecipeRows    = [];   // [{ref_id, ref_name, quantity, unit, yield_unit, cost_per_yield_unit, line_cost}]
 let fpProductRows   = [];   // [{ref_id, ref_name, quantity, unit, unit_cost, pack_unit}]
@@ -18,7 +19,7 @@ let currentFpDetailId = null;
 document.addEventListener('DOMContentLoaded', async () => {
   if (!document.getElementById('fpName')) return;
 
-  await Promise.all([loadFpCatalogues(), loadFinishedProducts()]);
+  await Promise.all([loadFpCatalogues(), loadFinishedProducts(), loadFpUnits()]);
 
   document.getElementById('addFpRecipeBtn').addEventListener('click',  () => addFpRecipeLine());
   document.getElementById('addFpProductBtn').addEventListener('click', () => addFpProductLine());
@@ -87,8 +88,11 @@ async function loadFpCatalogues() {
       const invRow = allInv.find(r => r.item_id === g.id && r.item_type === 'raw_material');
       const invQty = parseFloat(invRow?.quantity) || 0;
 
-      // Inventory-aware FIFO: find the active batch layer
-      const activeEntry = fp_fifoActiveEntry(myEntries, invQty);
+      // Inventory-aware FIFO: find the active batch layer. Converts purchases
+      // into the unit the stock is counted in first — see fifoActiveEntryIn().
+      const stockUnit = String(invRow?.unit || g.base_unit || '').trim();
+      const avgWKg    = g.avg_weight_per_unit != null ? parseFloat(g.avg_weight_per_unit) : null;
+      const activeEntry = fp_fifoActiveEntry(myEntries, invQty, stockUnit, avgWKg);
 
       const packSz  = activeEntry.pack_size || '';
       const pqMatch = packSz.match(/^([\d.]+)/);
@@ -119,42 +123,46 @@ async function loadFpCatalogues() {
 /**
  * Inventory-aware FIFO: given entries sorted oldest→newest and current
  * inventory quantity, return the entry whose batch is actively being consumed.
- * Mirrors the corrected logic in recipes.js → fifoActiveEntry().
+ * Delegates to the shared implementation in utils.js (fifoActiveEntryIn), which
+ * converts each purchase into the stocking unit before summing — this file used
+ * to carry its own copy and had drifted from the others.
  */
-// Quantity a single purchase (entry) brought into stock, in the entry's pack unit:
-//   pack_qty × qty_ordered. Prefers the pack_qty/qty_ordered columns; falls back
-// to parsing a legacy pack_size string. Mirrors recipes.js → fifoEntryQty().
-function fp_fifoEntryQty(entry) {
-  let pQty = (entry.pack_qty != null && entry.pack_qty !== '')
-    ? parseFloat(entry.pack_qty)
-    : parseFloat((String(entry.pack_size || '').match(/^([\d.]+)/) || [])[1]);
-  if (!(pQty > 0)) pQty = 1;
-  const ordered = parseFloat(entry.qty_ordered) || 1;
-  return pQty * ordered;
+function fp_fifoActiveEntry(sortedEntries, invQty, toUnit, avgWeightKg) {
+  return fifoActiveEntryIn(sortedEntries, invQty, toUnit || '', avgWeightKg ?? null);
 }
 
-function fp_fifoActiveEntry(sortedEntries, invQty) {
-  if (!sortedEntries.length) return null;
-
-  // Sum all purchased quantities
-  let totalPurchased = 0;
-  for (const entry of sortedEntries) {
-    totalPurchased += fp_fifoEntryQty(entry);
+// ── Units (same DB-managed set as the product & recipe pages) ───
+async function loadFpUnits() {
+  try {
+    const ud = await apiGet(`tables/units?page=1&limit=100`);
+    allUnits_fp = (ud.data || []).slice().sort((a, b) => a.sort_order - b.sort_order);
+  } catch (e) {
+    console.error('Failed to load units', e);
   }
-
-  // How much has already been consumed
-  const consumed = Math.max(0, totalPurchased - Math.max(0, invQty));
-
-  // Walk oldest→newest: first entry whose running cumulative > consumed = active batch
-  let cumulative = 0;
-  for (const entry of sortedEntries) {
-    cumulative += fp_fifoEntryQty(entry);
-    if (cumulative > consumed) return entry;
-  }
-
-  // All batches exhausted → use the newest entry
-  return sortedEntries[sortedEntries.length - 1];
 }
+
+// Reload the line unit dropdowns after Manage Units changes, preserving selections.
+registerUnitRefreshCallback(async () => {
+  if (!document.getElementById('fpName')) return;
+  await loadFpUnits();
+  fpRecipeRows.forEach((row, idx) => {
+    if (!row) return;
+    const sel = document.getElementById(`fpr-unit-${idx}`);
+    if (!sel) return;
+    const cur = sel.value !== '__manage_units__' ? sel.value : (row.unit || '');
+    sel.innerHTML = buildFpUnitOptions(cur, null);
+    sel.dataset.prevUnit = sel.value;
+  });
+  fpProductRows.forEach((row, idx) => {
+    if (!row) return;
+    const sel = document.getElementById(`fpp-unit-${idx}`);
+    if (!sel) return;
+    const product = allProducts_fp.find(p => p.id === row.ref_id);
+    const cur = sel.value !== '__manage_units__' ? sel.value : (row.unit || '');
+    sel.innerHTML = buildFpUnitOptions(cur, product);
+    sel.dataset.prevUnit = sel.value;
+  });
+});
 
 // ── Unit helpers (same logic as recipes.js) ────────────────────
 function fp_packQty(p) {
@@ -205,8 +213,9 @@ function addFpRecipeLine(prefill = null) {
       data-cost="${r.total_cost || 0}"
       data-yield="${r.servings || 1}"
       data-yieldunit="${esc(r.yield_unit || 'kg')}"
+      data-name="${esc(r.name)}"
       ${r.id === row.ref_id ? 'selected' : ''}>
-      ${esc(r.name)} (${fmt((r.total_cost||0)/(r.servings||1))}/${esc(r.yield_unit||'kg')})
+      ${esc(r.name)}
     </option>`
   ).join('');
 
@@ -227,6 +236,7 @@ function addFpRecipeLine(prefill = null) {
       <select id="fpr-unit-${idx}" onchange="onFpRecipeUnitChange(${idx})">
         ${buildFpUnitOptions(row.unit, null)}
       </select>
+      <span id="fpr-cpu-${idx}" style="font-size:.72rem;color:var(--text-muted);margin-top:.15rem;display:block;min-height:.9rem"></span>
     </div>
     <div>
       ${idx === 0 ? '<label style="font-size:.72rem;font-weight:600;color:transparent">x</label>' : ''}
@@ -234,6 +244,8 @@ function addFpRecipeLine(prefill = null) {
     </div>
   `;
   container.appendChild(div);
+  const unitSelInit = document.getElementById(`fpr-unit-${idx}`);
+  if (unitSelInit) unitSelInit.dataset.prevUnit = unitSelInit.value;
   if (row.ref_id) onFpRecipeChange(idx);
 }
 
@@ -245,7 +257,7 @@ function onFpRecipeChange(idx) {
   const yieldUnit = opt?.dataset?.yieldunit || 'kg';
 
   fpRecipeRows[idx].ref_id              = sel.value;
-  fpRecipeRows[idx].ref_name            = opt?.text?.split('(')[0]?.trim() || '';
+  fpRecipeRows[idx].ref_name            = opt?.dataset?.name || opt?.text?.trim() || '';
   fpRecipeRows[idx].cost_per_yield_unit = yieldQty > 0 ? totalCost / yieldQty : totalCost;
   fpRecipeRows[idx].yield_unit          = yieldUnit;
 
@@ -253,10 +265,26 @@ function onFpRecipeChange(idx) {
   if (!fpRecipeRows[idx]._manualUnit) {
     fpRecipeRows[idx].unit = yieldUnit;
     const unitSel = document.getElementById(`fpr-unit-${idx}`);
-    if (unitSel) unitSel.innerHTML = buildFpUnitOptions(yieldUnit, null);
+    if (unitSel) {
+      unitSel.innerHTML = buildFpUnitOptions(yieldUnit, null);
+      unitSel.dataset.prevUnit = unitSel.value;
+    }
   }
 
   onFpRecipeQtyChange(idx);
+  _updateFpRecipeCostDisplay(idx);
+}
+
+// Cost per chosen unit, shown under the Unit dropdown (mirrors the recipe tab's
+// per-ingredient cost line). Blank until a recipe is selected.
+function _updateFpRecipeCostDisplay(idx) {
+  const el = document.getElementById(`fpr-cpu-${idx}`);
+  if (!el) return;
+  const r = fpRecipeRows[idx];
+  if (!r || !r.ref_id) { el.textContent = ''; return; }
+  const unit   = r.unit || r.yield_unit || 'kg';
+  const factor = fp_conversionFactor(r.yield_unit || 'kg', unit);
+  el.textContent = `${fmt((r.cost_per_yield_unit || 0) * factor)} / ${unit}`;
 }
 
 function onFpRecipeQtyChange(idx) {
@@ -267,9 +295,17 @@ function onFpRecipeQtyChange(idx) {
 }
 
 function onFpRecipeUnitChange(idx) {
-  fpRecipeRows[idx].unit        = document.getElementById(`fpr-unit-${idx}`)?.value || 'kg';
+  const sel = document.getElementById(`fpr-unit-${idx}`);
+  if (sel && sel.value === '__manage_units__') {
+    sel.value = sel.dataset.prevUnit || fpRecipeRows[idx]?.unit || '';
+    openManageUnitsModal();
+    return;
+  }
+  fpRecipeRows[idx].unit        = sel?.value || 'kg';
   fpRecipeRows[idx]._manualUnit = true; // user explicitly chose — lock it
   fpRecipeRows[idx].line_cost   = calcFpRecipeLineCost(idx);
+  if (sel) sel.dataset.prevUnit = sel.value;
+  _updateFpRecipeCostDisplay(idx);
   recalcFpCosts();
 }
 
@@ -288,10 +324,21 @@ function removeFpRecipeLine(idx) {
 }
 
 // ── Product / Packaging Lines ──────────────────────────────────
-// Build unit dropdown options — case-insensitive match, sub-unit at top if defined
+// Build unit dropdown options — case-insensitive match, sub-unit at top if defined.
+// Uses the DB-managed `units` table (same set as the product & recipe pages),
+// with a fallback list if units haven't loaded yet.
 function buildFpUnitOptions(selectedUnit, product) {
-  const su  = product?.sub_unit_name || '';
-  const std = ['kg','g','lb','ml','L','Can','Each','Pack','Case','Dozen'];
+  const su   = product?.sub_unit_name || '';
+  const seen = new Set();
+  const stdRaw = allUnits_fp.length
+    ? allUnits_fp.map(u => u.name)
+    : ['kg','g','lb','ml','L','each','case'];
+  const std = stdRaw.filter(name => {
+    const key = (name || '').toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   const sel = (selectedUnit || '').toLowerCase();
   let html  = '';
   if (su) {
@@ -300,8 +347,9 @@ function buildFpUnitOptions(selectedUnit, product) {
   }
   html += std.map(u => {
     const isSel = sel === u.toLowerCase() ? 'selected' : '';
-    return `<option value="${u}" ${isSel}>${u}</option>`;
+    return `<option value="${esc(u)}" ${isSel}>${esc(u)}</option>`;
   }).join('');
+  html += '<option value="__manage_units__" style="color:var(--primary);font-style:italic">+ Manage units</option>';
   return html;
 }
 
@@ -322,8 +370,9 @@ function addFpProductLine(prefill = null) {
     const pu  = p._packUnit || fp_packUnit(p);
     return `<option value="${esc(p.id)}" data-cost="${cpu}" data-packunit="${esc(pu)}"
       data-subunitname="${esc(p.sub_unit_name || '')}"
+      data-name="${esc(p.name)}"
       ${p.id === row.ref_id ? 'selected' : ''}>
-      ${esc(p.name)} (${fmt(cpu)}/${pu}) [FIFO]
+      ${esc(p.name)}
     </option>`;
   }).join('');
 
@@ -339,11 +388,12 @@ function addFpProductLine(prefill = null) {
       ${idx === 0 ? '<label>Qty</label>' : '<label>&nbsp;</label>'}
       <input type="number" id="fpp-qty-${idx}" value="${row.quantity}" min="0.01" step="0.01" oninput="onFpProductQtyChange(${idx})" />
     </div>
-    <div class="form-group">
+    <div class="form-group unit-group">
       ${idx === 0 ? '<label>Unit</label>' : '<label>&nbsp;</label>'}
       <select id="fpp-unit-${idx}" onchange="onFpProductUnitChange(${idx})">
         ${buildFpUnitOptions(row.unit, allProducts_fp.find(p => p.id === row.ref_id))}
       </select>
+      <span id="fpp-cpu-${idx}" style="font-size:.72rem;color:var(--text-muted);margin-top:.15rem;display:block;min-height:.9rem"></span>
     </div>
     <div>
       ${idx === 0 ? '<label style="font-size:.72rem;font-weight:600;color:transparent">x</label>' : ''}
@@ -351,6 +401,8 @@ function addFpProductLine(prefill = null) {
     </div>
   `;
   container.appendChild(div);
+  const unitSelInit = document.getElementById(`fpp-unit-${idx}`);
+  if (unitSelInit) unitSelInit.dataset.prevUnit = unitSelInit.value;
   if (row.ref_id) onFpProductChange(idx);
 }
 
@@ -362,7 +414,7 @@ function onFpProductChange(idx) {
   const product     = allProducts_fp.find(p => p.id === sel.value);
 
   fpProductRows[idx].ref_id    = sel.value;
-  fpProductRows[idx].ref_name  = opt?.text?.split('(')[0]?.trim() || '';
+  fpProductRows[idx].ref_name  = opt?.dataset?.name || opt?.text?.trim() || '';
   fpProductRows[idx].unit_cost = parseFloat(opt?.dataset?.cost || 0);
   fpProductRows[idx].pack_unit = pu;
 
@@ -376,9 +428,22 @@ function onFpProductChange(idx) {
   const unitSel = document.getElementById(`fpp-unit-${idx}`);
   if (unitSel) {
     unitSel.innerHTML = buildFpUnitOptions(fpProductRows[idx].unit, product);
+    unitSel.dataset.prevUnit = unitSel.value;
   }
 
   onFpProductQtyChange(idx);
+  _updateFpProductCostDisplay(idx);
+}
+
+// Cost per chosen unit, shown under the Unit dropdown (mirrors the recipe tab).
+function _updateFpProductCostDisplay(idx) {
+  const el = document.getElementById(`fpp-cpu-${idx}`);
+  if (!el) return;
+  const r = fpProductRows[idx];
+  if (!r || !r.ref_id) { el.textContent = ''; return; }
+  const unit   = r.unit || r.pack_unit || 'kg';
+  const factor = fp_conversionFactor(r.pack_unit || 'kg', unit);
+  el.textContent = `${fmt((r.unit_cost || 0) * factor)} / ${unit}`;
 }
 
 function onFpProductQtyChange(idx) {
@@ -388,8 +453,16 @@ function onFpProductQtyChange(idx) {
 }
 
 function onFpProductUnitChange(idx) {
-  fpProductRows[idx].unit        = document.getElementById(`fpp-unit-${idx}`)?.value || 'kg';
+  const sel = document.getElementById(`fpp-unit-${idx}`);
+  if (sel && sel.value === '__manage_units__') {
+    sel.value = sel.dataset.prevUnit || fpProductRows[idx]?.unit || '';
+    openManageUnitsModal();
+    return;
+  }
+  fpProductRows[idx].unit        = sel?.value || 'kg';
   fpProductRows[idx]._manualUnit = true; // user explicitly chose — lock it
+  if (sel) sel.dataset.prevUnit = sel.value;
+  _updateFpProductCostDisplay(idx);
   recalcFpCosts();
 }
 

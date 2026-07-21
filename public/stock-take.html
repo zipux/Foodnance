@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Stock Take — InvoiceDB</title>
   <link rel="stylesheet" href="/static/style.css?v=20260717-6" />
-  <link rel="stylesheet" href="/static/stock-take.css?v=20260718-1" />
+  <link rel="stylesheet" href="/static/stock-take.css?v=20260721-5" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 </head>
@@ -45,6 +45,24 @@
       </button>
     </div>
 
+    <!-- FILTERS (sticky under the navbar so they stay reachable mid-count) -->
+    <div class="st-filters" id="stFilters" style="display:none">
+      <div class="st-search-wrap">
+        <i class="fas fa-search"></i>
+        <input type="search" id="stSearch" class="st-search"
+               placeholder="Search items…" autocomplete="off" />
+      </div>
+      <label class="st-toggle">
+        <input type="checkbox" id="stHideCounted" />
+        <span>Hide counted</span>
+      </label>
+      <label class="st-toggle" title="Hide the expected figure until you have entered a count, so the system total cannot influence what you write down">
+        <input type="checkbox" id="stBlindCount" />
+        <span>Blind count</span>
+      </label>
+    </div>
+    <div class="st-filter-note" id="stFilterNote" style="display:none"></div>
+
     <!-- LOADING / EMPTY -->
     <div id="stLoading" class="st-loading">
       <i class="fas fa-spinner fa-spin"></i> Loading stock take…
@@ -60,6 +78,7 @@
     <div class="st-footer-inner">
       <div class="st-footer-progress">
         <span id="stFooterProgress">0 of 0 counted</span>
+        <span id="stSyncStatus" class="st-sync"></span>
       </div>
       <button class="btn btn-success" id="stSubmitBtn">
         <i class="fas fa-check"></i> Submit Stock Take
@@ -67,10 +86,57 @@
     </div>
   </div>
 
+  <!-- ── PRE-SUBMIT SUMMARY ──
+       Shown only when items were left uncounted, so the user is never surprised
+       by stock that silently stayed as it was. -->
+  <div class="modal-overlay hidden" id="stSubmitModal">
+    <div class="modal" style="max-width:520px">
+      <div class="modal-header">
+        <h3><i class="fas fa-clipboard-check"></i> Before you submit</h3>
+        <button class="modal-close" id="stSubmitModalClose"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <p class="st-submit-lead" id="stSubmitLead"></p>
+
+        <div class="st-uncounted-box">
+          <div class="st-uncounted-head" id="stUncountedHead"></div>
+          <ul class="st-uncounted-list" id="stUncountedList"></ul>
+        </div>
+
+        <div class="st-submit-choices">
+          <label class="st-choice">
+            <input type="radio" name="stUncountedAction" value="keep" checked />
+            <span>
+              <strong>Leave them as they are</strong>
+              <em>Their stock stays at the current figure. Nothing is logged for them.</em>
+            </span>
+          </label>
+          <label class="st-choice">
+            <input type="radio" name="stUncountedAction" value="zero" />
+            <span>
+              <strong>Set them all to zero</strong>
+              <em>Records that you have none of these. This writes a stock movement for each one.</em>
+            </span>
+          </label>
+          <div class="st-choice-reason hidden" id="stZeroReasonWrap">
+            <label for="stZeroReason">Reason for zeroing</label>
+            <select id="stZeroReason"></select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="stSubmitCancel">Back to counting</button>
+        <button class="btn btn-success" id="stSubmitConfirm">
+          <i class="fas fa-check"></i> Submit stock take
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- TOAST -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/static/utils.js?v=20260717-6"></script>
-  <script src="/static/stock-take.js?v=20260718-1"></script>
+  <script src="/static/utils.js?v=20260721-5"></script>
+  <script src="/static/stock-take.js?v=20260721-6"></script>
 </body>
 </html>

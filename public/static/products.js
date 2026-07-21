@@ -43,13 +43,16 @@ document.getElementById('saveProductBtn').addEventListener('click', saveGenericP
 
   // Entry form controls
   document.getElementById('openAddEntryBtn').addEventListener('click', openAddEntryForm);
+  document.getElementById('addAliasBtn').addEventListener('click', addAlias);
   document.getElementById('eCost').addEventListener('input',       updateEntryCostPerUnit);
   document.getElementById('ePackQty').addEventListener('input',    updateEntryCostPerUnit);
   document.getElementById('eQtyOrdered').addEventListener('input', updateEntryCostPerUnit);
   document.getElementById('ePackUnit').addEventListener('change',  onPackUnitChange);
 
+  // Stocking unit drives the pack-size labels (pack weights are in that unit)
+  // and the low-stock threshold's unit, so it re-renders the preview too.
   // Pack-sizes section — live preview + reactive labels
-  ['pBaseUnit', 'pMidName', 'pMidLb', 'pTopName', 'pTopLb'].forEach(id => {
+  ['pStockUnit', 'pMidName', 'pMidLb', 'pTopName', 'pTopLb'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('input', updatePackPreview);
     if (el) el.addEventListener('change', updatePackPreview);
@@ -328,7 +331,7 @@ async function openAddProductModal() {
   document.getElementById('pSubUnitName').value = '';
   document.getElementById('pSubUnitQty').value  = '';
   document.getElementById('pAvgWeight').value   = '';
-  document.getElementById('pBaseUnit').value    = 'lb';
+  document.getElementById('pStockUnit').value   = 'lb';
   document.getElementById('pMidName').value     = '';
   document.getElementById('pMidLb').value       = '';
   document.getElementById('pTopName').value     = '';
@@ -336,6 +339,7 @@ async function openAddProductModal() {
   updatePackPreview();
   document.getElementById('pReorderLevel').value = '';
   syncReorderUnit();   // unit mirrors the Pack Size unit
+  renderAliases(null);          // no product yet — prompt to save first
 
   // Show entry form immediately — user fills everything on one screen
   document.getElementById('openAddEntryBtn').style.display = 'none';
@@ -371,17 +375,21 @@ async function openEditProduct(id) {
   document.getElementById('pSubUnitName').value     = g.sub_unit_name        || '';
   document.getElementById('pSubUnitQty').value      = g.sub_unit_qty         || '';
   document.getElementById('pAvgWeight').value       = g.avg_weight_per_unit  != null ? g.avg_weight_per_unit : '';
-  document.getElementById('pBaseUnit').value        = g.base_unit            || 'lb';
+  // base_unit is the declared stocking unit (migration 0032 widened it from the
+  // pack-levels-only base). Fall back to the newest entry's pack unit for any
+  // product the backfill couldn't derive one for.
+  document.getElementById('pStockUnit').value       = g.base_unit            || _inferStockUnit(g) || 'lb';
   document.getElementById('pMidName').value         = g.mid_name             || '';
   document.getElementById('pMidLb').value           = g.mid_lb               != null ? g.mid_lb : '';
   document.getElementById('pTopName').value         = g.top_name             || '';
   document.getElementById('pTopLb').value           = g.top_lb               != null ? g.top_lb : '';
   updatePackPreview();
   document.getElementById('pReorderLevel').value    = g.reorder_level        != null ? g.reorder_level : '';
-  // pReorderUnit is derived from the supplier entry's unit via syncReorderUnit(),
-  // called by updateEntryCostPerUnit() once the entry form is populated below.
+  // pReorderUnit mirrors the declared stocking unit via syncReorderUnit(),
+  // already called by the updatePackPreview() above.
 
   await loadSupplierDropdown();
+  await renderAliases(id);
 
   // ── Pre-fill entry form with most recent entry ──────────────
   const entries = allEntries
@@ -455,7 +463,7 @@ async function saveGenericProduct() {
   }
 
   const avgWeightRaw = parseFloat(document.getElementById('pAvgWeight').value);
-  const newUnit      = (document.getElementById('ePackUnit').value || '').trim();
+  const newUnit      = (document.getElementById('pStockUnit').value || '').trim().toLowerCase();
   let   reorderRaw   = parseFloat(document.getElementById('pReorderLevel').value);
 
   // If the stocking unit changed, the reorder threshold (stored as a bare number
@@ -473,16 +481,18 @@ async function saveGenericProduct() {
 
   // ── Pack sizes (multi-level counting) ──────────────────────────
   // A pack level is "set" when its weight is a positive number; the name is a
-  // display label. Base unit is only stored when at least one level is in use,
-  // keeping '' as the clean "feature off" signal.
+  // display label. Pack weights are expressed in the declared stocking unit.
   const midName = document.getElementById('pMidName').value.trim();
   const topName = document.getElementById('pTopName').value.trim();
   const midLb   = parseFloat(document.getElementById('pMidLb').value);
   const topLb   = parseFloat(document.getElementById('pTopLb').value);
-  const baseUnit = (document.getElementById('pBaseUnit').value || 'lb').trim();
+  // The declared stocking unit — what this item is counted and priced in, and
+  // what every purchase converts into. Always stored (migration 0032): pack
+  // levels stay gated on mid_lb/top_lb, so a populated base_unit does NOT turn
+  // pack-level entry on. See pkConfigFrom() in utils.js.
+  const baseUnit = (document.getElementById('pStockUnit').value || 'lb').trim().toLowerCase();
   const hasMid  = !isNaN(midLb) && midLb > 0;
   const hasTop  = !isNaN(topLb) && topLb > 0;
-  const packInUse = hasMid || hasTop;
 
   if ((!isNaN(midLb) && midLb <= 0) || (!isNaN(topLb) && topLb <= 0)) {
     showToast('Pack weights must be greater than zero.', 'error'); return;
@@ -497,14 +507,14 @@ async function saveGenericProduct() {
     sub_unit_name:        document.getElementById('pSubUnitName').value.trim() || null,
     sub_unit_qty:         parseFloat(document.getElementById('pSubUnitQty').value) || null,
     avg_weight_per_unit:  isNaN(avgWeightRaw) ? null : avgWeightRaw,
-    base_unit:            packInUse ? baseUnit : '',
+    base_unit:            baseUnit,
     mid_name:             hasMid ? (midName || 'bag')  : '',
     mid_lb:               hasMid ? midLb : null,
     top_name:             hasTop ? (topName || 'case') : '',
     top_lb:               hasTop ? topLb : null,
     reorder_level:        isNaN(reorderRaw) ? null : reorderRaw,
-    // Unit is derived from the supplier entry's pack unit (mirrored into the
-    // read-only pReorderUnit field), so the threshold matches the stock unit.
+    // Mirrors the declared stocking unit (shown in the read-only pReorderUnit
+    // field), so the threshold is compared against the bin in the same unit.
     reorder_unit:         isNaN(reorderRaw) ? '' : newUnit,
   };
 
@@ -525,20 +535,27 @@ async function saveGenericProduct() {
       savedId = created.id;
       currentGenericId = savedId;
       document.getElementById('editProductId').value = savedId;
+      // The product now exists, so vendor names can be attached to it.
+      await renderAliases(savedId);
     }
 
     // Persist any pending unit conversions to DB before saving the entry
     const entryId = document.getElementById('editEntryId').value;
     await _flushEntryConversions(savedId, entryId);
 
+    // The stocking unit is now a field of its own, so it can change without any
+    // entry being touched. Whenever it actually moved, bring the on-hand bin
+    // into the new unit — otherwise the quantity keeps meaning the old unit.
+    const stockUnitChanged = gPrev && gPrev.base_unit && !_sameUnit(gPrev.base_unit, baseUnit);
+    if (stockUnitChanged) await _reconcileInventoryUnit(savedId, baseUnit);
+
     if (entryHasData || entryId) {
       // _saveEntryForGeneric handles toast + inventory prompt; returns true on success
       const ok = await _saveEntryForGeneric(savedId, name, category);
       if (ok) {
-        // Editing an existing entry (no new-stock prompt) may have changed the
-        // stocking unit — bring on-hand inventory into the new unit. New entries
-        // create their inventory row fresh with the right unit via the prompt.
-        if (entryId) await _reconcileInventoryUnit(savedId, newUnit);
+        // Editing an existing entry may also have changed its pack unit; the bin
+        // is authoritative in the declared stocking unit either way.
+        if (entryId && !stockUnitChanged) await _reconcileInventoryUnit(savedId, baseUnit);
         closeModal('productModal');
       }
     } else {
@@ -694,6 +711,119 @@ async function loadSupplierDropdown() {
     allSupplierList.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
 }
 
+// ── Vendor names (product_aliases) ─────────────────────────────
+// An alias maps a supplier's wording to this product, so an invoice line like
+// "Grape Tomatoes" links here instead of creating a duplicate. supplier_id ''
+// / null means "accept this name from any vendor"; a supplier-specific alias
+// takes precedence at import time (see /api/bulk/upsert-products).
+
+let _aliasesForProduct = [];
+
+// Case/whitespace-insensitive text compare (names, not units).
+function _sameText(a, b) {
+  return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+}
+
+async function renderAliases(genericId) {
+  const wrap      = document.getElementById('aliasWrap');
+  const saveFirst = document.getElementById('aliasSaveFirst');
+  const listEl    = document.getElementById('aliasList');
+
+  // Aliases point at a product id, so there's nothing to attach them to until
+  // the product exists.
+  if (!genericId) {
+    _aliasesForProduct = [];
+    wrap.style.display      = 'none';
+    saveFirst.style.display = '';
+    return;
+  }
+  wrap.style.display      = '';
+  saveFirst.style.display = 'none';
+
+  // Vendor picker mirrors the entry form's supplier list, plus "Any vendor".
+  const sel = document.getElementById('aliasSupplier');
+  sel.innerHTML = '<option value="">Any vendor</option>' +
+    allSupplierList.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+
+  try {
+    const data = await apiGet(`tables/product_aliases?generic_product_id=${encodeURIComponent(genericId)}`);
+    _aliasesForProduct = data.data || [];
+  } catch (_) {
+    _aliasesForProduct = [];
+  }
+
+  if (!_aliasesForProduct.length) {
+    listEl.innerHTML = `<div style="font-size:.82rem;color:var(--text-muted)">No vendor names yet.</div>`;
+    return;
+  }
+
+  listEl.innerHTML = _aliasesForProduct.map(a => {
+    const sup = a.supplier_id
+      ? (allSupplierList.find(s => s.id === a.supplier_id)?.name || 'Unknown vendor')
+      : 'Any vendor';
+    return `
+      <div style="display:flex;align-items:center;gap:.5rem;padding:.35rem .6rem;background:#f8fafc;border:1px solid var(--border);border-radius:6px;margin-bottom:.35rem">
+        <span style="font-weight:600;font-size:.86rem">${esc(a.alias_name)}</span>
+        <span style="font-size:.76rem;color:var(--text-muted)">from ${esc(sup)}</span>
+        <button class="btn btn-icon btn-sm" style="margin-left:auto;background:#fee2e2;color:#dc2626"
+                title="Remove this vendor name" onclick="deleteAlias('${esc(a.id)}')">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>`;
+  }).join('');
+}
+
+async function addAlias() {
+  const genericId = document.getElementById('editProductId').value;
+  if (!genericId) { showToast('Save the product first.', 'error'); return; }
+
+  const nameEl = document.getElementById('aliasName');
+  const name   = (nameEl.value || '').trim();
+  if (!name) { showToast('Enter the name that appears on the invoice.', 'error'); return; }
+
+  const supplierId = document.getElementById('aliasSupplier').value || null;
+
+  // An alias identical to the product's own name is redundant — the exact-name
+  // match already handles it.
+  const ownName = (document.getElementById('pName').value || '').trim();
+  if (_sameText(name, ownName)) {
+    showToast('That is already the product name.', 'error'); return;
+  }
+  // Same name + same scope twice would just be dead rows.
+  const dup = _aliasesForProduct.some(a =>
+    _sameText(a.alias_name, name) && (a.supplier_id || null) === supplierId);
+  if (dup) { showToast('That vendor name is already listed.', 'error'); return; }
+
+  try {
+    await apiPost('tables/product_aliases', {
+      alias_name:         name,
+      generic_product_id: genericId,
+      supplier_id:        supplierId,
+    });
+    nameEl.value = '';
+    document.getElementById('aliasSupplier').value = '';
+    await renderAliases(genericId);
+    showToast('Vendor name added.', 'success');
+  } catch (e) {
+    showToast('Could not add vendor name: ' + e.message, 'error');
+  }
+}
+
+async function deleteAlias(id) {
+  // Removing an alias only stops future invoices auto-linking by that name —
+  // purchases already filed against the product are untouched.
+  if (!confirm('Remove this vendor name? Past purchases stay linked to this product.')) return;
+  try {
+    await apiDelete(`tables/product_aliases/${id}`);
+    await renderAliases(document.getElementById('editProductId').value);
+    showToast('Vendor name removed.', 'success');
+  } catch (e) {
+    showToast('Could not remove: ' + e.message, 'error');
+  }
+}
+
+window.deleteAlias = deleteAlias;
+
 function openAddEntryForm() {
   document.getElementById('editEntryId').value    = '';
   document.getElementById('eSupplier').value      = '';
@@ -777,23 +907,29 @@ function updateEntryCostPerUnit() {
 // The low-stock threshold is expressed in the product's supplier-entry unit of
 // measure, so its unit display mirrors the Pack Size unit and updates live when
 // that unit changes. Read-only in the form; the value is derived, not typed.
+// The low-stock threshold is compared against the inventory bin, which is now
+// kept in the declared stocking unit — so the threshold's unit follows that,
+// not whichever unit the currently-selected supplier happens to invoice in.
 function syncReorderUnit() {
-  const src = document.getElementById('ePackUnit');
+  const src = document.getElementById('pStockUnit');
   const dst = document.getElementById('pReorderUnit');
-  if (src && dst) dst.value = src.value && src.value !== '__manage_units__' ? src.value : '';
+  if (src && dst) dst.value = src.value || '';
 }
 
 // Keep the Pack Sizes section's echoed labels and the plain-language preview in
 // sync as the user types. Base is always a weight; middle/top are optional packs
 // whose weight (in the base unit) is what wires them into stock takes.
 function updatePackPreview() {
-  const base    = (document.getElementById('pBaseUnit').value || 'lb').trim();
+  const base    = (document.getElementById('pStockUnit').value || 'lb').trim();
+  document.getElementById('pBaseUnitEcho').value = base;
   const midName = document.getElementById('pMidName').value.trim();
   const topName = document.getElementById('pTopName').value.trim();
   const midLb   = parseFloat(document.getElementById('pMidLb').value);
   const topLb   = parseFloat(document.getElementById('pTopLb').value);
   const hasMid  = !isNaN(midLb) && midLb > 0;
   const hasTop  = !isNaN(topLb) && topLb > 0;
+
+  syncReorderUnit();   // threshold unit follows the stocking unit
 
   // Reactive labels next to the weight inputs
   document.getElementById('pMidNameEcho').textContent = midName || 'middle pack';
@@ -847,6 +983,18 @@ function _sameUnit(a, b) {
   return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
 }
 
+// Best guess at a product's stocking unit when base_unit is blank — the newest
+// supplier entry's pack unit. Only a prefill for the picker: migration 0032
+// backfilled base_unit for everything that had stock or purchase history, so
+// this covers products created since, or never purchased.
+function _inferStockUnit(g) {
+  if (!g || !g.id) return '';
+  const newest = allEntries
+    .filter(e => e.generic_product_id === g.id && !e.voided_at && String(e.pack_unit || '').trim())
+    .sort((a, b) => String(b.purchase_date || '').localeCompare(String(a.purchase_date || '')))[0];
+  return newest ? String(newest.pack_unit).trim().toLowerCase() : '';
+}
+
 function _isEach(unit) {
   return String(unit || '').trim().toLowerCase() === 'each';
 }
@@ -879,25 +1027,10 @@ function _convertUnitCost(cost, fromUnit, toUnit, avgWeightPerUnit) {
 
 // Convert a physical quantity (e.g. 35 lb -> 15.876 kg) — the reciprocal of the
 // cost conversion above. Returns { qty } on success, or { error } on failure.
+// Delegates to the shared converter in utils.js so quantity conversion has ONE
+// implementation across pages (see memory: unit-of-measure-cascade).
 function _convertQuantity(qty, fromUnit, toUnit, avgWeightPerUnit) {
-  if (_sameUnit(fromUnit, toUnit)) return { qty };
-
-  const from = _unitInfo(fromUnit);
-  const to   = _unitInfo(toUnit);
-
-  // Each -> weight: qty items × kg each, expressed in toUnit.
-  if (_isEach(fromUnit) && to && to.dim === 'weight') {
-    if (!avgWeightPerUnit || isNaN(avgWeightPerUnit) || avgWeightPerUnit <= 0) {
-      return { error: 'Set Average Weight per Unit first to enable conversion' };
-    }
-    return { qty: (qty * avgWeightPerUnit) / to.factor };
-  }
-
-  if (from && to && from.dim === to.dim) {
-    return { qty: qty * (from.factor / to.factor) };
-  }
-
-  return { error: `Cannot convert ${fromUnit} to ${toUnit}` };
+  return invConvertQty(qty, fromUnit, toUnit, avgWeightPerUnit);
 }
 
 async function onPackUnitChange() {
@@ -1123,7 +1256,9 @@ async function saveEntry() {
   }
   await _flushEntryConversions(genericId, document.getElementById('editEntryId').value);
   const ok = await _saveEntryForGeneric(genericId, null, null);
-  if (ok) await _reconcileInventoryUnit(genericId, document.getElementById('ePackUnit').value);
+  // Reconcile against the declared stocking unit — the bin's unit of record —
+  // not the pack unit of whichever supplier entry was just saved.
+  if (ok) await _reconcileInventoryUnit(genericId, document.getElementById('pStockUnit').value);
 }
 
 // Core entry-save logic — shared by saveGenericProduct (new) and saveEntry (existing)
@@ -1292,7 +1427,7 @@ async function confirmEntryInventory() {
 
   try {
     if (!window.invHelpers) throw new Error('Inventory module not loaded.');
-    await window.invHelpers.upsertInventory({
+    const binRow = await window.invHelpers.upsertInventory({
       itemId:    _pendingEntryInv.genericId,
       itemType:  'raw_material',
       itemName:  _pendingEntryInv.itemName,
@@ -1301,7 +1436,18 @@ async function confirmEntryInventory() {
       change:    qty,
       reason:    note || 'Stock-in from product entry',
     });
-    showToast(`${qty} ${_pendingEntryInv.packUnit} of ${_pendingEntryInv.itemName} added to inventory!`, 'success');
+    // The bin may be kept in a different unit than this supplier invoices in,
+    // in which case say what actually landed rather than echoing the input.
+    const entered = _pendingEntryInv.packUnit;
+    const binUnit = String(binRow?.unit || entered).trim();
+    if (_sameUnit(entered, binUnit)) {
+      showToast(`${qty} ${entered} of ${_pendingEntryInv.itemName} added to inventory!`, 'success');
+    } else {
+      const g    = allGeneric.find(x => x.id === _pendingEntryInv.genericId);
+      const conv = invConvertQty(qty, entered, binUnit, parseFloat(g?.avg_weight_per_unit) || null);
+      const shown = conv.error ? qty : Math.round(conv.qty * 1e6) / 1e6;
+      showToast(`${qty} ${entered} of ${_pendingEntryInv.itemName} added as ${shown} ${binUnit}.`, 'success');
+    }
     closeModal('entryInvModal');
     _pendingEntryInv = null;
   } catch (e) {

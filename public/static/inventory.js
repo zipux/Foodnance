@@ -49,8 +49,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('saveAdjustBtn').addEventListener('click', applyAdjustment);
 
   // Live preview in adjust modal
-  document.getElementById('adjustQty').addEventListener('input',    updateAdjustPreview);
-  document.getElementById('adjustType').addEventListener('change',  updateAdjustPreview);
+  document.getElementById('adjustQty').addEventListener('input', updateAdjustPreview);
+  document.getElementById('adjustType').addEventListener('change', () => {
+    populateAdjustReasons();   // available reasons depend on the type
+    onAdjustTypeChange();
+    updateAdjustPreview();
+  });
+
+  // Enter submits from any field in the modal (but not from the note field's
+  // own IME/autocomplete, and never while the save is already in flight).
+  document.getElementById('adjustModal').addEventListener('keydown', e => {
+    if (e.key !== 'Enter' || e.target.tagName === 'SELECT') return;
+    e.preventDefault();
+    if (!document.getElementById('saveAdjustBtn').disabled) applyAdjustment();
+  });
 
   // In-place product editor modal
   document.getElementById('closeInvEditModal').addEventListener('click',  () => closeModal('invEditProductModal'));
@@ -128,11 +140,22 @@ function buildPriceMap(inventory, generics, entries, recipes, finishedProducts) 
     if (!myEntries.length) { map[r.item_id] = null; return; }
 
     const invQty  = parseFloat(r.quantity) || 0;
-    const active  = invFifoActiveEntry(myEntries, invQty);
-    const cpu     = parseFloat(active.cost_per_unit) || 0;
+    // Value the bin in ITS unit: pick the active layer with purchases converted
+    // into that unit, then convert that layer's price into it too. Pairing a
+    // $/lb price with a quantity counted in kg overstates the value by ~2.2×.
+    const binUnit = String(r.unit || g.base_unit || '').trim();
+    const avgWKg  = g.avg_weight_per_unit != null ? parseFloat(g.avg_weight_per_unit) : null;
+    const active  = invFifoActiveEntry(myEntries, invQty, binUnit, avgWKg);
+    const rawCpu  = parseFloat(active.cost_per_unit) || 0;
     const pUnit   = active.pack_unit || 'unit';
 
-    map[r.item_id] = { type: 'raw', cpu, unit: pUnit, invQty };
+    const conv    = invConvertUnitCost(rawCpu, pUnit, binUnit || pUnit, avgWKg);
+    // Unconvertible → keep the price in the unit it was invoiced in and label it
+    // as such, rather than silently valuing the bin with a mismatched rate.
+    const cpu     = conv.error ? rawCpu : conv.cost;
+    const unit    = conv.error ? pUnit  : (binUnit || pUnit);
+
+    map[r.item_id] = { type: 'raw', cpu, unit, invQty, unit_mismatch: !!conv.error };
   });
 
   // ── Batches: recipe total cost + cost per yield unit ────────
@@ -159,23 +182,12 @@ function buildPriceMap(inventory, generics, entries, recipes, finishedProducts) 
 }
 
 /**
- * FIFO active entry — same algorithm as recipes.js fifoActiveEntry().
- * Kept local so inventory.js has no dependency on recipes.js.
+ * FIFO active entry — delegates to the shared implementation in utils.js.
+ * This file previously carried its own copy which had drifted: it ignored
+ * qty_ordered, so a 3 × 5 kg purchase counted as 5 kg rather than 15 kg.
  */
-function invFifoActiveEntry(sortedEntries, invQty) {
-  if (!sortedEntries.length) return sortedEntries[0];
-  let totalPurchased = 0;
-  for (const e of sortedEntries) {
-    totalPurchased += parseFloat(e.pack_qty) || 1;
-  }
-  const consumed = Math.max(0, totalPurchased - Math.max(0, invQty));
-  let cumulative = 0;
-  for (const e of sortedEntries) {
-    const pQty = parseFloat(e.pack_qty) || 1;
-    cumulative += pQty;
-    if (cumulative > consumed) return e;
-  }
-  return sortedEntries[sortedEntries.length - 1];
+function invFifoActiveEntry(sortedEntries, invQty, toUnit, avgWeightKg) {
+  return fifoActiveEntryIn(sortedEntries, invQty, toUnit || '', avgWeightKg ?? null);
 }
 
 // Cost-group type of a category name (falls back to the built-in map, then food).
@@ -476,84 +488,240 @@ async function saveInvEditProduct() {
 }
 
 // ── Manual Adjust Modal ────────────────────────────────────────
+
+// Reason codes come from STOCK_REASONS in utils.js — the single taxonomy
+// shared with stock-take variances, so both screens ask the same question the
+// same way and both feed reason_code. Add new reasons there, not here.
+
+// Box state for the pack-unit inputs in the modal (single item at a time).
+let adjustPackState = null;   // { top, mid, base } or null when not a pack item
+let adjustPack      = null;   // pkInfoFor() result, or null
+
 function openAdjustModal(invId) {
   const row = allInventory.find(r => r.id === invId);
   if (!row) return;
 
-  document.getElementById('adjustInvId').value        = invId;
+  document.getElementById('adjustInvId').value          = invId;
   document.getElementById('adjustItemLabel').textContent = row.item_name;
   document.getElementById('adjustCurrentStock').textContent =
-    `${parseFloat(row.quantity) || 0} ${row.unit || ''}`;
-  document.getElementById('adjustUnitLabel').textContent   = row.unit || 'unit';
+    `${pkFmtQty(row.quantity)} ${row.unit || ''}`;
   document.getElementById('adjustType').value  = 'add';
   document.getElementById('adjustQty').value   = '';
-  document.getElementById('adjustReason').value = '';
+  document.getElementById('adjustNote').value  = '';
+
+  // Pack levels only apply to raw materials whose base unit reconciles with the
+  // inventory row's own unit; everything else keeps the single-quantity input.
+  const generic = row.item_type === 'raw_material'
+    ? allGenericInv.find(g => g.id === row.item_id)
+    : null;
+  adjustPack = pkInfoFor(pkConfigFrom(generic), row.unit);
+  adjustPackState = adjustPack ? { top: '', mid: '', base: '' } : null;
+
+  renderAdjustQtyInput(row);
+  populateAdjustReasons();
   updateAdjustPreview();
   openModal('adjustModal');
+
+  // Focus the first quantity box so the modal is keyboard-ready.
+  const first = document.querySelector('#adjustModal .pk-adjust-input')
+             || document.getElementById('adjustQty');
+  if (first) first.focus();
+}
+
+// Swap between the pack boxes and the plain quantity input.
+function renderAdjustQtyInput(row) {
+  const wrap  = document.getElementById('adjustPackWrap');
+  const plain = document.getElementById('adjustQty');
+  const label = document.getElementById('adjustQtyLabel');
+
+  if (!adjustPack) {
+    wrap.classList.add('hidden');
+    wrap.innerHTML = '';
+    plain.classList.remove('hidden');
+    label.innerHTML = `Quantity (<span id="adjustUnitLabel">${esc(row.unit || 'unit')}</span>)`;
+    return;
+  }
+
+  plain.classList.add('hidden');
+  wrap.classList.remove('hidden');
+  wrap.innerHTML = pkBoxesHtml({
+    key:        'adjust',
+    pack:       adjustPack,
+    unit:       row.unit || adjustPack.base_unit,
+    state:      adjustPackState,
+    inputClass: 'pk-adjust-input',
+  });
+  label.textContent = 'Quantity';
+  wrap.querySelectorAll('.pk-adjust-input').forEach(el => {
+    el.addEventListener('input', onAdjustPackBoxChange);
+  });
+}
+
+/**
+ * Add/Remove take a *delta*, so the boxes start empty. "Correct to counted
+ * amount" takes an absolute count, so prefill it with what's on hand — split
+ * back into whole cases/bags plus a loose remainder — and the user edits from
+ * there rather than retyping the whole figure.
+ */
+function onAdjustTypeChange() {
+  const row  = allInventory.find(r => r.id === document.getElementById('adjustInvId').value);
+  if (!row) return;
+  const isSet = document.getElementById('adjustType').value === 'set';
+
+  if (!adjustPack) {
+    document.getElementById('adjustQty').value =
+      isSet ? pkFmtQty(row.quantity) : '';
+    return;
+  }
+
+  if (isSet) {
+    const base = pkConvWeight(parseFloat(row.quantity) || 0, row.unit, adjustPack.base_unit);
+    adjustPackState = pkSplitBase(base === null ? (parseFloat(row.quantity) || 0) : base, adjustPack);
+  } else {
+    adjustPackState = { top: '', mid: '', base: '' };
+  }
+  renderAdjustQtyInput(row);
+}
+
+function onAdjustPackBoxChange(e) {
+  if (!adjustPackState) return;
+  adjustPackState[e.target.dataset.level] = e.target.value;
+
+  const row   = allInventory.find(r => r.id === document.getElementById('adjustInvId').value);
+  const unit  = row?.unit || adjustPack.base_unit;
+  const total = pkTotalIn(adjustPackState, adjustPack, unit);
+  const el    = document.querySelector('#adjustModal [data-pack-total="adjust"]');
+  if (el) el.textContent = total === null ? '0' : pkFmtQty(total);
+
+  updateAdjustPreview();
+}
+
+// The quantity being entered, in the inventory row's unit. null = nothing yet.
+function adjustEnteredQty() {
+  if (adjustPack) {
+    const row = allInventory.find(r => r.id === document.getElementById('adjustInvId').value);
+    return pkTotalIn(adjustPackState, adjustPack, row?.unit || adjustPack.base_unit);
+  }
+  const raw = document.getElementById('adjustQty').value;
+  if (String(raw).trim() === '') return null;
+  const n = parseFloat(raw);
+  return isNaN(n) ? null : n;
+}
+
+// Reasons are filtered by adjustment type — "Spillage" makes no sense when
+// adding stock. A correction is always a correction, so it's forced for 'set'.
+function populateAdjustReasons() {
+  const type = document.getElementById('adjustType').value;
+  const sel  = document.getElementById('adjustReasonCode');
+  const prev = sel.value;
+
+  const opts = stockReasonsFor(type);
+  sel.innerHTML = opts.map(r => `<option value="${esc(r.code)}">${esc(r.label)}</option>`).join('');
+
+  if (type === 'set') {
+    sel.value = 'correction';
+    sel.disabled = true;
+  } else {
+    sel.disabled = false;
+    sel.value = opts.some(o => o.code === prev) ? prev : opts[0].code;
+  }
+}
+
+function adjustReasonLabel(code) {
+  return stockReasonLabel(code) || 'Manual adjustment';
+}
+
+// Resolve the new on-hand quantity for the current inputs.
+// Returns null when nothing usable has been entered.
+function adjustComputeNewQty(row) {
+  const qty = adjustEnteredQty();
+  if (qty === null || qty === 0) return null;
+  const current = parseFloat(row.quantity) || 0;
+  const type    = document.getElementById('adjustType').value;
+  if (type === 'add')    return current + qty;
+  if (type === 'remove') return current - qty;
+  return qty;   // 'set'
 }
 
 function updateAdjustPreview() {
-  const invId   = document.getElementById('adjustInvId').value;
-  const row     = allInventory.find(r => r.id === invId);
-  const current = parseFloat(row?.quantity) || 0;
-  const type    = document.getElementById('adjustType').value;
-  const qty     = parseFloat(document.getElementById('adjustQty').value) || 0;
-  const unit    = row?.unit || 'unit';
+  const row     = allInventory.find(r => r.id === document.getElementById('adjustInvId').value);
   const preview = document.getElementById('adjustPreview');
   const text    = document.getElementById('adjustPreviewText');
 
   preview.classList.remove('ready', 'error');
+  if (!row) return;
 
-  if (!qty) {
+  const qty = adjustEnteredQty();
+  if (qty !== null && qty < 0) {
+    preview.classList.add('error');
+    text.textContent = 'Quantity cannot be negative.';
+    return;
+  }
+
+  const newQty = adjustComputeNewQty(row);
+  if (newQty === null) {
     text.textContent = 'Enter a quantity to preview the change';
     return;
   }
 
-  let newQty;
-  if (type === 'add')    newQty = current + qty;
-  if (type === 'remove') newQty = current - qty;
-  if (type === 'set')    newQty = qty;
+  const current = parseFloat(row.quantity) || 0;
+  const unit    = row.unit || 'unit';
+  const change  = newQty - current;
+  const arrow   = change >= 0 ? '▲' : '▼';
 
-  const change = newQty - current;
-  const arrow  = change >= 0 ? '▲' : '▼';
-  preview.classList.add(newQty >= 0 ? 'ready' : 'error');
+  // Value of the movement, using the same cost basis as the Price column.
+  const price = priceMap[row.item_id];
+  const cpu   = price ? (price.type === 'finished' ? price.costPerUnit : price.cpu) : null;
+  const money = (cpu != null && !isNaN(cpu) && cpu > 0)
+    ? `  ·  ${change >= 0 ? '+' : '−'}${fmt(Math.abs(change) * cpu)}`
+    : '';
+
+  if (newQty < 0) {
+    preview.classList.add('error');
+    text.textContent =
+      `${pkFmtQty(current)} ${unit}  ${arrow}  ${pkFmtQty(newQty)} ${unit} — that would leave negative stock.`;
+    return;
+  }
+
+  preview.classList.add('ready');
   text.textContent =
-    `${current} ${unit}  ${arrow}  ${newQty.toFixed(3).replace(/\.?0+$/, '')} ${unit}  (${change >= 0 ? '+' : ''}${change.toFixed(3).replace(/\.?0+$/, '')} ${unit})`;
+    `${pkFmtQty(current)} ${unit}  ${arrow}  ${pkFmtQty(newQty)} ${unit}  ` +
+    `(${change >= 0 ? '+' : '−'}${pkFmtQty(Math.abs(change))} ${unit})${money}`;
 }
 
 async function applyAdjustment() {
-  const invId  = document.getElementById('adjustInvId').value;
-  const row    = allInventory.find(r => r.id === invId);
+  const invId = document.getElementById('adjustInvId').value;
+  const row   = allInventory.find(r => r.id === invId);
   if (!row) return;
 
-  const type   = document.getElementById('adjustType').value;
-  const qty    = parseFloat(document.getElementById('adjustQty').value);
-  const reason = document.getElementById('adjustReason').value.trim() || 'Manual adjustment';
+  const qty = adjustEnteredQty();
+  if (qty === null || qty <= 0) { showToast('Enter a valid quantity.', 'error'); return; }
 
-  if (isNaN(qty) || qty <= 0) { showToast('Enter a valid quantity.', 'error'); return; }
+  const newQty = adjustComputeNewQty(row);
+  if (newQty === null) { showToast('Enter a valid quantity.', 'error'); return; }
 
-  const current = parseFloat(row.quantity) || 0;
-  let newQty;
-  if (type === 'add')    newQty = current + qty;
-  if (type === 'remove') newQty = current - qty;
-  if (type === 'set')    newQty = qty;
+  // Negative stock is almost always a data-entry slip, so make it deliberate.
+  if (newQty < 0 && !confirm(
+    `This would leave "${row.item_name}" at ${pkFmtQty(newQty)} ${row.unit || ''} — below zero.\n\nApply it anyway?`
+  )) return;
 
-  const change = newQty - current;
+  const current    = parseFloat(row.quantity) || 0;
+  const reasonCode = document.getElementById('adjustReasonCode').value;
+  const note       = document.getElementById('adjustNote').value.trim();
 
   const btn = document.getElementById('saveAdjustBtn');
   btn.disabled = true;
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
 
   try {
-    await apiPatch(`tables/${INV_TABLE}/${invId}`, { quantity: newQty });
-    await logStockMove({
-      inventory_id: invId,
-      item_id:      row.item_id,
-      item_type:    row.item_type,
-      item_name:    row.item_name,
-      change,
-      reason,
-      lot_number:   '',
+    // Single endpoint so the quantity update and the log line commit together —
+    // a half-applied adjustment would silently lose stock history.
+    await apiPost(`inventory/${invId}/adjust`, {
+      new_quantity: newQty,
+      change:       newQty - current,
+      reason_code:  reasonCode,
+      reason:       adjustReasonLabel(reasonCode),
+      note,
     });
     showToast('Stock updated!', 'success');
     closeModal('adjustModal');
@@ -628,7 +796,10 @@ function renderLogTable() {
         <td><strong>${esc(l.item_name)}</strong></td>
         <td><span class="inv-type-badge">${esc(typeLabel)}</span></td>
         <td><span class="inv-change-chip ${chipClass}">${sign}${change.toFixed(3).replace(/\.?0+$/, '')}</span></td>
-        <td>${esc(l.reason || '—')}</td>
+        <td>
+          ${esc(l.reason || (l.reason_code ? adjustReasonLabel(l.reason_code) : '—'))}
+          ${l.note ? `<div style="font-size:.75rem;color:var(--text-muted);margin-top:.15rem">${esc(l.note)}</div>` : ''}
+        </td>
         <td style="color:var(--text-muted);font-size:.8rem">${esc(l.lot_number || '—')}</td>
       </tr>
     `;
@@ -698,8 +869,42 @@ async function upsertInventory({ itemId, itemType, itemName, category, unit, cha
   let row = await findInvRow(itemId, itemType);
   const now = new Date().toISOString();
 
+  // ── Resolve the bin's unit of record ──────────────────────────
+  // A supplier may invoice in a different unit than the item is stocked in
+  // (Yen bills potatoes in kg, Neptune in lb). An existing bin keeps its own
+  // unit — changing a product's declared unit is handled deliberately by
+  // _reconcileInventoryUnit() in products.js, which converts the standing
+  // quantity too. A NEW bin for a raw material opens in the product's declared
+  // stocking unit (generic_products.base_unit, migration 0032) so it starts in
+  // the right unit rather than inheriting whichever supplier arrived first.
+  let product  = null;
+  let binUnit  = String(row?.unit || '').trim();
+  if (!binUnit && itemType === 'raw_material') {
+    product = await _fetchGenericProduct(itemId);
+    binUnit = String(product?.base_unit || '').trim();
+  }
+  if (!binUnit) binUnit = String(unit || '').trim();
+
+  // ── Convert the movement into that unit ───────────────────────
+  // Without this a 2 × 50 lb delivery adds 100 to a bin counted in kg.
+  let delta = change;
+  const incomingUnit = String(unit || '').trim();
+  if (incomingUnit && binUnit && !invSameUnit(incomingUnit, binUnit)) {
+    if (!product && itemType === 'raw_material') product = await _fetchGenericProduct(itemId);
+    const avgW = parseFloat(product?.avg_weight_per_unit) || null;
+    const conv = invConvertQty(change, incomingUnit, binUnit, avgW);
+    if (conv.error) {
+      // Hard stop — never guess. Silently adding mismatched units is the bug
+      // this whole path exists to prevent.
+      throw new Error(
+        `${itemName || 'This item'} is stocked in ${binUnit}, but this movement is in ${incomingUnit}. ${conv.error}.`
+      );
+    }
+    delta = Math.round(conv.qty * 1e6) / 1e6;
+  }
+
   if (row) {
-    const newQty = (parseFloat(row.quantity) || 0) + change;
+    const newQty = (parseFloat(row.quantity) || 0) + delta;
     await apiPatch(`tables/${INV_TABLE}/${row.id}`, { quantity: newQty });
     row = { ...row, quantity: newQty };
   } else {
@@ -708,24 +913,32 @@ async function upsertInventory({ itemId, itemType, itemName, category, unit, cha
       item_type: itemType,
       item_name: itemName,
       category,
-      quantity:  change,
-      unit,
+      quantity:  delta,
+      unit:      binUnit,
     });
   }
 
-  // Log the movement
+  // Log the movement, in the bin's unit so the log and the bin agree.
   await logStockMove({
     inventory_id: row.id,
     item_id:      itemId,
     item_type:    itemType,
     item_name:    itemName,
-    change,
+    change:       delta,
     reason,
     lot_number:   lotNumber,
     moved_at:     now,
   });
 
   return row;
+}
+
+// Single generic_products row, or null. Used to read the declared stocking unit
+// and average weight when a movement needs converting.
+async function _fetchGenericProduct(id) {
+  if (!id) return null;
+  try { return await apiGet(`tables/generic_products/${id}`); }
+  catch (_) { return null; }
 }
 
 /**

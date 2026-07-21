@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Storage Layout — InvoiceDB</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260717-6" />
+  <link rel="stylesheet" href="/static/storage-layout.css?v=20260721-1" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav class="navbar">
+    <div class="nav-brand"><i class="fas fa-receipt"></i> InvoiceDB</div>
+    <div class="nav-links">
+      <a href="/home.html"><i class="fas fa-home"></i> Home</a>
+      <a href="/upload-invoice.html"><i class="fas fa-file-invoice"></i> Upload Invoice</a>
+      <a href="/invoices.html"><i class="fas fa-list-alt"></i> Invoices</a>
+      <a href="/pnl.html"><i class="fas fa-chart-pie"></i> P&amp;L</a>
+      <a href="/index.html"><i class="fas fa-boxes"></i> Products</a>
+      <a href="/recipes.html"><i class="fas fa-utensils"></i> Recipes</a>
+      <a href="/finished-products.html"><i class="fas fa-tag"></i> Finished Products</a>
+      <a href="/inventory.html" class="active"><i class="fas fa-warehouse"></i> Inventory</a>
+      <a href="/suppliers.html"><i class="fas fa-truck"></i> Suppliers</a>
+      <a href="/staff.html"><i class="fas fa-users"></i> Staff</a>
+    </div>
+  </nav>
+
+  <div class="container sl-container" id="storage-layout-marker">
+
+    <div class="page-header">
+      <h1><i class="fas fa-sitemap"></i> Storage Layout</h1>
+      <p>
+        Arrange your storage the way you actually walk it. Drag items into the order
+        they sit on the shelf — the stock take will list them exactly like this.
+      </p>
+    </div>
+
+    <div class="sl-toolbar">
+      <button class="btn btn-primary" id="slAddSectionBtn">
+        <i class="fas fa-plus"></i> New section
+      </button>
+      <a href="/stock-take.html" class="btn btn-secondary">
+        <i class="fas fa-clipboard-check"></i> Go to Stock Take
+      </a>
+      <span class="sl-save-state" id="slSaveState"></span>
+    </div>
+
+    <div id="slLoading" class="sl-loading">
+      <i class="fas fa-spinner fa-spin"></i> Loading your layout…
+    </div>
+
+    <div id="slBody" style="display:none"></div>
+
+  </div><!-- /container -->
+
+  <!-- Floating element that follows the finger/cursor while dragging -->
+  <div id="slGhost" class="sl-ghost hidden"></div>
+
+  <!-- TOAST -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/static/utils.js?v=20260721-5"></script>
+  <script src="/static/storage-layout.js?v=20260721-1"></script>
+</body>
+</html>

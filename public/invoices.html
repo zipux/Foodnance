@@ -470,11 +470,46 @@
     </div>
   </div>
 
+  <!-- LINK LINE TO EXISTING PRODUCT -->
+  <div class="modal-overlay hidden" id="linkProductModal">
+    <div class="modal" style="max-width:520px">
+      <div class="modal-header">
+        <h3><i class="fas fa-link"></i> Link to Existing Product</h3>
+        <button class="modal-close" onclick="closeModal('linkProductModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="linkLineIdx" />
+        <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:.75rem">
+          This invoice lists
+          <strong id="linkLineName" style="color:var(--text)"></strong>.
+          Pick the product it should be filed under — the vendor's wording is remembered, so
+          future invoices from
+          <strong id="linkVendorName" style="color:var(--text)">this vendor</strong>
+          link automatically instead of creating a duplicate.
+        </p>
+        <div class="form-group" style="position:relative">
+          <label>Search your products</label>
+          <input type="text" id="linkSearch" placeholder="Type to search…" autocomplete="off"
+                 oninput="onLinkSearchInput()" style="width:100%" />
+          <div id="linkDropdown"
+               style="display:none;position:absolute;z-index:20;left:0;right:0;background:#fff;border:1px solid var(--border);border-radius:6px;max-height:220px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.08)"></div>
+        </div>
+        <div id="linkChosen" style="display:none;padding:.45rem .75rem;background:#f0fdf4;border:1px solid #86efac;border-radius:6px;font-size:.88rem;color:#16a34a;margin-top:.35rem"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('linkProductModal')">Cancel</button>
+        <button class="btn btn-primary" id="confirmLinkBtn" disabled onclick="confirmLinkProduct()">
+          <i class="fas fa-link"></i> Link
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- TOAST -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/static/utils.js?v=20260717-6"></script>
-  <script src="/static/inventory.js?v=20260717-1"></script>
-  <script src="/static/invoices.js?v=20260717-4"></script>
+  <script src="/static/utils.js?v=20260721-5"></script>
+  <script src="/static/inventory.js?v=20260721-5"></script>
+  <script src="/static/invoices.js?v=20260721-8"></script>
 </body>
 </html>
