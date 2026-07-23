@@ -183,14 +183,16 @@ function fp_costPerUnit(p) {
   const qty = fp_packQty(p);
   return qty > 0 ? (p.cost || 0) / qty : (p.cost || 0);
 }
-const _FP_WEIGHT_KG = { kg: 1, g: 0.001, lb: 0.453592 };
+// 'oz' is the WEIGHT ounce (28.35 g); fluid ounces are the separate 'fl oz' unit.
+const _FP_WEIGHT_KG = { kg: 1, g: 0.001, lb: 0.453592, oz: 0.0283495231 };
+const _FP_VOLUME_ML = { l: 1000, ml: 1, 'fl oz': 29.5735296 };
 function _fpIsEach(u) { return u === 'each' || u === 'ea' || u === 'unit'; }
 
 // Dimension of a unit for compatibility checks: 'weight' | 'volume' | 'each' | 'other'.
 function _fpUnitDim(u) {
   const x = (u || '').toLowerCase().trim();
-  if (_FP_WEIGHT_KG[x] != null) return 'weight';
-  if (x === 'l' || x === 'ml') return 'volume';
+  if (_FP_WEIGHT_KG[x] != null) return 'weight';   // kg, g, lb, oz
+  if (_FP_VOLUME_ML[x] != null) return 'volume';   // L, ml, fl oz
   if (_fpIsEach(x)) return 'each';
   return 'other';   // case, sub-unit, or anything unrecognised
 }
@@ -218,11 +220,10 @@ function fp_conversionFactor(fromU, toU, avgWeightKg) {
   const pu = (fromU || '').toLowerCase().trim();
   const ru = (toU   || '').toLowerCase().trim();
   if (pu === ru) return 1;
-  // Weight ↔ weight
+  // Weight ↔ weight (kg, g, lb, oz)
   if (_FP_WEIGHT_KG[pu] != null && _FP_WEIGHT_KG[ru] != null) return _FP_WEIGHT_KG[ru] / _FP_WEIGHT_KG[pu];
-  // Volume ↔ volume
-  if (pu === 'l'  && ru === 'ml') return 0.001;
-  if (pu === 'ml' && ru === 'l')  return 1000;
+  // Volume ↔ volume (L, ml, fl oz)
+  if (_FP_VOLUME_ML[pu] != null && _FP_VOLUME_ML[ru] != null) return _FP_VOLUME_ML[ru] / _FP_VOLUME_ML[pu];
   // Each ↔ weight, via the product's average weight per each (product lines only)
   if (_fpIsEach(pu) && _FP_WEIGHT_KG[ru] != null) {
     if (!avgWeightKg || avgWeightKg <= 0) return null;

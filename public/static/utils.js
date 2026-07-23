@@ -312,11 +312,17 @@ async function renderManageUnitsList() {
   try {
     const data = await apiGet('tables/units?page=1&limit=100');
     _manageUnitsCache = (data.data || []).sort((a, b) => a.sort_order - b.sort_order);
+    // Clarify the ounce ambiguity: 'oz' is treated as weight everywhere; fluid
+    // ounces are the separate 'fl oz' unit. They never convert into each other.
+    const hint = `<div style="font-size:.76rem;color:var(--text-muted);background:#f8fafc;border:1px solid var(--border);border-radius:6px;padding:.45rem .6rem;margin-bottom:.6rem;line-height:1.5">
+      <i class="fas fa-circle-info" style="color:#6366f1"></i>
+      <strong>oz</strong> means weight (28&nbsp;g). For fluid ounces use <strong>fl&nbsp;oz</strong> (30&nbsp;ml) — the two never convert into each other.
+    </div>`;
     if (!_manageUnitsCache.length) {
-      container.innerHTML = '<div style="color:var(--text-muted);font-size:.85rem;padding:.5rem 0">No units defined yet.</div>';
+      container.innerHTML = hint + '<div style="color:var(--text-muted);font-size:.85rem;padding:.5rem 0">No units defined yet.</div>';
       return;
     }
-    container.innerHTML = _manageUnitsCache.map(u => `
+    container.innerHTML = hint + _manageUnitsCache.map(u => `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:.45rem .65rem;border:1px solid var(--border);border-radius:6px;margin-bottom:.35rem;background:#fafbff">
         <span style="font-weight:500;font-size:.92rem">${esc(u.name)}</span>
         <button class="btn btn-danger btn-icon" onclick="deleteUnit(${u.id},'${esc(u.name)}')" title="Delete unit" style="padding:.3rem .55rem;font-size:.78rem">
@@ -706,9 +712,10 @@ const _INV_UNIT_FACTORS = {
   g:   { dim: 'weight', factor: 0.001 },
   lb:  { dim: 'weight', factor: 0.45359237 },
   lbs: { dim: 'weight', factor: 0.45359237 },
-  oz:  { dim: 'weight', factor: 0.0283495231 },
+  oz:  { dim: 'weight', factor: 0.0283495231 },   // WEIGHT ounce; fluid ounce is 'fl oz'
   l:   { dim: 'volume', factor: 1 },
   ml:  { dim: 'volume', factor: 0.001 },
+  'fl oz': { dim: 'volume', factor: 0.0295735296 },
   gal: { dim: 'volume', factor: 3.78541178 },
 };
 

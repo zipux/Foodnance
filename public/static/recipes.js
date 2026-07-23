@@ -126,16 +126,19 @@ function costPerUnit(p) {
   return qty > 0 ? (p.cost || 0) / qty : (p.cost || 0);
 }
 
-// kg-equivalent of one weight unit (used for all weight ↔ weight math)
-const _WEIGHT_KG = { kg: 1, g: 0.001, lb: 0.453592 };
+// kg-equivalent of one weight unit (used for all weight ↔ weight math). 'oz' is
+// the WEIGHT ounce (28.35 g); fluid ounces are the separate 'fl oz' volume unit.
+const _WEIGHT_KG = { kg: 1, g: 0.001, lb: 0.453592, oz: 0.0283495231 };
+// ml-equivalent of one volume unit (used for all volume ↔ volume math).
+const _VOLUME_ML = { l: 1000, ml: 1, 'fl oz': 29.5735296 };
 // Treat these pack units as a discrete "each"/count
 function _isEachUnit(u) { return u === 'each' || u === 'ea' || u === 'unit'; }
 
 // Dimension of a unit for compatibility checks: 'weight' | 'volume' | 'each' | 'other'.
 function _unitDim(u) {
   const x = (u || '').toLowerCase().trim();
-  if (_WEIGHT_KG[x] != null) return 'weight';   // kg, g, lb
-  if (x === 'l' || x === 'ml') return 'volume';
+  if (_WEIGHT_KG[x] != null) return 'weight';   // kg, g, lb, oz
+  if (_VOLUME_ML[x] != null) return 'volume';   // L, ml, fl oz
   if (_isEachUnit(x)) return 'each';
   return 'other';                               // case, or anything unrecognised
 }
@@ -168,11 +171,10 @@ function unitConversionFactor(packUnitStr, recipeUnitStr, avgWeightKg) {
   const pu = (packUnitStr  || '').toLowerCase();
   const ru = (recipeUnitStr || '').toLowerCase();
   if (pu === ru) return 1;
-  // Weight ↔ weight
+  // Weight ↔ weight (kg, g, lb, oz)
   if (_WEIGHT_KG[pu] != null && _WEIGHT_KG[ru] != null) return _WEIGHT_KG[ru] / _WEIGHT_KG[pu];
-  // Volume ↔ volume
-  if (pu === 'l'   && ru === 'ml')  return 0.001;
-  if (pu === 'ml'  && ru === 'l')   return 1000;
+  // Volume ↔ volume (L, ml, fl oz)
+  if (_VOLUME_ML[pu] != null && _VOLUME_ML[ru] != null) return _VOLUME_ML[ru] / _VOLUME_ML[pu];
   // Each ↔ weight, via average weight per each
   //   packUnit=each, recipeUnit=weight → each per 1 recipeUnit = (recipeUnit in kg) / avgWeightKg
   //   packUnit=weight, recipeUnit=each → packUnits per 1 each = avgWeightKg / (packUnit in kg)

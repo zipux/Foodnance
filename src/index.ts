@@ -1183,9 +1183,10 @@ const UNIT_FACTORS: Record<string, { dim: 'weight' | 'volume'; factor: number }>
   g:   { dim: 'weight', factor: 0.001 },
   lb:  { dim: 'weight', factor: 0.45359237 },
   lbs: { dim: 'weight', factor: 0.45359237 },
-  oz:  { dim: 'weight', factor: 0.0283495231 },
+  oz:  { dim: 'weight', factor: 0.0283495231 },   // WEIGHT ounce; fluid ounce is 'fl oz'
   l:   { dim: 'volume', factor: 1 },
   ml:  { dim: 'volume', factor: 0.001 },
+  'fl oz': { dim: 'volume', factor: 0.0295735296 },
   gal: { dim: 'volume', factor: 3.78541178 },
 }
 
