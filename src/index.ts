@@ -161,6 +161,21 @@ function parsePackSize(raw: string): { packQty: number; packUnit: string } {
   return { packQty: 1, packUnit: normalizeUnit(s || 'each') }
 }
 
+// True when a pack-size string carries an explicit unit of measure — a real unit
+// token ("kg", "L"…), a count word ("each"), or any alphabetic unit — as opposed
+// to a bare number. A number-only pack size ("2") would otherwise be silently
+// coerced to "each" by parsePackSize(), producing a wrong cost_per_unit and
+// corrupting every downstream cost comparison. The approve path rejects those
+// instead of guessing (see /api/bulk/upsert-products).
+function packSizeHasUnit(raw: string): boolean {
+  const s = (raw || '').trim()
+  if (!s) return false
+  // Drop any leading quantity ("2", "2 x 2", "1/5") and separators; a real unit
+  // leaves alphabetic characters behind.
+  const rest = s.replace(/^[\d.,\s×xX/]+/, '').trim()
+  return /[a-zA-Z]/.test(rest)
+}
+
 // ─── Helper: infer product category from name via keyword matching ─
 // Best-effort classification for invoice auto-import. Keep the returned labels
 // in sync with DEFAULT_CATEGORIES in public/static/utils.js (the frontend list).
@@ -956,6 +971,23 @@ app.post('/api/bulk/upsert-products', async (c) => {
   }
   if (!Array.isArray(body.products)) return c.json({ error: 'products array required' }, 400)
 
+  // ── Guard: reject unit-less pack sizes before writing anything ──
+  // A pack size with no unit of measure ("2" instead of "2 kg") would be
+  // silently stored as "each" with a meaningless cost_per_unit, breaking Price
+  // Movers, recipe costing and FIFO. Fail fast, name the offenders, and write
+  // nothing — the invoice review UI blocks this too, so this is defense-in-depth.
+  const unitless = body.products
+    .filter(p => String(p.name || '').trim())
+    .filter(p => !packSizeHasUnit(String(p.pack_size || '')))
+    .map(p => String(p.name).trim())
+  if (unitless.length) {
+    return c.json({
+      error: `Missing a unit of measure: ${unitless.join(', ')}. `
+           + `Set a unit (e.g. kg, L, each) before saving.`,
+      unitless,
+    }, 400)
+  }
+
   // ── Step 0: Find-or-create the supplier ──────────────────────
   let supplierId   = ''
   let supplierName = ''
@@ -1197,13 +1229,87 @@ function convertUnitCost(
   return null
 }
 
-// ─── Product Merge ────────────────────────────────────────────
-// POST /api/products/merge
-// Body: { merged_id, surviving_id }
-// 1. Re-links product_entries to the surviving product
-// 2. Sums inventory quantities (deletes merged row)
-// 3. Re-links recipe_items to the surviving product
-// 4. Soft-deletes the merged generic_product (sets deleted_at)
+// ─── Product combine helpers (shared by Merge and Group) ──────
+// Combine one product's data into another: re-link purchase history, pool
+// inventory, re-link recipes, cascade the surviving name to every denormalized
+// copy, then soft-delete the absorbed product. Extracted so Merge (duplicates)
+// and Group (interchangeable items) stay identical under the hood — including
+// the full name cascade.
+async function mergeInto(
+  db: D1Database,
+  merged: { id: string; name: string },
+  surviving: { id: string; name: string }
+) {
+  // 1. Re-link product_entries (the purchase/cost history)
+  await db.prepare(
+    'UPDATE product_entries SET generic_product_id = ?, generic_product_name = ? WHERE generic_product_id = ?'
+  ).bind(surviving.id, surviving.name, merged.id).run()
+
+  // 2. Merge inventory rows (pool the stock into one bin)
+  const mergedInv = await db.prepare('SELECT id, quantity FROM inventory WHERE item_id = ?')
+    .bind(merged.id).first<{ id: string; quantity: number }>()
+  if (mergedInv) {
+    const survivingInv = await db.prepare('SELECT id FROM inventory WHERE item_id = ?')
+      .bind(surviving.id).first<{ id: string }>()
+    if (survivingInv) {
+      await db.prepare('UPDATE inventory SET quantity = quantity + ? WHERE item_id = ?')
+        .bind(mergedInv.quantity, surviving.id).run()
+      await db.prepare('DELETE FROM inventory WHERE item_id = ?').bind(merged.id).run()
+    } else {
+      // No surviving inventory row — reassign the merged row
+      await db.prepare('UPDATE inventory SET item_id = ?, item_name = ? WHERE item_id = ?')
+        .bind(surviving.id, surviving.name, merged.id).run()
+    }
+  }
+
+  // 3. Re-link recipe_items
+  await db.prepare('UPDATE recipe_items SET product_id = ?, product_name = ? WHERE product_id = ?')
+    .bind(surviving.id, surviving.name, merged.id).run()
+
+  // 3b. Cascade the surviving identity to the remaining tables where the merged
+  // product's name/id is denormalized (invoice_lines, product_mappings, stock_log).
+  // Without this the absorbed rows keep the old name and stock_log keeps pointing
+  // at the now-deleted product id, so spending breakdown / stock history drift.
+  await db.batch([
+    db.prepare(
+      `UPDATE invoice_lines SET generic_product_id = ?, product_name = ?
+        WHERE generic_product_id = ? OR LOWER(TRIM(product_name)) = LOWER(TRIM(?))`
+    ).bind(surviving.id, surviving.name, merged.id, merged.name),
+    db.prepare('UPDATE product_mappings SET corrected_name = ? WHERE LOWER(TRIM(corrected_name)) = LOWER(TRIM(?))')
+      .bind(surviving.name, merged.name),
+    db.prepare('UPDATE stock_log SET item_id = ?, item_name = ? WHERE item_id = ?')
+      .bind(surviving.id, surviving.name, merged.id),
+  ])
+
+  // 4. Soft-delete the merged product
+  await db.prepare("UPDATE generic_products SET deleted_at = datetime('now') WHERE id = ?")
+    .bind(merged.id).run()
+}
+
+// Rename a product and cascade the new name to every denormalized copy. Name-only
+// (does not touch category/units), used by Group when it renames the survivor to
+// the umbrella name. Mirrors the cascade inside PUT /api/generic_products/:id.
+async function cascadeRename(db: D1Database, id: string, oldName: string, newName: string) {
+  await db.prepare('UPDATE generic_products SET name = ? WHERE id = ?').bind(newName, id).run()
+  await db.prepare("UPDATE inventory SET item_name = ? WHERE item_id = ? AND item_type = 'raw_material'")
+    .bind(newName, id).run()
+  if (oldName.trim().toLowerCase() !== newName.trim().toLowerCase()) {
+    await db.batch([
+      db.prepare('UPDATE product_entries SET generic_product_name = ? WHERE generic_product_id = ? OR LOWER(TRIM(generic_product_name)) = LOWER(TRIM(?))')
+        .bind(newName, id, oldName),
+      db.prepare('UPDATE invoice_lines SET product_name = ? WHERE LOWER(TRIM(product_name)) = LOWER(TRIM(?))')
+        .bind(newName, oldName),
+      db.prepare('UPDATE product_mappings SET corrected_name = ? WHERE LOWER(TRIM(corrected_name)) = LOWER(TRIM(?))')
+        .bind(newName, oldName),
+      db.prepare('UPDATE recipe_items SET product_name = ? WHERE product_id = ?').bind(newName, id),
+      db.prepare('UPDATE stock_log SET item_name = ? WHERE item_id = ?').bind(newName, id),
+    ])
+  }
+}
+
+// ─── Product Merge (duplicates) ───────────────────────────────
+// POST /api/products/merge  Body: { merged_id, surviving_id }
+// Folds an accidental duplicate into another product (see mergeInto).
 app.post('/api/products/merge', async (c) => {
   const body = await c.req.json() as { merged_id: string; surviving_id: string }
   const { merged_id, surviving_id } = body
@@ -1212,53 +1318,70 @@ app.post('/api/products/merge', async (c) => {
   if (merged_id === surviving_id)
     return c.json({ error: 'Cannot merge a product with itself' }, 400)
 
-  const merged   = await c.env.DB.prepare(
+  const merged = await c.env.DB.prepare(
     'SELECT id, name FROM generic_products WHERE id = ? AND deleted_at IS NULL'
   ).bind(merged_id).first<{ id: string; name: string }>()
   const surviving = await c.env.DB.prepare(
     'SELECT id, name FROM generic_products WHERE id = ? AND deleted_at IS NULL'
   ).bind(surviving_id).first<{ id: string; name: string }>()
-
-  if (!merged)   return c.json({ error: 'Merged product not found' }, 404)
+  if (!merged)    return c.json({ error: 'Merged product not found' }, 404)
   if (!surviving) return c.json({ error: 'Surviving product not found' }, 404)
 
-  // 1. Re-link product_entries
-  await c.env.DB.prepare(
-    'UPDATE product_entries SET generic_product_id = ?, generic_product_name = ? WHERE generic_product_id = ?'
-  ).bind(surviving_id, surviving.name, merged_id).run()
+  await mergeInto(c.env.DB, merged, surviving)
+  return c.json({ ok: true, merged_name: merged.name, surviving_name: surviving.name })
+})
 
-  // 2. Merge inventory rows
-  const mergedInv = await c.env.DB.prepare(
-    'SELECT id, quantity FROM inventory WHERE item_id = ?'
-  ).bind(merged_id).first<{ id: string; quantity: number }>()
-  if (mergedInv) {
-    const survivingInv = await c.env.DB.prepare(
-      'SELECT id FROM inventory WHERE item_id = ?'
-    ).bind(surviving_id).first<{ id: string }>()
-    if (survivingInv) {
-      await c.env.DB.prepare(
-        'UPDATE inventory SET quantity = quantity + ? WHERE item_id = ?'
-      ).bind(mergedInv.quantity, surviving_id).run()
-      await c.env.DB.prepare('DELETE FROM inventory WHERE item_id = ?').bind(merged_id).run()
-    } else {
-      // No surviving inventory row — reassign the merged row
-      await c.env.DB.prepare(
-        'UPDATE inventory SET item_id = ?, item_name = ? WHERE item_id = ?'
-      ).bind(surviving_id, surviving.name, merged_id).run()
-    }
+// ─── Product Group (interchangeable items) ────────────────────
+// POST /api/products/group  Body: { general_name: string, product_ids: string[] }
+// Combines 2+ products you buy interchangeably (cherry/grape tomatoes) into one
+// umbrella product named general_name, keeping every supplier's purchases as its
+// own row (the "Basil" shape). Distinct in intent from Merge, same plumbing: one
+// product survives (renamed to general_name), the rest are merged into it, and
+// each absorbed name is remembered as a vendor alias so future invoices route in.
+app.post('/api/products/group', async (c) => {
+  const body = await c.req.json() as { general_name?: string; product_ids?: string[] }
+  const generalName = (body.general_name || '').trim()
+  const ids = Array.from(new Set((body.product_ids || []).map(s => String(s || '').trim()).filter(Boolean)))
+  if (!generalName)    return c.json({ error: 'general_name required' }, 400)
+  if (ids.length < 2)  return c.json({ error: 'Select at least two products to group' }, 400)
+
+  // Load every selected product (active only).
+  const products: { id: string; name: string }[] = []
+  for (const id of ids) {
+    const p = await c.env.DB.prepare('SELECT id, name FROM generic_products WHERE id = ? AND deleted_at IS NULL')
+      .bind(id).first<{ id: string; name: string }>()
+    if (!p) return c.json({ error: `Product not found or archived: ${id}` }, 404)
+    products.push(p)
   }
 
-  // 3. Re-link recipe_items
-  await c.env.DB.prepare(
-    'UPDATE recipe_items SET product_id = ?, product_name = ? WHERE product_id = ?'
-  ).bind(surviving_id, surviving.name, merged_id).run()
+  // Survivor: prefer one already named general_name, else the first selected. It
+  // is renamed to the umbrella name; the rest are merged into it.
+  const survivor = products.find(p => p.name.trim().toLowerCase() === generalName.toLowerCase()) || products[0]
+  if (survivor.name.trim().toLowerCase() !== generalName.toLowerCase()) {
+    await cascadeRename(c.env.DB, survivor.id, survivor.name, generalName)
+  }
+  const surviving = { id: survivor.id, name: generalName }
 
-  // 4. Soft-delete the merged product
-  await c.env.DB.prepare(
-    "UPDATE generic_products SET deleted_at = datetime('now') WHERE id = ?"
-  ).bind(merged_id).run()
+  let grouped = 0
+  for (const p of products) {
+    if (p.id === survivor.id) continue
+    await mergeInto(c.env.DB, p, surviving)
+    // Remember the absorbed name so future invoices with that wording route in.
+    const aliasName = p.name.trim()
+    if (aliasName && aliasName.toLowerCase() !== generalName.toLowerCase()) {
+      const dup = await c.env.DB.prepare(
+        'SELECT id FROM product_aliases WHERE generic_product_id = ? AND LOWER(TRIM(alias_name)) = LOWER(TRIM(?)) AND supplier_id IS NULL'
+      ).bind(survivor.id, aliasName).first()
+      if (!dup) {
+        await c.env.DB.prepare(
+          'INSERT INTO product_aliases (id, alias_name, generic_product_id, supplier_id) VALUES (?, ?, ?, NULL)'
+        ).bind(uid(), aliasName, survivor.id).run()
+      }
+    }
+    grouped++
+  }
 
-  return c.json({ ok: true, merged_name: merged.name, surviving_name: surviving.name })
+  return c.json({ ok: true, survivor_id: survivor.id, survivor_name: generalName, grouped_count: grouped })
 })
 
 // ─── Price Movers ─────────────────────────────────────────────

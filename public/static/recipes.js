@@ -131,6 +131,30 @@ const _WEIGHT_KG = { kg: 1, g: 0.001, lb: 0.453592 };
 // Treat these pack units as a discrete "each"/count
 function _isEachUnit(u) { return u === 'each' || u === 'ea' || u === 'unit'; }
 
+// Dimension of a unit for compatibility checks: 'weight' | 'volume' | 'each' | 'other'.
+function _unitDim(u) {
+  const x = (u || '').toLowerCase().trim();
+  if (_WEIGHT_KG[x] != null) return 'weight';   // kg, g, lb
+  if (x === 'l' || x === 'ml') return 'volume';
+  if (_isEachUnit(x)) return 'each';
+  return 'other';                               // case, or anything unrecognised
+}
+
+// Can a product priced in `packU` be expressed in `otherU` at all? Same dimension
+// converts; weight↔each bridges via the product's average weight (that bridge is
+// still flagged uncostable if the weight is missing — see unitConversionFactor —
+// not blocked here). Volume never crosses to weight/each, and an 'other'/'case'
+// unit only matches itself. Drives the recipe unit-switch guard so 'each'/'case'
+// items are checked too, instead of only the hardcoded weight↔volume pair.
+function _unitsCompatible(packU, otherU) {
+  const a = _unitDim(packU), b = _unitDim(otherU);
+  if (a === 'other' || b === 'other') {
+    return (packU || '').toLowerCase().trim() === (otherU || '').toLowerCase().trim();
+  }
+  if (a === b) return true;
+  return (a === 'weight' && b === 'each') || (a === 'each' && b === 'weight');
+}
+
 // Conversion factor: how many "packUnit" equal 1 "recipeUnit".
 // Returns a multiplier so that:  line_cost = unit_cost_per_packUnit × quantity × conversionFactor
 // e.g. packUnit=kg, recipeUnit=g  → 1g = 0.001kg → factor = 0.001
@@ -160,7 +184,10 @@ function unitConversionFactor(packUnitStr, recipeUnitStr, avgWeightKg) {
     if (!avgWeightKg || avgWeightKg <= 0) return null;
     return avgWeightKg / _WEIGHT_KG[pu];
   }
-  return 1;
+  // No bridge between these units (e.g. weight↔volume, each↔volume, case↔weight).
+  // Return null — "cannot cost this line" — never a silent factor of 1, which
+  // would mis-cost the line with no warning. Callers must treat null as uncostable.
+  return null;
 }
 
 // Average weight (kg per each) for the product referenced by a recipe row, or 0.
@@ -445,18 +472,20 @@ function onUnitChange(idx) {
   }
 
   const prevUnit = sel.dataset.prevUnit || ingredientRows[idx]?.unit || '';
+  const row      = ingredientRows[idx] || {};
 
-  // Block weight ↔ volume swaps — check the two unit values being switched between
+  // Block a switch to a unit this ingredient can't be costed in. Compatibility is
+  // driven by the product's pack unit (what it's priced in) and real dimension
+  // bridges, not a hardcoded weight/volume list — so 'each'/'case' items are
+  // guarded too (e.g. an each-priced cucumber can't switch to L). The product's
+  // own sub-unit is always allowed (costed via the sub-unit path, not conversion).
   if (newUnit !== prevUnit) {
-    const WEIGHT     = ['kg', 'g', 'lb'];
-    const VOLUME     = ['l', 'ml'];
-    const fromU      = prevUnit.toLowerCase().trim();
-    const toU        = newUnit.toLowerCase().trim();
-    const impossible = (WEIGHT.includes(fromU) && VOLUME.includes(toU)) ||
-                       (VOLUME.includes(fromU) && WEIGHT.includes(toU));
-    if (impossible) {
+    const packU   = row.pack_unit || prevUnit || 'kg';
+    const subName = (row.sub_unit_name || '').toLowerCase().trim();
+    const isSub   = subName && newUnit.toLowerCase().trim() === subName;
+    if (!isSub && !_unitsCompatible(packU, newUnit)) {
       sel.value = prevUnit;
-      showToast(`Cannot convert ${prevUnit} to ${newUnit} — unit reset.`, 'warning');
+      showToast(`Cannot convert ${packU} to ${newUnit} — unit reset.`, 'warning');
       return;
     }
   }
@@ -1262,8 +1291,9 @@ function updatePbPreview() {
     return;
   }
 
-  // Scale factor: how many times the base recipe is being made
-  const scaleFactor = (batchQty * unitConversionFactor(batchUnit, recipeYieldUnit)) / recipeYieldQty;
+  // Scale factor: how many times the base recipe is being made. Yield scaling has
+  // no avg-weight bridge; keep the historic factor-of-1 fallback for mismatched units.
+  const scaleFactor = (batchQty * (unitConversionFactor(batchUnit, recipeYieldUnit) ?? 1)) / recipeYieldQty;
 
   let totalBatchCost = 0;
 
@@ -1342,7 +1372,7 @@ async function confirmProduceBatch() {
 
   const recipeYieldQty  = parseFloat(pbRecipeData.servings) || 1;
   const recipeYieldUnit = pbRecipeData.yield_unit || 'kg';
-  const scaleFactor     = (batchQty * unitConversionFactor(batchUnit, recipeYieldUnit)) / recipeYieldQty;
+  const scaleFactor     = (batchQty * (unitConversionFactor(batchUnit, recipeYieldUnit) ?? 1)) / recipeYieldQty;
   const reason          = note ? `Batch production: ${pbRecipeData.name} — ${note}` : `Batch production: ${pbRecipeData.name}`;
 
   const btn = document.getElementById('confirmProduceBatchBtn');

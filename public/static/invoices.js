@@ -44,10 +44,26 @@ function fmtDate(iso) {
   return m ? `${m[1]}/${m[2]}/${m[3]}` : iso;
 }
 
+// Split a pack-size string into an editable qty + unit for the review row.
+// Mirrors the backend parsePackSize() for multi-pack formats so a multiplied
+// pack ("2 x 2 kg" = 4 kg) pre-fills correctly instead of collapsing to qty "2"
+// with an unrecognized "x 2 kg" unit (which shows blank and, if approved, gets
+// coerced to "each"). Simple "N unit" packs keep their existing behavior.
 function parsePackaging(str) {
   const s = (str || '').trim();
   if (!s) return { pack_qty: '', pack_unit: '' };
-  const m = s.match(/^([\d.,]+)\s*(.*)$/);
+  const unitPat = '(?:kg|g|lb|lbs|l|ml|oz|fl\\s*oz|gal)';
+  // "N x M unit" → qty = N*M (e.g. "2 x 2 kg" → 4 kg)
+  let m = s.match(new RegExp(`^([\\d.]+)\\s*[×xX]\\s*([\\d.]+)\\s*(${unitPat})\\b`, 'i'));
+  if (m) {
+    const q = (parseFloat(m[1]) || 1) * (parseFloat(m[2]) || 1);
+    return { pack_qty: String(Math.round(q * 1000) / 1000), pack_unit: m[3].trim() };
+  }
+  // "N/M unit" fraction notation → the second number is the pack size (e.g. "1/5 kg" → 5 kg)
+  m = s.match(new RegExp(`^([\\d.]+)\\s*/\\s*([\\d.]+)\\s*(${unitPat})\\b`, 'i'));
+  if (m) return { pack_qty: m[2], pack_unit: m[3].trim() };
+  // Simple "N unit" / "N word" (unchanged)
+  m = s.match(/^([\d.,]+)\s*(.*)$/);
   if (m) return { pack_qty: m[1], pack_unit: m[2].trim() };
   return { pack_qty: '', pack_unit: s };
 }
@@ -840,6 +856,61 @@ async function handleAddPageFile(e) {
   }
 }
 
+// Paint the rows that failed the confirm-time validation: tint the row and
+// red-outline the specific empty fields, then scroll the first one into view.
+// Highlights clear naturally on the next render, or when the field is edited.
+function highlightInvalidLines(problems) {
+  const tbody = document.getElementById('linesBody');
+  if (!tbody) return;
+  tbody.querySelectorAll('tr').forEach(r => {
+    r.style.background = '';
+    r.querySelectorAll('.line-input').forEach(el => { el.style.borderColor = ''; el.style.background = ''; });
+  });
+  problems.forEach(({ i, missing }) => {
+    const row = tbody.querySelector(`tr[data-idx="${i}"]`);
+    if (!row) return;
+    row.style.background = '#fff1f2';
+    const mark = sel => { const el = row.querySelector(sel); if (el) { el.style.borderColor = '#ef4444'; el.style.background = '#fff5f5'; } };
+    if (missing.includes('unit of measure')) mark('.line-unit-sel');
+    if (missing.includes('pack quantity'))   mark('[data-f="pack_qty"]');
+    if (missing.includes('order quantity'))  mark('[data-f="qty"]');
+    if (missing.includes('price'))           mark('[data-f="price"]');
+  });
+  const firstRow = tbody.querySelector(`tr[data-idx="${problems[0].i}"]`);
+  if (firstRow) firstRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// Lines missing required data for a costed purchase. A blank unit is the
+// critical one (it becomes "each" on the backend and corrupts cost_per_unit),
+// but qty/price matter too. Blank rows (no product name) are ignored — they get
+// dropped on save. Used by BOTH save paths so neither can persist a bad line.
+function collectLineProblems() {
+  const problems = [];
+  currentLines.forEach((l, i) => {
+    if (!(l.product_name || '').trim()) return;
+    const missing = [];
+    if (!(l.pack_unit || '').trim())   missing.push('unit of measure');
+    if (!(parseFloat(l.pack_qty) > 0)) missing.push('pack quantity');
+    if (!(parseFloat(l.qty)      > 0)) missing.push('order quantity');
+    if (!(parseFloat(l.price)    > 0)) missing.push('price');
+    if (missing.length) problems.push({ i, name: (l.product_name || '').trim(), missing });
+  });
+  return problems;
+}
+
+// Block a save when lines are incomplete: highlight the rows and explain what's
+// missing. Returns true if it blocked (caller should re-enable its button + bail).
+function blockOnInvalidLines(problems) {
+  if (!problems.length) return false;
+  highlightInvalidLines(problems);
+  const first = problems[0];
+  const more  = problems.length > 1
+    ? ` (+${problems.length - 1} more row${problems.length > 2 ? 's' : ''})`
+    : '';
+  showToast(`"${first.name}" is missing: ${first.missing.join(', ')}${more}. Fix the highlighted rows before saving.`, 'error');
+  return true;
+}
+
 function renderLinesTable() {
   const tbody = document.getElementById('linesBody');
   if (!currentLines.length) {
@@ -894,6 +965,20 @@ function renderLinesTable() {
     populateInvoiceUnitDropdown(sel, currentLines[idx].pack_unit || '');
   });
 
+  // Review mode (Action Required): pre-flag any named row whose unit didn't
+  // resolve to a known unit, so a missing unit is obvious on open — not only
+  // after clicking Confirm. sel.value is '' when nothing matched.
+  if (currentParsedData) {
+    tbody.querySelectorAll('.line-unit-sel').forEach(sel => {
+      const idx = parseInt(sel.dataset.idx);
+      if ((currentLines[idx].product_name || '').trim() && !sel.value) {
+        sel.style.borderColor = '#f59e0b';
+        sel.style.background  = '#fffbeb';
+        sel.title = 'Set a unit of measure';
+      }
+    });
+  }
+
   // Attach input/change listeners for live line-total + subtotal update
   tbody.querySelectorAll('.line-input').forEach(inp => {
     const eventType = inp.tagName === 'SELECT' ? 'change' : 'input';
@@ -906,6 +991,9 @@ function renderLinesTable() {
         return;
       }
       currentLines[idx][f] = e.target.value;
+      // Clear any validation/flag styling on the field now that it's been touched
+      e.target.style.borderColor = '';
+      e.target.style.background  = '';
       // Refresh line total cell (only price/qty affect it)
       const row   = tbody.querySelector(`tr[data-idx="${idx}"]`);
       const price = parseFloat(currentLines[idx].price) || 0;
@@ -1102,6 +1190,12 @@ async function saveInvDetail() {
   const status = document.getElementById('detailStatus').value;
   const notes  = document.getElementById('detailNotes').value.trim();
   const btn    = document.getElementById('saveInvDetailBtn');
+
+  // Same completeness guard as Confirm & Save — editing a posted invoice must
+  // not persist a line with a missing unit/qty/price either. Blocks before any
+  // write, highlights the offending rows.
+  if (blockOnInvalidLines(collectLineProblems())) return;
+
   btn.disabled = true;
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
 
@@ -1552,6 +1646,18 @@ async function confirmAndSaveInvoice() {
     btn.disabled = false;
     btn.innerHTML = '<i class="fas fa-check-circle"></i> Confirm & Save';
     showToast('Add at least one line item with a product name before confirming.', 'error');
+    return;
+  }
+
+  // Guard: every named line must be fully specified before we post it. A missing
+  // unit is silently coerced to "each" on the backend and corrupts cost_per_unit
+  // (and Price Movers / recipe costing / FIFO). Mirrored by the backend
+  // /api/bulk/upsert-products guard and by the Save Changes path (saveInvDetail).
+  const lineProblems = collectLineProblems();
+  if (lineProblems.length) {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-check-circle"></i> Confirm & Save';
+    blockOnInvalidLines(lineProblems);
     return;
   }
 

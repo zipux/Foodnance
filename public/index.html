@@ -41,6 +41,7 @@
             <span class="switch-track"><span class="switch-thumb"></span></span>
             <span class="switch-label">Archived</span>
           </label>
+<button class="btn btn-secondary" id="openGroupProductsModal" title="Combine products you buy interchangeably under one general name"><i class="fas fa-object-group"></i> Group</button>
 <button class="btn btn-primary" id="openAddProductModal"><i class="fas fa-plus"></i> Add Product</button>
         </div>
       </div>
@@ -218,7 +219,16 @@
             <div class="form-grid" style="grid-template-columns:1.2fr 1fr auto;align-items:end;gap:.5rem">
               <div class="form-group" style="margin:0">
                 <label>Name on the invoice</label>
-                <input type="text" id="aliasName" placeholder="e.g. Grape Tomatoes" />
+                <div style="position:relative">
+                  <input type="text" id="aliasName" placeholder="e.g. Grape Tomatoes" autocomplete="off"
+                         oninput="onAliasNameInput()" onfocus="onAliasNameInput()"
+                         onblur="setTimeout(hideAliasNameDropdown, 150)"
+                         style="width:100%;box-sizing:border-box" />
+                  <div id="aliasNameDropdown"
+                       style="display:none;position:absolute;top:100%;left:0;right:0;z-index:9999;
+                              background:#fff;border:1px solid #cbd5e1;border-radius:0 0 6px 6px;
+                              max-height:220px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.12)"></div>
+                </div>
               </div>
               <div class="form-group" style="margin:0">
                 <label>From vendor</label>
@@ -491,10 +501,45 @@
     </div>
   </div>
 
+  <!-- GROUP PRODUCTS MODAL -->
+  <div class="modal-overlay hidden" id="groupProductsModal">
+    <div class="modal" style="max-width:540px">
+      <div class="modal-header">
+        <h3><i class="fas fa-object-group"></i> Group Products</h3>
+        <button class="modal-close" onclick="closeModal('groupProductsModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:.82rem;color:var(--text-muted);margin-bottom:1rem;line-height:1.55">
+          Combine products you buy <strong>interchangeably</strong> (e.g. cherry &amp; grape tomatoes)
+          into one product under a general name. Every supplier's invoices stay listed underneath,
+          each with its own price. Different from <em>Merge</em>, which is only for fixing accidental duplicates.
+        </p>
+        <div class="form-group" style="margin-bottom:.9rem">
+          <label>General name <span style="color:#dc2626">*</span></label>
+          <input type="text" id="groupGeneralName" placeholder="e.g. Tomatoes" autocomplete="off"
+                 oninput="updateGroupState()" style="width:100%;box-sizing:border-box" />
+        </div>
+        <div class="form-group" style="margin-bottom:.3rem">
+          <label>Combine these products <span style="color:#dc2626">*</span></label>
+          <input type="text" id="groupProductSearch" placeholder="Type to filter…" autocomplete="off"
+                 oninput="renderGroupPicker()" style="width:100%;box-sizing:border-box;margin-bottom:.5rem" />
+          <div id="groupProductList" style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:6px"></div>
+        </div>
+        <div id="groupHint" style="font-size:.8rem;color:var(--text-muted);margin-top:.55rem;min-height:1.1rem"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('groupProductsModal')">Cancel</button>
+        <button class="btn btn-primary" id="confirmGroupBtn" disabled onclick="confirmGroup()">
+          <i class="fas fa-object-group"></i> Group
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script src="/static/utils.js?v=20260721-5"></script>
   <script src="/static/inventory.js?v=20260721-5"></script>
   <script src="/static/suppliers.js?v=20260714-1"></script>
-  <script src="/static/products.js?v=20260721-6"></script>
+  <script src="/static/products.js?v=20260723-3"></script>
 
   <!-- ── Inline invoice-file viewer modal (shared, lightweight) ── -->
   <div class="modal-overlay hidden" id="entryFileViewModal">

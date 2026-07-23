@@ -34,6 +34,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   document.getElementById('toggleArchivedInput').addEventListener('change', toggleArchivedView);
   document.getElementById('openAddProductModal').addEventListener('click', openAddProductModal);
+  document.getElementById('openGroupProductsModal').addEventListener('click', openGroupProductsModal);
 document.getElementById('saveProductBtn').addEventListener('click', saveGenericProduct);
   document.getElementById('closeModal').addEventListener('click', () => { _restoreEntrySnapshots(); closeModal('productModal'); });
   document.getElementById('cancelModal').addEventListener('click', () => { _restoreEntrySnapshots(); closeModal('productModal'); });
@@ -802,6 +803,7 @@ async function addAlias() {
     });
     nameEl.value = '';
     document.getElementById('aliasSupplier').value = '';
+    hideAliasNameDropdown();
     await renderAliases(genericId);
     showToast('Vendor name added.', 'success');
   } catch (e) {
@@ -823,6 +825,116 @@ async function deleteAlias(id) {
 }
 
 window.deleteAlias = deleteAlias;
+
+// ── Vendor-name autocomplete ───────────────────────────────────
+// The "Name on the invoice" field suggests wordings that have ACTUALLY appeared
+// on invoices (product_entries.vendor_item_name, already loaded in allEntries),
+// so the alias matches the real string. An alias only fires on an exact
+// (lower/trim) match, so a hand-typed typo would silently never link — picking a
+// real wording guarantees it works. Free-typing is still allowed for a wording
+// that hasn't been received yet.
+let _aliasSuggestions = [];
+
+// Build the ranked suggestion list for the current query, honouring the scope
+// filters: exclude the product's own name and names already added as aliases;
+// when a specific vendor is chosen, only that vendor's wordings; wordings that
+// already land on ANOTHER product (the substitute candidates) rank first.
+function _buildAliasSuggestions(query) {
+  const q          = (query || '').trim().toLowerCase();
+  const currentId  = document.getElementById('editProductId').value;
+  const ownName    = (document.getElementById('pName').value || '').trim().toLowerCase();
+  const supplierId = document.getElementById('aliasSupplier').value || '';
+  const already    = new Set(_aliasesForProduct.map(a => (a.alias_name || '').trim().toLowerCase()));
+
+  // Distinct wordings from purchase history, keyed case-insensitively.
+  const byWording = new Map();
+  for (const e of allEntries) {
+    const w = (e.vendor_item_name || '').trim();
+    if (!w) continue;
+    if (supplierId && e.supplier_id !== supplierId) continue;
+    const key = w.toLowerCase();
+    if (key === ownName) continue;   // same as this product's own name — redundant
+    if (already.has(key)) continue;  // already added here
+    let rec = byWording.get(key);
+    if (!rec) {
+      rec = { name: w, productIds: new Set(), productName: '', suppliers: new Set() };
+      byWording.set(key, rec);
+    }
+    if (e.generic_product_id) {
+      rec.productIds.add(e.generic_product_id);
+      // Prefer a name from an entry NOT on the current product (the substitute's
+      // own product name is the useful label here).
+      if (!rec.productName || e.generic_product_id !== currentId) {
+        rec.productName = e.generic_product_name || rec.productName;
+      }
+    }
+    if (e.supplier_name) rec.suppliers.add(e.supplier_name);
+  }
+
+  let list = Array.from(byWording.values())
+    // Drop wordings that ONLY ever land on THIS product — they already route
+    // here, so aliasing them adds nothing. Keep unmatched ones (empty set) and
+    // anything that touches another product.
+    .filter(r => !(r.productIds.size > 0 && [...r.productIds].every(id => id === currentId)));
+
+  if (q) list = list.filter(r => r.name.toLowerCase().includes(q));
+
+  // Substitute candidates (currently on a different product) first, then A–Z.
+  list.sort((a, b) => {
+    const aCand = [...a.productIds].some(id => id !== currentId) ? 0 : 1;
+    const bCand = [...b.productIds].some(id => id !== currentId) ? 0 : 1;
+    if (aCand !== bCand) return aCand - bCand;
+    return a.name.localeCompare(b.name);
+  });
+
+  return list.slice(0, 10).map(r => {
+    const productName = r.productName
+      || (r.productIds.size ? (allGeneric.find(g => r.productIds.has(g.id))?.name || '') : '');
+    const supArr = [...r.suppliers];
+    const sup = supArr.length === 0 ? '' : supArr.length === 1 ? supArr[0] : `${supArr.length} vendors`;
+    let context;
+    if (productName) context = `currently: ${productName}${sup ? ' · ' + sup : ''}`;
+    else if (sup)    context = `seen from ${sup}`;
+    else             context = 'not yet linked';
+    return { name: r.name, context };
+  });
+}
+
+function onAliasNameInput() {
+  const dd = document.getElementById('aliasNameDropdown');
+  if (!dd) return;
+  // Wait for a couple of characters before suggesting — otherwise focusing the
+  // field would dump every invoice wording in alphabetical order, which is noise.
+  const typed = (document.getElementById('aliasName').value || '').trim();
+  if (typed.length < 2) { dd.style.display = 'none'; return; }
+  _aliasSuggestions = _buildAliasSuggestions(typed);
+  if (!_aliasSuggestions.length) { dd.style.display = 'none'; return; }
+  dd.innerHTML = _aliasSuggestions.map((s, i) => `
+    <div class="merge-dd-item" onmousedown="selectAliasName(${i})"
+         style="padding:.5rem 1rem;cursor:pointer;font-size:.9rem;border-bottom:1px solid #f1f5f9"
+         onmouseover="this.style.background='#f0f9ff'" onmouseout="this.style.background=''">
+      <div style="font-weight:600">${esc(s.name)}</div>
+      <div style="color:var(--text-muted);font-size:.76rem;margin-top:.1rem">${esc(s.context)}</div>
+    </div>`).join('');
+  dd.style.display = 'block';
+}
+
+// mousedown (not click) so the pick registers before the input's blur fires.
+function selectAliasName(i) {
+  const s = _aliasSuggestions[i];
+  if (!s) return;
+  document.getElementById('aliasName').value = s.name;
+  hideAliasNameDropdown();
+}
+
+function hideAliasNameDropdown() {
+  const dd = document.getElementById('aliasNameDropdown');
+  if (dd) dd.style.display = 'none';
+}
+
+window.onAliasNameInput      = onAliasNameInput;
+window.selectAliasName       = selectAliasName;
+window.hideAliasNameDropdown = hideAliasNameDropdown;
 
 function openAddEntryForm() {
   document.getElementById('editEntryId').value    = '';
@@ -1715,10 +1827,24 @@ async function confirmMerge() {
     const local = allGeneric.find(g => g.id === sourceId);
     if (local) local.deleted_at = new Date().toISOString();
 
+    // Re-point the merged product's purchases onto the survivor in the local
+    // cache too — the backend already moved them, but without this the survivor
+    // wouldn't show the new supplier(s) until a full page reload.
+    allEntries.forEach(e => {
+      if (e.generic_product_id === sourceId) {
+        e.generic_product_id   = _mergeSurvivingId;
+        e.generic_product_name = _mergeSurvivingName;
+      }
+    });
+
     showToast(`"${sourceName}" merged into "${_mergeSurvivingName}"`, 'success');
     closeMergeModal();
     renderStats();
     renderProductTable();
+    // If the survivor's detail modal happens to be open, refresh its entries too.
+    if (typeof currentGenericId !== 'undefined' && currentGenericId === _mergeSurvivingId) {
+      renderEntriesTable(_mergeSurvivingId);
+    }
 
     // Offer to save as alias
     _showAliasPrompt(sourceName, _mergeSurvivingId, _mergeSurvivingName);
@@ -1753,3 +1879,111 @@ window.closeMergeModal    = closeMergeModal;
 window.onMergeSearchInput = onMergeSearchInput;
 window.selectMergeSurviving = selectMergeSurviving;
 window.confirmMerge       = confirmMerge;
+
+// ── Group products (interchangeable items) ─────────────────────
+// A distinct tool from Merge: pick 2+ active products you buy interchangeably and
+// combine them under one general name, keeping every supplier's invoices as its
+// own row. Backend POST /api/products/group does the work (rename survivor +
+// merge the rest + remember absorbed names as vendor aliases).
+let _groupSelected = new Set();
+
+function openGroupProductsModal() {
+  _groupSelected = new Set();
+  document.getElementById('groupGeneralName').value   = '';
+  document.getElementById('groupProductSearch').value = '';
+  renderGroupPicker();
+  updateGroupState();
+  openModal('groupProductsModal');
+}
+
+// One checkbox row per active product, filtered by the search box. Selection is
+// kept in _groupSelected so it survives filtering (a checked item scrolled out of
+// the filter still counts).
+function renderGroupPicker() {
+  const list = document.getElementById('groupProductList');
+  const q    = (document.getElementById('groupProductSearch').value || '').trim().toLowerCase();
+  const rows = allGeneric
+    .filter(g => !g.deleted_at)
+    .filter(g => !q || (g.name || '').toLowerCase().includes(q))
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  if (!rows.length) {
+    list.innerHTML = `<div style="padding:.75rem 1rem;color:var(--text-muted);font-size:.85rem">No products found.</div>`;
+    return;
+  }
+
+  list.innerHTML = rows.map(g => {
+    const entries  = allEntries.filter(e => e.generic_product_id === g.id);
+    const vendors  = [...new Set(entries.map(e => e.supplier_name).filter(Boolean))];
+    const sub      = vendors.length === 0 ? 'no purchases'
+                   : vendors.length === 1 ? vendors[0]
+                   : `${vendors.length} vendors`;
+    const checked  = _groupSelected.has(g.id) ? 'checked' : '';
+    return `
+      <label style="display:flex;align-items:center;gap:.6rem;padding:.5rem .75rem;border-bottom:1px solid #f1f5f9;cursor:pointer">
+        <input type="checkbox" ${checked} onchange="toggleGroupProduct('${esc(g.id)}', this.checked)" style="width:16px;height:16px">
+        <span style="font-weight:600;font-size:.9rem">${esc(g.name)}</span>
+        <span style="color:var(--text-muted);font-size:.78rem;margin-left:auto">${esc(sub)}</span>
+      </label>`;
+  }).join('');
+}
+
+function toggleGroupProduct(id, checked) {
+  if (checked) _groupSelected.add(id); else _groupSelected.delete(id);
+  updateGroupState();
+}
+
+// Enable Group only with a name and 2+ products; echo what will happen.
+function updateGroupState() {
+  const name = (document.getElementById('groupGeneralName').value || '').trim();
+  const btn  = document.getElementById('confirmGroupBtn');
+  const hint = document.getElementById('groupHint');
+  const n    = _groupSelected.size;
+  btn.disabled = !(name && n >= 2);
+  hint.textContent = n === 0 ? ''
+    : n < 2 ? 'Select at least two products to group.'
+    : `${n} products selected${name ? ` → will become one product called "${name}"` : ''}.`;
+}
+
+async function confirmGroup() {
+  const name = (document.getElementById('groupGeneralName').value || '').trim();
+  const ids  = [..._groupSelected];
+  if (!name || ids.length < 2) return;
+
+  const btn = document.getElementById('confirmGroupBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Grouping…';
+
+  try {
+    const res = await apiPost('products/group', { general_name: name, product_ids: ids });
+    const survivorId = res.survivor_id;
+
+    // Update local caches so the change shows without a reload: rename the
+    // survivor, mark the others archived, and re-point their purchases.
+    allGeneric.forEach(g => {
+      if (g.id === survivorId) g.name = res.survivor_name;
+      else if (ids.includes(g.id)) g.deleted_at = new Date().toISOString();
+    });
+    allEntries.forEach(e => {
+      if (ids.includes(e.generic_product_id) && e.generic_product_id !== survivorId) {
+        e.generic_product_id   = survivorId;
+        e.generic_product_name = res.survivor_name;
+      }
+    });
+
+    showToast(`Grouped ${ids.length} products into "${res.survivor_name}"`, 'success');
+    closeModal('groupProductsModal');
+    renderStats();
+    renderProductTable();
+  } catch (e) {
+    showToast('Group failed: ' + e.message, 'error');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-object-group"></i> Group';
+  }
+}
+
+window.openGroupProductsModal = openGroupProductsModal;
+window.renderGroupPicker      = renderGroupPicker;
+window.toggleGroupProduct     = toggleGroupProduct;
+window.updateGroupState       = updateGroupState;
+window.confirmGroup           = confirmGroup;
