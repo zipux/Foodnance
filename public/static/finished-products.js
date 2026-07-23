@@ -80,6 +80,7 @@ async function loadFpCatalogues() {
           deleted_at: g.deleted_at || null,   // archived items stay resolvable but are hidden from the picker
           pack_size: '', cost: 0,
           sub_unit_name: g.sub_unit_name || '', sub_unit_qty: g.sub_unit_qty || 0,
+          avg_weight_per_unit: g.avg_weight_per_unit ?? null, pack_qty: 1,
           _cpu: 0, _packUnit: 'unit',
         };
       }
@@ -110,6 +111,8 @@ async function loadFpCatalogues() {
         cost:          activeEntry.cost || 0,
         sub_unit_name: g.sub_unit_name || '',
         sub_unit_qty:  g.sub_unit_qty  || 0,
+        avg_weight_per_unit: g.avg_weight_per_unit ?? null,
+        pack_qty:      pQty,
         _cpu:          cpu,
         _packUnit:     pUnit,
       };
@@ -180,21 +183,56 @@ function fp_costPerUnit(p) {
   const qty = fp_packQty(p);
   return qty > 0 ? (p.cost || 0) / qty : (p.cost || 0);
 }
-function fp_conversionFactor(packUnitStr, recipeUnitStr) {
-  const pu = (packUnitStr  || '').toLowerCase();
-  const ru = (recipeUnitStr || '').toLowerCase();
+const _FP_WEIGHT_KG = { kg: 1, g: 0.001, lb: 0.453592 };
+function _fpIsEach(u) { return u === 'each' || u === 'ea' || u === 'unit'; }
+
+// Dimension of a unit for compatibility checks: 'weight' | 'volume' | 'each' | 'other'.
+function _fpUnitDim(u) {
+  const x = (u || '').toLowerCase().trim();
+  if (_FP_WEIGHT_KG[x] != null) return 'weight';
+  if (x === 'l' || x === 'ml') return 'volume';
+  if (_fpIsEach(x)) return 'each';
+  return 'other';   // case, sub-unit, or anything unrecognised
+}
+
+// Can `fromU` be expressed in `toU` at all? Same dimension converts; weight↔each
+// bridges via a product's average weight — allowed only when `allowEachWeight`
+// (product lines), never for recipe lines (a recipe has no average weight). The
+// bridge is still flagged uncostable if the weight is missing (see the converter),
+// not blocked here. Volume never crosses; 'other'/'case' only matches itself.
+function _fpUnitsCompatible(fromU, toU, allowEachWeight) {
+  const a = _fpUnitDim(fromU), b = _fpUnitDim(toU);
+  if (a === 'other' || b === 'other') {
+    return (fromU || '').toLowerCase().trim() === (toU || '').toLowerCase().trim();
+  }
+  if (a === b) return true;
+  if ((a === 'weight' && b === 'each') || (a === 'each' && b === 'weight')) return !!allowEachWeight;
+  return false;
+}
+
+// Conversion factor from `fromU` to `toU`, or null when the two units can't be
+// bridged (e.g. a recipe yielding L used by kg, each↔volume, or each↔weight with
+// no average weight). Never a silent factor of 1 — callers treat null as "can't
+// cost this line" and flag it instead of multiplying by a wrong number.
+function fp_conversionFactor(fromU, toU, avgWeightKg) {
+  const pu = (fromU || '').toLowerCase().trim();
+  const ru = (toU   || '').toLowerCase().trim();
   if (pu === ru) return 1;
-  // Weight
-  if (pu === 'kg'  && ru === 'g')   return 0.001;
-  if (pu === 'g'   && ru === 'kg')  return 1000;
-  if (pu === 'kg'  && ru === 'lb')  return 0.453592;
-  if (pu === 'lb'  && ru === 'kg')  return 2.20462;
-  if (pu === 'g'   && ru === 'lb')  return 453.592;
-  if (pu === 'lb'  && ru === 'g')   return 0.00220462;
-  // Volume
-  if (pu === 'l'   && ru === 'ml')  return 0.001;
-  if (pu === 'ml'  && ru === 'l')   return 1000;
-  return 1;
+  // Weight ↔ weight
+  if (_FP_WEIGHT_KG[pu] != null && _FP_WEIGHT_KG[ru] != null) return _FP_WEIGHT_KG[ru] / _FP_WEIGHT_KG[pu];
+  // Volume ↔ volume
+  if (pu === 'l'  && ru === 'ml') return 0.001;
+  if (pu === 'ml' && ru === 'l')  return 1000;
+  // Each ↔ weight, via the product's average weight per each (product lines only)
+  if (_fpIsEach(pu) && _FP_WEIGHT_KG[ru] != null) {
+    if (!avgWeightKg || avgWeightKg <= 0) return null;
+    return _FP_WEIGHT_KG[ru] / avgWeightKg;
+  }
+  if (_FP_WEIGHT_KG[pu] != null && _fpIsEach(ru)) {
+    if (!avgWeightKg || avgWeightKg <= 0) return null;
+    return avgWeightKg / _FP_WEIGHT_KG[pu];
+  }
+  return null;   // no bridge between these units
 }
 
 // ── Recipe Lines ───────────────────────────────────────────────
@@ -284,6 +322,10 @@ function _updateFpRecipeCostDisplay(idx) {
   if (!r || !r.ref_id) { el.textContent = ''; return; }
   const unit   = r.unit || r.yield_unit || 'kg';
   const factor = fp_conversionFactor(r.yield_unit || 'kg', unit);
+  if (factor === null) {
+    el.innerHTML = `<span style="color:#dc2626" title="Can't convert ${esc(r.yield_unit || 'kg')} to ${esc(unit)}"><i class="fas fa-triangle-exclamation"></i> can't convert</span>`;
+    return;
+  }
   el.textContent = `${fmt((r.cost_per_yield_unit || 0) * factor)} / ${unit}`;
 }
 
@@ -301,19 +343,32 @@ function onFpRecipeUnitChange(idx) {
     openManageUnitsModal();
     return;
   }
-  fpRecipeRows[idx].unit        = sel?.value || 'kg';
+  const newUnit  = sel?.value || 'kg';
+  const prevUnit = sel?.dataset.prevUnit || fpRecipeRows[idx]?.unit || '';
+  const yieldU   = fpRecipeRows[idx]?.yield_unit || 'kg';
+  // A recipe carries no average weight, so it can only be measured in its yield
+  // dimension. Block a switch the converter can't perform (e.g. a Puree recipe
+  // that yields L can't be used by kg).
+  if (newUnit !== prevUnit && !_fpUnitsCompatible(yieldU, newUnit, false)) {
+    if (sel) sel.value = prevUnit;
+    showToast(`Cannot convert ${yieldU} to ${newUnit} — unit reset.`, 'warning');
+    return;
+  }
+  fpRecipeRows[idx].unit        = newUnit;
   fpRecipeRows[idx]._manualUnit = true; // user explicitly chose — lock it
   fpRecipeRows[idx].line_cost   = calcFpRecipeLineCost(idx);
-  if (sel) sel.dataset.prevUnit = sel.value;
+  if (sel) sel.dataset.prevUnit = newUnit;
   _updateFpRecipeCostDisplay(idx);
   recalcFpCosts();
 }
 
-// Cost = cost_per_yield_unit × quantity × conversion(yieldUnit → chosenUnit)
+// Cost = cost_per_yield_unit × quantity × conversion(yieldUnit → chosenUnit).
+// Returns null when the units can't be bridged (uncostable — excluded from total).
 function calcFpRecipeLineCost(idx) {
   const r      = fpRecipeRows[idx];
   if (!r || !r.ref_id) return 0;
   const factor = fp_conversionFactor(r.yield_unit || 'kg', r.unit || 'kg');
+  if (factor === null) return null;
   return (r.cost_per_yield_unit || 0) * (r.quantity || 0) * factor;
 }
 
@@ -417,6 +472,12 @@ function onFpProductChange(idx) {
   fpProductRows[idx].ref_name  = opt?.dataset?.name || opt?.text?.trim() || '';
   fpProductRows[idx].unit_cost = parseFloat(opt?.dataset?.cost || 0);
   fpProductRows[idx].pack_unit = pu;
+  // Extra facts needed for costing (mirrors the Recipes page): the sub-unit
+  // breakdown, the pack size, and the average weight that bridges each↔weight.
+  fpProductRows[idx].sub_unit_name = subUnitName;
+  fpProductRows[idx].sub_unit_qty  = product?.sub_unit_qty || 0;
+  fpProductRows[idx].pack_qty      = product?.pack_qty || 1;
+  fpProductRows[idx].avg_weight    = product?.avg_weight_per_unit != null ? parseFloat(product.avg_weight_per_unit) : null;
 
   // Auto-set unit: sub-unit first, then pack unit — unless user manually locked it
   if (!fpProductRows[idx]._manualUnit) {
@@ -441,9 +502,44 @@ function _updateFpProductCostDisplay(idx) {
   if (!el) return;
   const r = fpProductRows[idx];
   if (!r || !r.ref_id) { el.textContent = ''; return; }
-  const unit   = r.unit || r.pack_unit || 'kg';
-  const factor = fp_conversionFactor(r.pack_unit || 'kg', unit);
-  el.textContent = `${fmt((r.unit_cost || 0) * factor)} / ${unit}`;
+  const unit    = r.unit || r.pack_unit || 'kg';
+  const subName = (r.sub_unit_name || '');
+  const subQty  = parseFloat(r.sub_unit_qty || 0);
+  let rate;
+  // Sub-unit path (e.g. priced per pack, used by 'can'): cost per sub-unit.
+  if (subName && subQty > 0 && unit.toLowerCase() === subName.toLowerCase()) {
+    const pQty = parseFloat(r.pack_qty || 0) || 1;
+    rate = (r.unit_cost || 0) * pQty / subQty;
+  } else {
+    const factor = fp_conversionFactor(r.pack_unit || 'kg', unit, r.avg_weight);
+    rate = factor === null ? null : (r.unit_cost || 0) * factor;
+  }
+  if (rate === null) {
+    const eachWt = (_fpUnitDim(r.pack_unit) === 'each' && _fpUnitDim(unit) === 'weight') ||
+                   (_fpUnitDim(r.pack_unit) === 'weight' && _fpUnitDim(unit) === 'each');
+    const label  = eachWt ? 'set avg. weight' : "can't convert";
+    const tip    = eachWt ? `Set an Average Weight on this product to use it by ${esc(unit)}` : `Can't convert ${esc(r.pack_unit || 'kg')} to ${esc(unit)}`;
+    el.innerHTML = `<span style="color:#dc2626" title="${tip}"><i class="fas fa-triangle-exclamation"></i> ${label}</span>`;
+    return;
+  }
+  el.textContent = `${fmt(rate)} / ${unit}`;
+}
+
+// Dollar cost of one product line: sub-unit path first, else avg-weight-aware
+// unit conversion. Returns null when the units can't be bridged (uncostable).
+function calcFpProductLineCost(r) {
+  if (!r || !r.ref_id) return 0;
+  const unit    = (r.unit || r.pack_unit || 'kg');
+  const subName = (r.sub_unit_name || '');
+  const subQty  = parseFloat(r.sub_unit_qty || 0);
+  const qty     = (r.quantity || 0);
+  if (subName && subQty > 0 && unit.toLowerCase() === subName.toLowerCase()) {
+    const pQty = parseFloat(r.pack_qty || 0) || 1;
+    return (r.unit_cost || 0) * pQty / subQty * qty;
+  }
+  const factor = fp_conversionFactor(r.pack_unit || 'kg', unit, r.avg_weight);
+  if (factor === null) return null;
+  return (r.unit_cost || 0) * factor * qty;
 }
 
 function onFpProductQtyChange(idx) {
@@ -459,9 +555,22 @@ function onFpProductUnitChange(idx) {
     openManageUnitsModal();
     return;
   }
-  fpProductRows[idx].unit        = sel?.value || 'kg';
+  const newUnit  = sel?.value || 'kg';
+  const prevUnit = sel?.dataset.prevUnit || fpProductRows[idx]?.unit || '';
+  const packU    = fpProductRows[idx]?.pack_unit || 'kg';
+  const subName  = (fpProductRows[idx]?.sub_unit_name || '').toLowerCase().trim();
+  const isSub    = subName && newUnit.toLowerCase().trim() === subName;
+  // Product lines bridge each↔weight via the product's average weight (flagged
+  // uncostable if it's missing, not blocked); the product's own sub-unit is
+  // costed directly. Block only genuinely incompatible switches (e.g. kg↔L).
+  if (newUnit !== prevUnit && !isSub && !_fpUnitsCompatible(packU, newUnit, true)) {
+    if (sel) sel.value = prevUnit;
+    showToast(`Cannot convert ${packU} to ${newUnit} — unit reset.`, 'warning');
+    return;
+  }
+  fpProductRows[idx].unit        = newUnit;
   fpProductRows[idx]._manualUnit = true; // user explicitly chose — lock it
-  if (sel) sel.dataset.prevUnit = sel.value;
+  if (sel) sel.dataset.prevUnit = newUnit;
   _updateFpProductCostDisplay(idx);
   recalcFpCosts();
 }
@@ -475,23 +584,28 @@ function removeFpProductLine(idx) {
 // ── Cost Recalc ────────────────────────────────────────────────
 function recalcFpCosts() {
   let total = 0;
+  let anyUncostable = false;   // a line whose units can't be bridged (⚠ on the total)
 
   // Sum recipe costs (quantity × cost_per_yield_unit × unit conversion)
   fpRecipeRows.filter(r => r && r.ref_id).forEach(r => {
-    total += r.line_cost || 0;
+    const factor = fp_conversionFactor(r.yield_unit || 'kg', r.unit || 'kg');
+    if (factor === null) { anyUncostable = true; return; }
+    total += (r.cost_per_yield_unit || 0) * (r.quantity || 0) * factor;
   });
 
-  // Sum product costs (with unit conversion)
+  // Sum product costs (sub-unit / avg-weight aware)
   fpProductRows.filter(r => r && r.ref_id).forEach(r => {
-    const factor = fp_conversionFactor(r.pack_unit || 'kg', r.unit || 'kg');
-    total += (r.unit_cost || 0) * (r.quantity || 1) * factor;
+    const c = calcFpProductLineCost(r);
+    if (c === null) { anyUncostable = true; return; }
+    total += c;
   });
 
+  window._fpAnyUncostable = anyUncostable;   // read by the total-cost display below
   const selling = parseFloat(document.getElementById('fpSellingPrice').value) || 0;
   const profit  = selling - total;
   const margin  = selling > 0 ? (profit / selling) * 100 : null;
 
-  document.getElementById('fpTotalCostDisplay').textContent = fmt(total);
+  document.getElementById('fpTotalCostDisplay').textContent = fmt(total) + (window._fpAnyUncostable ? ' ⚠' : '');
 
   const profitEl  = document.getElementById('fpProfitDisplay');
   const marginEl  = document.getElementById('fpMarginDisplay');
@@ -581,9 +695,8 @@ async function saveFp() {
       });
     }
 
-    // Save product items
+    // Save product items (sub-unit / avg-weight aware; uncostable → 0)
     for (const r of activeProducts) {
-      const factor = fp_conversionFactor(r.pack_unit || 'kg', r.unit || 'kg');
       await apiPost(`tables/${FP_ITEMS_TABLE}`, {
         finished_product_id: fpId,
         item_type:  'product',
@@ -591,7 +704,7 @@ async function saveFp() {
         ref_name:   r.ref_name,
         quantity:   r.quantity,
         unit:       r.unit,
-        line_cost:  (r.unit_cost || 0) * (r.quantity || 1) * factor,
+        line_cost:  calcFpProductLineCost(r) || 0,
       });
     }
 
@@ -919,7 +1032,7 @@ function updatePrPreview() {
       // different unit than the recipe's yield_unit (e.g. produced in 'g' vs yield 'kg').
       const invRow  = allInventory_fp.find(r => r.item_id === it.ref_id && r.item_type === 'batch');
       const invUnit = invRow?.unit || allRecipes_fp.find(r => r.id === it.ref_id)?.yield_unit || 'kg';
-      const factor  = fp_conversionFactor(invUnit, it.unit || invUnit);
+      const factor  = fp_conversionFactor(invUnit, it.unit || invUnit) ?? 1;   // keep prior behaviour for incompatible units
       deductQty     = lineQty * factor;
       displayUnit   = invUnit;
     } else {
@@ -927,7 +1040,8 @@ function updatePrPreview() {
       const invRow  = allInventory_fp.find(r => r.item_id === it.ref_id && r.item_type === 'raw_material');
       const prod    = allProducts_fp.find(p => p.id === it.ref_id);
       const invUnit = invRow?.unit || (prod ? (prod._packUnit || fp_packUnit(prod)) : (it.unit || 'Each'));
-      const factor  = fp_conversionFactor(invUnit, it.unit || invUnit);
+      const avgW    = prod?.avg_weight_per_unit != null ? parseFloat(prod.avg_weight_per_unit) : null;
+      const factor  = fp_conversionFactor(invUnit, it.unit || invUnit, avgW) ?? 1;   // avg-weight aware; prior behaviour for incompatible units
       deductQty     = lineQty * factor;
       displayUnit   = invUnit;
     }
@@ -970,7 +1084,7 @@ async function confirmPackRun() {
         const recipe    = allRecipes_fp.find(r => r.id === it.ref_id);
         const invUnit   = invRow?.unit || recipe?.yield_unit || 'kg';
         const lineUnit  = it.unit || invUnit;
-        const factor    = fp_conversionFactor(invUnit, lineUnit);
+        const factor    = fp_conversionFactor(invUnit, lineUnit) ?? 1;   // keep prior behaviour for incompatible units
         const deductQty = lineQty * factor;
 
         await window.invHelpers.upsertInventory({
@@ -988,7 +1102,8 @@ async function confirmPackRun() {
         const prod     = allProducts_fp.find(p => p.id === it.ref_id);
         const invUnit  = invRow?.unit || (prod ? (prod._packUnit || fp_packUnit(prod)) : (it.unit || 'Each'));
         const lineUnit = it.unit || invUnit;
-        const factor   = fp_conversionFactor(invUnit, lineUnit);
+        const avgW     = prod?.avg_weight_per_unit != null ? parseFloat(prod.avg_weight_per_unit) : null;
+        const factor   = fp_conversionFactor(invUnit, lineUnit, avgW) ?? 1;   // avg-weight aware; prior behaviour for incompatible units
         const deductQty = lineQty * factor;
 
         await window.invHelpers.upsertInventory({
