@@ -201,6 +201,29 @@
       margin-top: .85rem;
       flex-wrap: wrap;
     }
+
+    /* ── Touch devices (phone/tablet): drag-and-drop isn't possible, so drop the
+       drag prompt and let the two buttons be the whole upload control. ─────── */
+    @media (hover: none) and (pointer: coarse) {
+      .drop-zone .drop-icon,
+      .drop-zone .drop-title,
+      .drop-zone .drop-sub { display: none; }
+      .drop-zone {
+        padding: 1.25rem 1rem;
+        cursor: default;
+      }
+      .upload-actions { margin-top: 0; }
+    }
+
+    /* ── Narrow screens: stack the buttons full-width for easy tapping and slim
+       the hero so more of the page fits above the fold. ──────────────────── */
+    @media (max-width: 560px) {
+      .upload-actions { flex-direction: column; margin-top: 0; }
+      .upload-actions .btn { width: 100%; min-width: 0; }
+      .page-header h1 { font-size: 1.4rem; }
+      .page-header p { font-size: .88rem; }
+      .card-body { padding: 1rem; }
+    }
   </style>
 </head>
 <body>
@@ -210,7 +233,7 @@
       <i class="fas fa-receipt"></i> InvoiceDB
     </div>
     <div class="nav-links">
-      <a href="/home.html"><i class="fas fa-home"></i> Home</a>
+      <a href="/home.html"><i class="fas fa-chart-line"></i> Price Movers</a>
       <a href="/upload-invoice.html" class="active"><i class="fas fa-file-invoice"></i> Upload Invoice</a>
       <a href="/invoices.html"><i class="fas fa-list-alt"></i> Invoices</a>
       <a href="/pnl.html"><i class="fas fa-chart-pie"></i> P&amp;L</a>
@@ -229,21 +252,6 @@
       <h1><i class="fas fa-file-invoice"></i> Upload Invoice</h1>
       <p>Upload an invoice (PDF or image) — it goes straight to your <strong>Action Required</strong> queue. Open it from the Invoices page to review and confirm. Multi-page invoices are supported — add all pages, reorder if needed, then submit.</p>
     </div>
-
-    <!-- AI STATUS SECTION -->
-    <section class="card" style="margin-bottom:1.25rem">
-      <div class="card-body" style="padding:1rem 1.25rem">
-        <div style="display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap">
-          <div style="display:flex;align-items:center;gap:.5rem">
-            <i class="fas fa-robot" style="color:var(--primary);font-size:1.1rem"></i>
-            <span style="font-weight:600">Claude Opus 4.8</span>
-          </div>
-          <div id="apiKeyStatus" style="font-size:.85rem;color:var(--text-muted)">
-            <i class="fas fa-spinner fa-spin"></i> Checking…
-          </div>
-        </div>
-      </div>
-    </section>
 
     <!-- UPLOAD SECTION -->
     <section class="card upload-card">

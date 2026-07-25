@@ -21,6 +21,17 @@ async function loadInvoiceUnits() {
   } catch (_) { invoiceUnits = []; }
 }
 
+// A unit only counts as set when it matches the units master list — the same
+// test the dropdown uses to select an option. A non-empty but UNRECOGNISED unit
+// ("case", "cs", "ct") renders as a blank dropdown yet used to satisfy the
+// blank-string check, so such lines closed with a meaningless cost_per_unit.
+// Add the unit via Manage Units if it's a real one.
+function isKnownUnit(unit) {
+  const u = (unit || '').trim().toLowerCase();
+  if (!u) return false;
+  return invoiceUnits.some(x => (x.name || '').trim().toLowerCase() === u);
+}
+
 function populateInvoiceUnitDropdown(select, selectedValue) {
   const seen = new Set();
   const opts = invoiceUnits
@@ -155,7 +166,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('addLineBtn').addEventListener('click',          addLineRow);
 
   // Live cost summary as user edits additional costs
-  ['detailTaxPst','detailTaxGst','detailDelivery','detailDeposit','detailCredit','detailOtherCost'].forEach(id => {
+  // detailTotalInput included so editing the stated total re-checks reconciliation live.
+  ['detailTaxPst','detailTaxGst','detailDelivery','detailDeposit','detailCredit','detailOtherCost','detailTotalInput'].forEach(id => {
     document.getElementById(id).addEventListener('input', renderCostSummary);
   });
 });
@@ -382,6 +394,11 @@ async function openInvDetail(id) {
   document.getElementById('detailNumberInput').value   = invNum;
   document.getElementById('detailDateInput').value     = invDate;
   document.getElementById('detailTotalInput').value    = total ? total.toFixed(2) : '';
+  // Clear any styling/override left over from a previously blocked close.
+  document.getElementById('detailTotalInput').style.borderColor = '';
+  document.getElementById('detailTotalInput').style.background  = '';
+  const mismatchNote = document.getElementById('totalMismatchNote');
+  if (mismatchNote) { mismatchNote.style.display = 'none'; mismatchNote.innerHTML = ''; }
 
   // Supplier de-dupe: match the parsed vendor against existing suppliers.
   // Only in review mode (the vendor field is editable there).
@@ -889,7 +906,7 @@ function collectLineProblems() {
   currentLines.forEach((l, i) => {
     if (!(l.product_name || '').trim()) return;
     const missing = [];
-    if (!(l.pack_unit || '').trim())   missing.push('unit of measure');
+    if (!isKnownUnit(l.pack_unit))     missing.push('unit of measure');
     if (!(parseFloat(l.pack_qty) > 0)) missing.push('pack quantity');
     if (!(parseFloat(l.qty)      > 0)) missing.push('order quantity');
     if (!(parseFloat(l.price)    > 0)) missing.push('price');
@@ -910,6 +927,90 @@ function blockOnInvalidLines(problems) {
   showToast(`"${first.name}" is missing: ${first.missing.join(', ')}${more}. Fix the highlighted rows before saving.`, 'error');
   return true;
 }
+
+// ── Invoice total reconciliation ───────────────────────────────
+// Closing an invoice whose lines don't add up to the stated total silently
+// mis-states spend, P&L and per-unit costs. Both close paths must agree, so the
+// arithmetic lives here once: lines + extra costs − credit vs the typed total.
+const TOTAL_TOLERANCE = 0.02;   // cents of rounding slack
+
+function computeInvoiceTotals() {
+  const num = id => parseFloat(document.getElementById(id)?.value) || 0;
+  const subtotal = currentLines.reduce((s, l) => s + (parseFloat(l.price) || 0) * (parseFloat(l.qty) || 0), 0);
+  const computed = subtotal
+    + num('detailTaxPst') + num('detailTaxGst') + num('detailDelivery')
+    + num('detailDeposit') + num('detailOtherCost') - num('detailCredit');
+  const statedRaw = (document.getElementById('detailTotalInput')?.value || '').trim();
+  const stated    = parseFloat(statedRaw) || 0;
+  return {
+    subtotal,
+    computed: Math.round(computed * 100) / 100,
+    stated:   Math.round(stated * 100) / 100,
+    hasStated: statedRaw !== '' && stated > 0,
+    diff:     Math.round((stated - computed) * 100) / 100,
+  };
+}
+
+// Returns null when the totals reconcile (or the user ticked the override);
+// otherwise a reason describing what to fix. Used by BOTH close paths.
+function checkInvoiceTotal() {
+  const t = computeInvoiceTotals();
+  if (!t.hasStated) return { kind: 'missing', msg: 'Enter the invoice total before closing this invoice.' };
+  if (Math.abs(t.diff) <= TOTAL_TOLERANCE) return null;
+  if (document.getElementById('totalMismatchOverride')?.checked) return null;   // explicit override
+  const over = t.diff < 0;   // computed exceeds the stated total
+  return {
+    kind: 'mismatch',
+    msg: `Lines + costs come to $${t.computed.toFixed(2)} but the invoice total is $${t.stated.toFixed(2)} `
+       + `(${over ? 'over' : 'short'} by $${Math.abs(t.diff).toFixed(2)}). `
+       + `Fix a line, adjust the extra costs, or tick "Close anyway".`,
+  };
+}
+
+// Block a close when the totals don't reconcile. Returns true if it blocked.
+function blockOnTotalMismatch() {
+  const problem = checkInvoiceTotal();
+  if (!problem) return false;
+  const el = document.getElementById('detailTotalInput');
+  if (el) {
+    el.style.borderColor = '#ef4444';
+    el.style.background  = '#fff5f5';
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  renderTotalMismatchNote();
+  showToast(problem.msg, 'error');
+  return true;
+}
+
+// Live pre-flight note under the line items: shows the discrepancy as it changes
+// and carries the "Close anyway" override, so the block is never a surprise at
+// click time. The override resets whenever an invoice is opened.
+function renderTotalMismatchNote() {
+  const el = document.getElementById('totalMismatchNote');
+  if (!el) return;
+  const t = computeInvoiceTotals();
+  const off = t.hasStated && Math.abs(t.diff) > TOTAL_TOLERANCE;
+  if (!off) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  const over = t.diff < 0;
+  const checked = document.getElementById('totalMismatchOverride')?.checked ? 'checked' : '';
+  el.style.display = 'block';
+  el.innerHTML = `
+    <div style="display:flex;align-items:flex-start;gap:.5rem;flex-wrap:wrap">
+      <i class="fas fa-triangle-exclamation" style="margin-top:.15rem"></i>
+      <div style="flex:1;min-width:220px">
+        <strong>Totals don't match.</strong>
+        Lines + costs come to <strong>$${t.computed.toFixed(2)}</strong>,
+        but the invoice total is <strong>$${t.stated.toFixed(2)}</strong>
+        — ${over ? 'over' : 'short'} by <strong>$${Math.abs(t.diff).toFixed(2)}</strong>.
+        <label style="display:flex;align-items:center;gap:.4rem;margin-top:.4rem;font-weight:600;cursor:pointer">
+          <input type="checkbox" id="totalMismatchOverride" ${checked}
+                 onchange="renderTotalMismatchNote()" />
+          Close anyway — I've checked this invoice
+        </label>
+      </div>
+    </div>`;
+}
+window.renderTotalMismatchNote = renderTotalMismatchNote;
 
 function renderLinesTable() {
   const tbody = document.getElementById('linesBody');
@@ -1183,6 +1284,9 @@ function renderCostSummary({ autoFill = false } = {}) {
   </span>`);
   el.style.display = 'flex';
   el.innerHTML = parts.join('');
+
+  // Keep the blocking totals warning in step with every edit.
+  renderTotalMismatchNote();
 }
 
 async function saveInvDetail() {
@@ -1195,6 +1299,9 @@ async function saveInvDetail() {
   // not persist a line with a missing unit/qty/price either. Blocks before any
   // write, highlights the offending rows.
   if (blockOnInvalidLines(collectLineProblems())) return;
+  // Totals must reconcile before an invoice is closed (Closed = counted in P&L).
+  // Editing a still-open invoice stays unblocked so work can be saved midway.
+  if (status === 'Closed' && blockOnTotalMismatch()) return;
 
   btn.disabled = true;
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
@@ -1209,10 +1316,12 @@ async function saveInvDetail() {
     const otherDesc = document.getElementById('detailOtherDesc').value.trim();
     const subtotal  = currentLines.reduce((s, l) => s + (parseFloat(l.price)||0) * (parseFloat(l.qty)||0), 0);
     const newTotal  = subtotal + taxPst + taxGst + delivery + deposit + otherCost - credit;
-    // Keep the higher of: recomputed total vs stored DB total (never silently lower it)
-    const savedTotal = currentInvTotal > 0
-      ? Math.max(currentInvTotal, newTotal)
-      : newTotal;
+    // The typed invoice total is the source of truth — it's what the paper says,
+    // and the close guard above has already reconciled it against the lines (or
+    // the user knowingly overrode it). Falls back to the computed figure only
+    // when no total was entered (possible on a still-open invoice).
+    const typedTotal = parseFloat(document.getElementById('detailTotalInput').value) || 0;
+    const savedTotal = typedTotal > 0 ? typedTotal : newTotal;
 
     // 1. Patch status, notes, extra cost fields AND recalculated total on invoice
     await apiPatch(`tables/${INV_LIST_TABLE}/${id}`, {
@@ -1661,13 +1770,21 @@ async function confirmAndSaveInvoice() {
     return;
   }
 
+  // Guard: the stated invoice total must reconcile with lines + extra costs
+  // (or be explicitly overridden). Confirming posts this invoice to P&L, so a
+  // silent mismatch would mis-state spend and per-unit costs.
+  if (blockOnTotalMismatch()) {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-check-circle"></i> Confirm & Save';
+    return;
+  }
+
 
   const subtotal = validLines.reduce((s, l) => s + l.price * l.qty, 0);
   const computedTotal = subtotal + taxPst + taxGst + delivery + deposit + otherCost - credit;
-  // Never silently lower the total — keep the higher of stored vs recomputed
-  const finalTotal = totalInput > 0
-    ? Math.max(totalInput, computedTotal)
-    : computedTotal;
+  // The typed total is authoritative (the guard above proved it reconciles, or
+  // the user overrode it knowingly) — no silent max() reconciliation.
+  const finalTotal = totalInput > 0 ? totalInput : computedTotal;
 
   try {
     // 1. Update the invoice meta + extra costs + flip status to Closed,

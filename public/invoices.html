@@ -125,7 +125,7 @@
   <nav class="navbar">
     <div class="nav-brand"><i class="fas fa-receipt"></i> InvoiceDB</div>
     <div class="nav-links">
-      <a href="/home.html"><i class="fas fa-home"></i> Home</a>
+      <a href="/home.html"><i class="fas fa-chart-line"></i> Price Movers</a>
       <a href="/upload-invoice.html"><i class="fas fa-file-invoice"></i> Upload Invoice</a>
       <a href="/invoices.html" class="active"><i class="fas fa-list-alt"></i> Invoices</a>
       <a href="/pnl.html"><i class="fas fa-chart-pie"></i> P&amp;L</a>
@@ -347,6 +347,8 @@
             </table>
           </div>
           <div id="linesSubtotal" style="text-align:right;font-size:.85rem;color:var(--text-muted);margin-top:.35rem"></div>
+          <!-- Live totals-reconciliation warning + "Close anyway" override -->
+          <div id="totalMismatchNote" style="display:none;margin-top:.5rem;padding:.6rem .85rem;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:.83rem;color:#991b1b"></div>
         </div>
 
         <!-- ── Additional costs breakdown ── -->
@@ -510,6 +512,6 @@
 
   <script src="/static/utils.js?v=20260724-1"></script>
   <script src="/static/inventory.js?v=20260721-5"></script>
-  <script src="/static/invoices.js?v=20260726-1"></script>
+  <script src="/static/invoices.js?v=20260726-2"></script>
 </body>
 </html>
