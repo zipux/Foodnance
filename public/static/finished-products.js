@@ -247,24 +247,20 @@ function addFpRecipeLine(prefill = null) {
   div.className = 'fp-line';
   div.id = `fpr-${idx}`;
 
-  const opts = allRecipes_fp.map(r =>
-    `<option value="${esc(r.id)}"
-      data-cost="${r.total_cost || 0}"
-      data-yield="${r.servings || 1}"
-      data-yieldunit="${esc(r.yield_unit || 'kg')}"
-      data-name="${esc(r.name)}"
-      ${r.id === row.ref_id ? 'selected' : ''}>
-      ${esc(r.name)}
-    </option>`
-  ).join('');
+  // Type-to-search picker (mirrors the Recipes tab): a text input to filter by,
+  // a hidden field holding the chosen recipe id, and a suggestions dropdown.
+  const prefillName = row.ref_id
+    ? esc((allRecipes_fp.find(r => r.id === row.ref_id) || {}).name || row.ref_name || '')
+    : '';
 
   div.innerHTML = `
-    <div class="form-group">
+    <div class="form-group" style="position:relative">
       ${idx === 0 ? '<label>Recipe</label>' : '<label>&nbsp;</label>'}
-      <select id="fpr-sel-${idx}" onchange="onFpRecipeChange(${idx})">
-        <option value="">— Select recipe —</option>
-        ${opts}
-      </select>
+      <input type="text" id="fpr-input-${idx}" value="${prefillName}" placeholder="Search or pick a recipe…" autocomplete="off"
+             oninput="onFpPickerSearch('recipe', ${idx})" onfocus="onFpPickerFocus('recipe', ${idx})"
+             onkeydown="onFpPickerKeydown('recipe', ${idx}, event)" onblur="hideFpPickerSuggestions('recipe', ${idx})" />
+      <input type="hidden" id="fpr-sel-${idx}" value="${esc(row.ref_id || '')}" />
+      <div id="fpr-suggestions-${idx}" class="product-suggestions" onmousedown="event.preventDefault()"></div>
     </div>
     <div class="form-group">
       ${idx === 0 ? '<label>Qty</label>' : '<label>&nbsp;</label>'}
@@ -289,14 +285,15 @@ function addFpRecipeLine(prefill = null) {
 }
 
 function onFpRecipeChange(idx) {
-  const sel       = document.getElementById(`fpr-sel-${idx}`);
-  const opt       = sel.options[sel.selectedIndex];
-  const totalCost = parseFloat(opt?.dataset?.cost  || 0);
-  const yieldQty  = parseFloat(opt?.dataset?.yield || 1);
-  const yieldUnit = opt?.dataset?.yieldunit || 'kg';
+  const hidden    = document.getElementById(`fpr-sel-${idx}`);
+  const refId     = hidden ? hidden.value : '';
+  const r         = allRecipes_fp.find(x => x.id === refId) || null;
+  const totalCost = parseFloat(r?.total_cost || 0);
+  const yieldQty  = parseFloat(r?.servings   || 1);
+  const yieldUnit = r?.yield_unit || 'kg';
 
-  fpRecipeRows[idx].ref_id              = sel.value;
-  fpRecipeRows[idx].ref_name            = opt?.dataset?.name || opt?.text?.trim() || '';
+  fpRecipeRows[idx].ref_id              = refId;
+  fpRecipeRows[idx].ref_name            = r?.name || '';
   fpRecipeRows[idx].cost_per_yield_unit = yieldQty > 0 ? totalCost / yieldQty : totalCost;
   fpRecipeRows[idx].yield_unit          = yieldUnit;
 
@@ -419,26 +416,21 @@ function addFpProductLine(prefill = null) {
   div.className = 'fp-line';
   div.id = `fpp-${idx}`;
 
-  // Hide archived (discontinued) products, but keep the one this line already
-  // uses (row.ref_id) so editing an existing finished product never loses its selection.
-  const opts = allProducts_fp.filter(p => !p.deleted_at || p.id === row.ref_id).map(p => {
-    const cpu = fp_costPerUnit(p);
-    const pu  = p._packUnit || fp_packUnit(p);
-    return `<option value="${esc(p.id)}" data-cost="${cpu}" data-packunit="${esc(pu)}"
-      data-subunitname="${esc(p.sub_unit_name || '')}"
-      data-name="${esc(p.name)}"
-      ${p.id === row.ref_id ? 'selected' : ''}>
-      ${esc(p.name)}
-    </option>`;
-  }).join('');
+  // Type-to-search picker (mirrors the Recipes tab). The line's current product
+  // is shown in the input text, so archived products are simply not offered in
+  // the suggestion list without losing an existing selection.
+  const prefillName = row.ref_id
+    ? esc((allProducts_fp.find(p => p.id === row.ref_id) || {}).name || row.ref_name || '')
+    : '';
 
   div.innerHTML = `
-    <div class="form-group">
+    <div class="form-group" style="position:relative">
       ${idx === 0 ? '<label>Product</label>' : '<label>&nbsp;</label>'}
-      <select id="fpp-sel-${idx}" onchange="onFpProductChange(${idx})">
-        <option value="">— Select product —</option>
-        ${opts}
-      </select>
+      <input type="text" id="fpp-input-${idx}" value="${prefillName}" placeholder="Search or pick a product…" autocomplete="off"
+             oninput="onFpPickerSearch('product', ${idx})" onfocus="onFpPickerFocus('product', ${idx})"
+             onkeydown="onFpPickerKeydown('product', ${idx}, event)" onblur="hideFpPickerSuggestions('product', ${idx})" />
+      <input type="hidden" id="fpp-sel-${idx}" value="${esc(row.ref_id || '')}" />
+      <div id="fpp-suggestions-${idx}" class="product-suggestions" onmousedown="event.preventDefault()"></div>
     </div>
     <div class="form-group">
       ${idx === 0 ? '<label>Qty</label>' : '<label>&nbsp;</label>'}
@@ -463,15 +455,15 @@ function addFpProductLine(prefill = null) {
 }
 
 function onFpProductChange(idx) {
-  const sel         = document.getElementById(`fpp-sel-${idx}`);
-  const opt         = sel.options[sel.selectedIndex];
-  const pu          = opt?.dataset?.packunit || 'kg';
-  const subUnitName = opt?.dataset?.subunitname || '';
-  const product     = allProducts_fp.find(p => p.id === sel.value);
+  const hidden      = document.getElementById(`fpp-sel-${idx}`);
+  const refId       = hidden ? hidden.value : '';
+  const product     = allProducts_fp.find(p => p.id === refId) || null;
+  const pu          = product ? (product._packUnit || fp_packUnit(product)) : 'kg';
+  const subUnitName = product?.sub_unit_name || '';
 
-  fpProductRows[idx].ref_id    = sel.value;
-  fpProductRows[idx].ref_name  = opt?.dataset?.name || opt?.text?.trim() || '';
-  fpProductRows[idx].unit_cost = parseFloat(opt?.dataset?.cost || 0);
+  fpProductRows[idx].ref_id    = refId;
+  fpProductRows[idx].ref_name  = product?.name || '';
+  fpProductRows[idx].unit_cost = product ? fp_costPerUnit(product) : 0;
   fpProductRows[idx].pack_unit = pu;
   // Extra facts needed for costing (mirrors the Recipes page): the sub-unit
   // breakdown, the pack size, and the average weight that bridges each↔weight.
@@ -580,6 +572,131 @@ function removeFpProductLine(idx) {
   document.getElementById(`fpp-${idx}`)?.remove();
   fpProductRows[idx] = null;
   recalcFpCosts();
+}
+
+// ── Type-to-search pickers (recipe & product lines) ────────────
+// One shared typeahead for both line kinds, modeled on the Recipes tab's
+// ingredient picker. `kind` is 'recipe' | 'product'. Each line has a text input
+// (#<pre>-input-<idx>), a hidden id field (#<pre>-sel-<idx>) that the change
+// handler reads, and a suggestions box (#<pre>-suggestions-<idx>).
+let _fpPickerItems  = [];   // [{id}] in display order — for keyboard nav
+let _fpPickerActive = -1;   // highlighted index into _fpPickerItems
+
+function _fpPickerCfg(kind) {
+  return kind === 'recipe'
+    ? { pre: 'fpr', noun: 'recipe',  onChange: onFpRecipeChange,
+        list: () => allRecipes_fp.filter(r => !r.deleted_at),
+        all:  () => allRecipes_fp }
+    : { pre: 'fpp', noun: 'product', onChange: onFpProductChange,
+        list: () => allProducts_fp.filter(p => !p.deleted_at),
+        all:  () => allProducts_fp };
+}
+
+function onFpPickerFocus(kind, idx) {
+  const cfg = _fpPickerCfg(kind);
+  const input = document.getElementById(`${cfg.pre}-input-${idx}`);
+  renderFpSuggestions(kind, idx, input ? input.value : '');
+}
+
+function onFpPickerSearch(kind, idx) {
+  const cfg    = _fpPickerCfg(kind);
+  const input  = document.getElementById(`${cfg.pre}-input-${idx}`);
+  const hidden = document.getElementById(`${cfg.pre}-sel-${idx}`);
+  const hadSelection = hidden && hidden.value;
+  if (hidden) hidden.value = '';   // typing invalidates any prior selection
+  // Emptying the field clears the line so its cost stops counting toward the total.
+  if (hadSelection && !(input && input.value.trim())) cfg.onChange(idx);
+  renderFpSuggestions(kind, idx, input ? input.value : '');
+}
+
+function renderFpSuggestions(kind, idx, rawQuery) {
+  const cfg = _fpPickerCfg(kind);
+  const box = document.getElementById(`${cfg.pre}-suggestions-${idx}`);
+  if (!box) return;
+  const q   = (rawQuery || '').trim();
+  const ql  = q.toLowerCase();
+  const all = cfg.list();
+  _fpPickerItems = [];
+  _fpPickerActive = -1;
+
+  if (!all.length) {
+    box.innerHTML = `<div class="product-suggestion-empty">No ${cfg.noun}s yet.</div>`;
+    box.style.display = 'block';
+    return;
+  }
+
+  // Empty query → browse A→Z; otherwise prefix matches first, then A→Z.
+  const list = !ql
+    ? all.slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+    : all.filter(x => (x.name || '').toLowerCase().includes(ql))
+         .sort((a, b) => {
+           const ap = (a.name || '').toLowerCase().startsWith(ql) ? 0 : 1;
+           const bp = (b.name || '').toLowerCase().startsWith(ql) ? 0 : 1;
+           return ap - bp || (a.name || '').localeCompare(b.name || '');
+         });
+
+  let html = '';
+  if (!list.length) html += `<div class="product-suggestion-empty">No ${cfg.noun}s match “${esc(q)}”.</div>`;
+  for (const it of list) {
+    const n = _fpPickerItems.length;
+    _fpPickerItems.push({ id: it.id });
+    const sub = (kind === 'product' && it.category) ? `<span class="psi-sub">${esc(it.category)}</span>` : '';
+    html += `<div class="product-suggestion-item" data-n="${n}" onmousedown="selectFpItem('${kind}', ${idx}, '${esc(it.id)}')">
+      <span>${esc(it.name)}</span>${sub}</div>`;
+  }
+  box.innerHTML = html;
+  box.style.display = 'block';
+  _applyFpHighlight(box);
+}
+
+function _applyFpHighlight(box) {
+  box.querySelectorAll('.product-suggestion-item').forEach(el => {
+    const on = Number(el.dataset.n) === _fpPickerActive;
+    el.classList.toggle('active', on);
+    if (on) el.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+// Keyboard: ↑/↓ move highlight, Enter picks, Esc closes.
+function onFpPickerKeydown(kind, idx, e) {
+  const cfg  = _fpPickerCfg(kind);
+  const box  = document.getElementById(`${cfg.pre}-suggestions-${idx}`);
+  const open = box && box.style.display !== 'none' && _fpPickerItems.length;
+  if (!open) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); onFpPickerFocus(kind, idx); }
+    return;
+  }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault(); _fpPickerActive = Math.min(_fpPickerItems.length - 1, _fpPickerActive + 1); _applyFpHighlight(box);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault(); _fpPickerActive = Math.max(0, _fpPickerActive - 1); _applyFpHighlight(box);
+  } else if (e.key === 'Enter') {
+    if (_fpPickerActive >= 0 && _fpPickerActive < _fpPickerItems.length) {
+      e.preventDefault();
+      selectFpItem(kind, idx, _fpPickerItems[_fpPickerActive].id);
+    }
+  } else if (e.key === 'Escape') {
+    box.style.display = 'none';
+  }
+}
+
+function selectFpItem(kind, idx, id) {
+  const cfg  = _fpPickerCfg(kind);
+  const item = cfg.all().find(x => x.id === id);
+  if (!item) return;
+  const input  = document.getElementById(`${cfg.pre}-input-${idx}`);
+  const hidden = document.getElementById(`${cfg.pre}-sel-${idx}`);
+  const box    = document.getElementById(`${cfg.pre}-suggestions-${idx}`);
+  if (input)  input.value  = item.name;
+  if (hidden) hidden.value = id;
+  if (box)    box.style.display = 'none';
+  cfg.onChange(idx);
+}
+
+function hideFpPickerSuggestions(kind, idx) {
+  const cfg = _fpPickerCfg(kind);
+  const box = document.getElementById(`${cfg.pre}-suggestions-${idx}`);
+  if (box) box.style.display = 'none';
 }
 
 // ── Cost Recalc ────────────────────────────────────────────────

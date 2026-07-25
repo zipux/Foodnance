@@ -2,6 +2,7 @@
 
 let pmData = [];           // full products array from /api/price-movers
 let pmSelectedId = null;   // currently selected product id
+let pmTab = 'trend';       // 'trend' | 'vendor' | 'portfolio'
 let pmChart = null;        // Chart.js instance
 let pmSuggestBlur;         // timer id for suggestion dismissal
 let sbChart = null;
@@ -91,6 +92,10 @@ async function loadMovers() {
       clearDetail();
     }
   }
+
+  // The Portfolio tab reads the whole catalog, not the selected product — keep
+  // it in sync when the date range changes.
+  if (pmTab === 'portfolio') renderPortfolio();
 }
 
 function renderList() {
@@ -160,9 +165,18 @@ function clearDetail() {
   document.getElementById('pmWarning').classList.add('hidden');
   document.getElementById('pmVendorLegend').innerHTML = '';
   document.getElementById('pmDetailBody').innerHTML =
-    '<tr><td colspan="4" class="empty-row">Select a product to see its purchase history.</td></tr>';
-  document.getElementById('pmChartPlaceholder').classList.remove('hidden');
+    '<tr><td colspan="5" class="empty-row">Select a product to see its purchase history.</td></tr>';
+  const ph = document.getElementById('pmChartPlaceholder');
+  ph.querySelector('div').textContent = 'No product selected yet';
+  ph.classList.remove('hidden');
+  hideVendorExtras();
   if (pmChart) { pmChart.destroy(); pmChart = null; }
+}
+
+// Hide the Vendor-Compare-only elements (savings headline + per-vendor strip).
+function hideVendorExtras() {
+  document.getElementById('pmSavings').classList.add('hidden');
+  document.getElementById('pmVendorStrip').innerHTML = '';
 }
 
 function renderDetail(product) {
@@ -182,8 +196,9 @@ function renderDetail(product) {
     subEl.textContent = '';
     changeEl.textContent = '';
     legendEl.innerHTML = '';
-    bodyEl.innerHTML = '<tr><td colspan="4" class="empty-row">No purchases in this range.</td></tr>';
+    bodyEl.innerHTML = '<tr><td colspan="5" class="empty-row">No purchases in this range.</td></tr>';
     placeholderEl.classList.remove('hidden');
+    hideVendorExtras();
     if (pmChart) { pmChart.destroy(); pmChart = null; }
     return;
   }
@@ -205,10 +220,24 @@ function renderDetail(product) {
 
   // Build chronological series (oldest → newest).
   const chrono = [...product.purchases].reverse();
-  renderChart(chrono, unit);
-  renderLegend(chrono);
+  if (pmTab === 'vendor') {
+    renderVendorChart(product, unit);   // manages the placeholder itself
+    renderSavings(product, unit);
+    renderVendorStrip(product, unit);
+    // Vendor identity and the price gap live in the strip below; the trend %
+    // and the per-point colour legend belong to the Trend tab, so keep them
+    // out of the way here.
+    changeEl.textContent = '';
+    legendEl.innerHTML = '';
+    const nv = product.vendor_count || (product.vendors || []).length;
+    subEl.textContent = `${nv} vendor${nv === 1 ? '' : 's'} · latest price per ${unit}`;
+  } else {
+    renderChart(chrono, unit);
+    hideVendorExtras();
+    renderLegend(chrono);
+    placeholderEl.classList.add('hidden');
+  }
   renderDetailTable(product.purchases, unit);
-  placeholderEl.classList.add('hidden');
 }
 
 function renderChart(chrono, unit) {
@@ -287,6 +316,271 @@ function renderLegend(chrono) {
   document.getElementById('pmVendorLegend').innerHTML = html;
 }
 
+// ── Tabs ─────────────────────────────────────────────────────
+// Tooltip copy for the info icon beside the tab group — keeps the "?" honest
+// about whichever tab is currently active.
+const PM_TAB_TIPS = {
+  trend:     "Trend shows how this product's price per unit has moved over time — each point is one purchase, coloured by supplier. Use it to spot creeping price rises, one-off spikes, or seasonal swings on the items you buy most.",
+  vendor:    "Vendor Compare shows the latest price per unit from each supplier side by side, so you can see who's cheapest right now and roughly how much you'd save by switching.",
+  portfolio: "Portfolio ranks every multi-vendor item by how much you could save by moving it to its cheapest supplier — your biggest switching wins, top first."
+};
+
+function switchTab(tab) {
+  pmTab = tab;
+  document.querySelectorAll('.pm-tab-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.tab === tab));
+
+  const help = document.getElementById('pmTabHelp');
+  if (help && PM_TAB_TIPS[tab]) help.setAttribute('data-tip', PM_TAB_TIPS[tab]);
+
+  const productView   = document.getElementById('pmProductView');
+  const portfolioView = document.getElementById('pmPortfolioView');
+
+  if (tab === 'portfolio') {
+    productView.classList.add('hidden');
+    portfolioView.classList.remove('hidden');
+    renderPortfolio();
+    return;
+  }
+
+  portfolioView.classList.add('hidden');
+  productView.classList.remove('hidden');
+  // Re-render the selected product with this tab's chart.
+  const prod = pmSelectedId ? pmData.find(p => p.product_id === pmSelectedId) : null;
+  if (prod) renderDetail(prod); else clearDetail();
+}
+
+// ── Vendor Compare tab ───────────────────────────────────────
+// One horizontal bar per vendor at their latest price/unit. A time series is
+// the wrong form here — most vendors have a single purchase in the window, so a
+// line has nothing to connect. Bars answer the actual question ("who's cheapest,
+// and by how much?") and read cleanly even with one data point each.
+function renderVendorChart(product, unit) {
+  const ctx = document.getElementById('pmChart').getContext('2d');
+  if (pmChart) pmChart.destroy();
+
+  // Vendors whose supplier unit can't be reconciled have no comparable price;
+  // they're listed in the strip below but can't be plotted on a $/unit axis.
+  const priced = (product.vendors || []).filter(v => v.latest_price != null);
+  const placeholderEl = document.getElementById('pmChartPlaceholder');
+  if (!priced.length) {
+    placeholderEl.querySelector('div').textContent = 'No comparable vendor prices in this range';
+    placeholderEl.classList.remove('hidden');
+    return;
+  }
+  placeholderEl.classList.add('hidden');
+
+  // Backend sorts vendors ascending by latest_price, so index 0 is the cheapest.
+  // Colour it "good"; the rest recede to neutral. Magnitude is carried by bar
+  // length and the direct labels — never by hue-by-rank.
+  const labels   = priced.map(v => v.name);
+  const data     = priced.map(v => v.latest_price);
+  const cheapest = priced[0].latest_price;
+  const colors   = priced.map((_, i) => i === 0 ? '#16a34a' : '#94a3b8');
+
+  // Direct label at each bar end: price, plus how much over the cheapest.
+  const barLabels = {
+    id: 'pmBarLabels',
+    afterDatasetsDraw(chart) {
+      const { ctx } = chart;
+      chart.getDatasetMeta(0).data.forEach((bar, i) => {
+        const v = priced[i].latest_price;
+        const delta = (cheapest > 0 && i !== 0)
+          ? ` +${Math.round(((v - cheapest) / cheapest) * 100)}%`
+          : '';
+        ctx.save();
+        ctx.fillStyle = '#334155';
+        ctx.font = '600 11px ui-sans-serif, system-ui, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`${fmt(v)}${delta}`, bar.x + 6, bar.y);
+        ctx.restore();
+      });
+    }
+  };
+
+  pmChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: `Latest price / ${unit}`,
+        data,
+        backgroundColor: colors,
+        borderRadius: 4,
+        borderSkipped: false,
+        barPercentage: 0.7,
+        categoryPercentage: 0.85,
+      }]
+    },
+    plugins: [barLabels],
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      layout: { padding: { right: 70 } },   // room for the end-of-bar labels
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (item) => {
+              const v = priced[item.dataIndex];
+              const lines = item.dataIndex === 0
+                ? [`${fmt(v.latest_price)} / ${unit}`, 'cheapest']
+                : [`${fmt(v.latest_price)} / ${unit}`,
+                   `+${fmt(v.latest_price - cheapest)}/${unit} vs ${priced[0].name}`];
+              lines.push(`${Math.round(v.qty_stock)} ${unit} bought · ${fmt(v.spend)}`);
+              return lines;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          beginAtZero: true,
+          ticks: { callback: (v) => '$' + Number(v).toFixed(2) },
+          grid: { color: 'rgba(0,0,0,.05)' }
+        },
+        y: { grid: { display: false } }
+      }
+    }
+  });
+}
+
+// Headline: the dollar figure a manager acts on.
+function renderSavings(product, unit) {
+  const el = document.getElementById('pmSavings');
+  const save = Number(product.overpay_est || 0);
+  const nVendors = product.vendor_count || (product.vendors ? product.vendors.length : 0);
+
+  el.classList.remove('hidden');
+  if (nVendors < 2) {
+    el.className = 'pm-savings flat';
+    el.innerHTML = `<i class="fas fa-circle-info"></i> <span>Only one vendor supplied this in range — nothing to compare yet.</span>`;
+  } else if (save < 1) {
+    el.className = 'pm-savings flat';
+    el.innerHTML = `<i class="fas fa-circle-check"></i> <span>You're already buying at the cheapest available price.</span>`;
+  } else {
+    el.className = 'pm-savings';
+    el.innerHTML = `<i class="fas fa-piggy-bank"></i> <span>Est. save <span class="amt">${fmt(save)}</span> by moving your volume to <strong>${esc(product.cheapest_vendor)}</strong> at current prices.</span>`;
+  }
+}
+
+// Per-vendor strip: latest price, volume/spend, and Δ vs the cheapest vendor.
+function renderVendorStrip(product, unit) {
+  const el = document.getElementById('pmVendorStrip');
+  const vendors  = product.vendors || [];
+  const cheapest = product.cheapest_price;
+  const now = Date.now();
+
+  if (!vendors.length) { el.innerHTML = ''; return; }
+
+  const header = `
+    <div class="pm-vhead">
+      <span>Vendor</span>
+      <span class="r">Latest</span>
+      <span class="r pm-vcol-vol">Bought (range)</span>
+      <span class="r">vs cheapest</span>
+    </div>`;
+
+  const rows = vendors.map(v => {
+    const isCheapest = product.cheapest_vendor && v.name === product.cheapest_vendor && v.latest_price != null;
+
+    // Badge stays compact — just the gap to the cheapest as a %. The absolute
+    // prices sit in the Latest column, so a $/unit delta here would be redundant.
+    let badge;
+    if (v.latest_price == null) {
+      badge = `<span class="pm-vbadge">n/a</span>`;
+    } else if (isCheapest) {
+      badge = `<span class="pm-vbadge base">cheapest</span>`;
+    } else if (cheapest != null && cheapest > 0) {
+      const pct = Math.round(((v.latest_price - cheapest) / cheapest) * 100);
+      badge = `<span class="pm-vbadge up">+${pct}%</span>`;
+    } else {
+      badge = `<span class="pm-vbadge">—</span>`;
+    }
+
+    // Stale flag: last bought from this vendor more than 30 days ago, so the
+    // "latest price" comparison isn't over-trusted.
+    let stale = '';
+    if (v.latest_date) {
+      const days = Math.floor((now - new Date(v.latest_date).getTime()) / 86400000);
+      if (days > 30) stale = `<span class="pm-stale" title="Last bought ${days} days ago">stale</span>`;
+    }
+
+    const price  = v.latest_price != null ? `${fmt(v.latest_price)}/${esc(unit)}` : '—';
+    const bought = `${Math.round(v.qty_stock)} ${esc(unit)} · ${fmt(v.spend)}`;
+    return `
+      <div class="pm-vrow ${isCheapest ? 'cheapest' : ''}">
+        <span class="vname"><span class="pm-vendor-dot" style="background:${vendorColor(v.name)}"></span><span class="vname-txt">${esc(v.name)}</span>${stale}</span>
+        <span class="vprice">${price}</span>
+        <span class="vmeta pm-vcol-vol">${bought}</span>
+        ${badge}
+      </div>`;
+  }).join('');
+
+  el.innerHTML = header + rows;
+}
+
+// ── Portfolio tab ────────────────────────────────────────────
+// Catalog-wide scan: where am I not on the cheapest vendor, ranked by $ impact.
+function renderPortfolio() {
+  const el = document.getElementById('pmPortfolioBody');
+  const rows = pmData
+    .filter(p => Number(p.overpay_est || 0) >= 1 && (p.vendor_count || 0) >= 2)
+    .sort((a, b) => Number(b.overpay_est) - Number(a.overpay_est));
+
+  if (!rows.length) {
+    el.innerHTML = `<div class="pm-portfolio-empty"><i class="fas fa-circle-check"></i>Nothing to switch in this range — every multi-vendor item is already on (or within ~$1 of) its cheapest supplier.</div>`;
+    return;
+  }
+
+  const total = rows.reduce((s, p) => s + Number(p.overpay_est), 0);
+  el.innerHTML = `
+    <div class="pm-savings"><i class="fas fa-piggy-bank"></i> <span>Total estimated savings across ${rows.length} item${rows.length === 1 ? '' : 's'}: <span class="amt">${fmt(total)}</span></span></div>
+    <div class="table-scroll" style="margin-top:1rem">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>Paying more from</th>
+            <th>Cheapest vendor</th>
+            <th style="text-align:right">Est. savings</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(p => {
+            const above = (p.vendors || [])
+              .filter(v => v.latest_price != null && v.name !== p.cheapest_vendor && v.latest_price > (p.cheapest_price || 0))
+              .map(v => esc(v.name));
+            const cheapestCell = p.cheapest_price != null
+              ? `${esc(p.cheapest_vendor || '—')} · ${fmt(p.cheapest_price)}/${esc(p.unit || 'unit')}`
+              : '—';
+            return `
+              <tr style="cursor:pointer" data-id="${esc(p.product_id)}" title="Open Vendor Compare">
+                <td><strong>${esc(p.product_name)}</strong></td>
+                <td style="color:var(--text-muted)">${above.length ? above.join(', ') : '—'}</td>
+                <td>${cheapestCell}</td>
+                <td style="text-align:right"><span class="pm-portfolio-save">${fmt(p.overpay_est)}</span></td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+
+  el.querySelectorAll('tr[data-id]').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const id = tr.getAttribute('data-id');
+      const prod = pmData.find(p => p.product_id === id);
+      if (prod) {
+        pmSelectedId = id;
+        renderList();
+        switchTab('vendor');
+      }
+    });
+  });
+}
+
 // Price cell: the figure normalized to the stocking unit (what the chart and
 // the % change use), plus what the supplier actually invoiced when that was in
 // a different unit — so the row still reconciles with the paperwork.
@@ -304,8 +598,10 @@ function _pmPriceCell(p, unit) {
 function renderDetailTable(purchases, unit) {
   const bodyEl = document.getElementById('pmDetailBody');
   bodyEl.innerHTML = purchases.map(p => {
+    const item = (p.vendor_item || '').trim();
     const cells = `
           <td>${esc(p.vendor || '—')}</td>
+          <td>${item ? esc(item) : '<span style="color:var(--text-muted)">—</span>'}</td>
           <td>${fmtDate(p.date)}</td>
           <td>${Number(p.pack_qty || 0)} ${esc(p.pack_unit || unit)}</td>
           ${_pmPriceCell(p, unit)}`;
@@ -599,6 +895,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('pmFrom').addEventListener('change', loadMovers);
   document.getElementById('pmTo').addEventListener('change', loadMovers);
+
+  document.querySelectorAll('.pm-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  });
 
   const searchEl = document.getElementById('pmSearch');
   searchEl.addEventListener('input', renderSuggestions);

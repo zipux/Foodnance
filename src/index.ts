@@ -1486,6 +1486,59 @@ app.get('/api/price-movers', async (c) => {
     // Already DESC sorted by the query. Take at most the latest 10.
     const purchases = g.purchases.slice(0, 10)
 
+    // ── Per-vendor aggregation over ALL in-range purchases (not just the
+    // latest 10 the chart draws). Powers the Vendor Compare strip and the
+    // dollar "you could save" figure, which must reflect real volume, so we
+    // aggregate g.purchases in full here.
+    type VendorAgg = {
+      name: string
+      latest_price: number | null   // most recent comparable $/stock-unit
+      latest_date: string
+      qty_stock: number             // total volume bought, in the stocking unit
+      spend: number                 // total $ spent with this vendor in range
+      buys: number
+    }
+    const vmap = new Map<string, VendorAgg>()
+    for (const p of g.purchases) {          // DESC by date — first seen is latest
+      const key = (p.vendor || '—').trim() || '—'
+      let v = vmap.get(key)
+      if (!v) {
+        v = { name: key, latest_price: null, latest_date: '', qty_stock: 0, spend: 0, buys: 0 }
+        vmap.set(key, v)
+      }
+      v.buys += 1
+      v.spend += p.cost
+      // First comparable purchase encountered (DESC order) is the latest price.
+      if (v.latest_price == null && p.cost_per_stock_unit != null) {
+        v.latest_price = p.cost_per_stock_unit
+        v.latest_date  = p.date
+      }
+      // Volume in the stocking unit; only derivable when the line is comparable.
+      if (p.cost_per_stock_unit && p.cost_per_stock_unit > 0) {
+        v.qty_stock += p.cost / p.cost_per_stock_unit
+      }
+    }
+    const vendors = Array.from(vmap.values()).sort((a, b) => {
+      if (a.latest_price == null) return 1
+      if (b.latest_price == null) return -1
+      return a.latest_price - b.latest_price
+    })
+    // Cheapest current price across vendors with a comparable latest price.
+    const priced   = vendors.filter(v => v.latest_price != null)
+    const cheapest = priced.length ? priced[0] : null
+    // "At today's prices, buying your same in-range volumes from the cheapest
+    // vendor instead would save this much." Each vendor priced above the floor
+    // contributes its own volume × the per-unit gap; the floor contributes 0.
+    let overpay_est = 0
+    if (cheapest && cheapest.latest_price != null) {
+      for (const v of priced) {
+        if ((v.latest_price as number) > cheapest.latest_price) {
+          overpay_est += v.qty_stock * ((v.latest_price as number) - cheapest.latest_price)
+        }
+      }
+    }
+    overpay_est = Math.round(overpay_est * 100) / 100
+
     // Compare the two most recent purchases that can both be expressed in the
     // stocking unit. Comparing raw cost_per_unit across units is what made a
     // kg→lb supplier switch read as a ~120% price rise.
@@ -1539,6 +1592,12 @@ app.get('/api/price-movers', async (c) => {
       change_from,
       change_to,
       purchases,
+      // Vendor comparison (over the full in-range history).
+      vendors,
+      vendor_count:    vmap.size,
+      cheapest_vendor: cheapest ? cheapest.name : '',
+      cheapest_price:  cheapest ? cheapest.latest_price : null,
+      overpay_est,
     }
   })
 

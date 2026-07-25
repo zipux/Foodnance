@@ -41,7 +41,6 @@
             <span class="switch-track"><span class="switch-thumb"></span></span>
             <span class="switch-label">Archived</span>
           </label>
-<button class="btn btn-secondary" id="openGroupProductsModal" title="Combine products you buy interchangeably under one general name"><i class="fas fa-object-group"></i> Group</button>
 <button class="btn btn-primary" id="openAddProductModal"><i class="fas fa-plus"></i> Add Product</button>
         </div>
       </div>
@@ -207,42 +206,18 @@
             <span class="sub-unit-hint">Other names suppliers use for this item</span>
           </div>
           <small style="display:block;color:var(--text-muted);font-size:.78rem;margin-bottom:.6rem">
-            When an invoice lists this item under a different name — Neptune calling your Small Tomatoes
-            "Grape Tomatoes" — add that name here and future invoices will link to this product instead of
-            creating a duplicate. Tie it to one vendor unless the name is safe to accept from anyone.
+            Other names suppliers use for this item — Neptune calling your Small Tomatoes
+            "Grape Tomatoes" — learned automatically when you approve invoices, so future invoices link to
+            this product instead of creating a duplicate. Remove any that were linked by mistake.
           </small>
           <div id="aliasSaveFirst" style="display:none;font-size:.82rem;color:var(--text-muted);padding:.5rem .75rem;background:#f8fafc;border:1px dashed var(--border);border-radius:6px">
-            Save the product first, then you can add vendor names.
+            Save the product first — vendor names are added automatically from invoices.
           </div>
           <div id="aliasWrap" style="display:none">
-            <div id="aliasList" style="margin-bottom:.6rem"></div>
-            <div class="form-grid" style="grid-template-columns:1.2fr 1fr auto;align-items:end;gap:.5rem">
-              <div class="form-group" style="margin:0">
-                <label>Name on the invoice</label>
-                <div style="position:relative">
-                  <input type="text" id="aliasName" placeholder="e.g. Grape Tomatoes" autocomplete="off"
-                         oninput="onAliasNameInput()" onfocus="onAliasNameInput()"
-                         onblur="setTimeout(hideAliasNameDropdown, 150)"
-                         style="width:100%;box-sizing:border-box" />
-                  <div id="aliasNameDropdown"
-                       style="display:none;position:absolute;top:100%;left:0;right:0;z-index:9999;
-                              background:#fff;border:1px solid #cbd5e1;border-radius:0 0 6px 6px;
-                              max-height:220px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.12)"></div>
-                </div>
-              </div>
-              <div class="form-group" style="margin:0">
-                <label>From vendor</label>
-                <select id="aliasSupplier">
-                  <option value="">Any vendor</option>
-                </select>
-              </div>
-              <button class="btn btn-secondary btn-sm" id="addAliasBtn" style="height:38px">
-                <i class="fas fa-plus"></i> Add
-              </button>
-            </div>
+            <div id="aliasList"></div>
           </div>
         </div>
-        <div class="sub-unit-section" style="margin-top:1.25rem">
+        <div class="sub-unit-section" id="stockUnitSection" style="margin-top:1.25rem">
           <div class="sub-unit-header">
             <i class="fas fa-scale-balanced"></i> Stocked In
             <span class="sub-unit-hint">The unit this item is counted and priced in</span>
@@ -251,6 +226,7 @@
             Suppliers may invoice this item in different units — one bills by kg, another by lb. Everything is
             converted into the unit you pick here, so stock counts and price comparisons stay consistent.
           </small>
+          <div id="stockUnitConflictNote" style="display:none;font-size:.8rem;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:.5rem .7rem;margin-bottom:.6rem"></div>
           <div class="form-grid" style="grid-template-columns:1fr 1fr">
             <div class="form-group">
               <label>Stocking unit *</label>
@@ -539,7 +515,7 @@
   <script src="/static/utils.js?v=20260724-1"></script>
   <script src="/static/inventory.js?v=20260721-5"></script>
   <script src="/static/suppliers.js?v=20260714-1"></script>
-  <script src="/static/products.js?v=20260723-3"></script>
+  <script src="/static/products.js?v=20260726-2"></script>
 
   <!-- ── Inline invoice-file viewer modal (shared, lightweight) ── -->
   <div class="modal-overlay hidden" id="entryFileViewModal">

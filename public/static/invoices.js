@@ -1743,6 +1743,9 @@ async function confirmAndSaveInvoice() {
     //     product, scoped to the supplier the bulk import just resolved (or
     //     created). Next invoice, the alias match links it with no prompting.
     const linkedLines = validLines.filter(l => l._link_product_id && l.product_name);
+    // Vendor names are learned silently here; count them so we can tell the user
+    // afterward (they can review/remove them in the product's Vendor Names list).
+    let learnedCount = 0;
     if (linkedLines.length && bulkResult?.supplier_id) {
       for (const l of linkedLines) {
         const wording = l.product_name.trim();
@@ -1762,6 +1765,7 @@ async function confirmAndSaveInvoice() {
             generic_product_id: l._link_product_id,
             supplier_id:        bulkResult.supplier_id,
           });
+          learnedCount++;
         } catch (e) {
           // Non-fatal: the invoice is already filed correctly. Only the
           // remembering failed, so say so rather than failing the approval.
@@ -1769,6 +1773,14 @@ async function confirmAndSaveInvoice() {
           showToast(`Filed correctly, but couldn't remember "${wording}" for next time.`, 'warning');
         }
       }
+    }
+    if (learnedCount) {
+      showToast(
+        learnedCount === 1
+          ? 'Remembered 1 new supplier name for next time.'
+          : `Remembered ${learnedCount} new supplier names for next time.`,
+        'success'
+      );
     }
 
     // 4. Save product mappings so future uploads benefit from corrections

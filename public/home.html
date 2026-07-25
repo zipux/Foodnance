@@ -188,6 +188,148 @@
       white-space: nowrap;
     }
 
+    /* ── Purchase-history tabs (Trend / Vendor Compare / Portfolio) ── */
+    .pm-tabs-row {
+      display: flex;
+      align-items: center;
+      gap: .55rem;
+      margin-bottom: 1rem;
+    }
+    .pm-tabs {
+      display: inline-flex;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+    }
+    /* Info icon + hover/focus tooltip describing the active tab. Sits outside
+       .pm-tabs so its bubble isn't clipped by that element's overflow:hidden. */
+    .pm-tab-help {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      color: var(--text-muted);
+      font-size: .95rem;
+      cursor: help;
+    }
+    .pm-tab-help:hover, .pm-tab-help:focus { color: var(--primary); outline: none; }
+    .pm-tab-help::after {
+      content: attr(data-tip);
+      position: absolute;
+      left: 0;
+      top: calc(100% + 8px);
+      width: 270px;
+      max-width: 78vw;
+      background: #1e293b;
+      color: #fff;
+      padding: .6rem .72rem;
+      border-radius: var(--radius-sm);
+      font-size: .78rem;
+      font-weight: 400;
+      line-height: 1.45;
+      text-align: left;
+      white-space: normal;
+      box-shadow: 0 6px 18px rgba(0,0,0,.2);
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(-3px);
+      transition: opacity .12s ease, transform .12s ease;
+      pointer-events: none;
+      z-index: 30;
+    }
+    .pm-tab-help:hover::after, .pm-tab-help:focus::after {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0);
+    }
+    .pm-tab-btn {
+      padding: .4rem .9rem;
+      font-size: .82rem;
+      font-weight: 500;
+      background: #fff;
+      color: var(--text-muted);
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: .4rem;
+    }
+    .pm-tab-btn + .pm-tab-btn { border-left: 1px solid var(--border); }
+    .pm-tab-btn.active { background: var(--primary); color: #fff; }
+    .pm-tab-btn:hover:not(.active) { background: #f1f5f9; color: var(--text); }
+
+    /* Savings headline (Vendor Compare) */
+    .pm-savings {
+      display: flex;
+      align-items: center;
+      gap: .6rem;
+      background: #f0fdf4;
+      border: 1px solid #86efac;
+      color: #166534;
+      padding: .7rem .9rem;
+      border-radius: var(--radius-sm);
+      font-size: .9rem;
+      margin-bottom: 1rem;
+    }
+    .pm-savings .amt {
+      font-weight: 700;
+      font-family: ui-monospace, monospace;
+      font-size: 1.05rem;
+    }
+    .pm-savings.flat { background: #f8fafc; border-color: var(--border); color: var(--text-muted); }
+
+    /* Per-vendor strip (Vendor Compare) */
+    .pm-vstrip { display: flex; flex-direction: column; gap: .35rem; margin-top: .85rem; }
+    /* Header and rows share one column template, and every numeric track is a
+       fixed width, so figures line up vertically across every row. */
+    .pm-vhead, .pm-vrow {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 96px 150px 84px;
+      align-items: center;
+      gap: .75rem;
+    }
+    .pm-vhead {
+      padding: 0 .65rem .1rem;
+      font-size: .68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .03em;
+      color: var(--text-muted);
+    }
+    .pm-vhead .r { text-align: right; }
+    .pm-vrow {
+      padding: .5rem .65rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: .82rem;
+    }
+    .pm-vrow.cheapest { border-color: #86efac; background: #f0fdf4; }
+    .pm-vrow .vname { display: inline-flex; align-items: center; gap: .4rem; min-width: 0; font-weight: 500; color: var(--text); }
+    .pm-vrow .vname-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pm-vrow .vprice { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text); }
+    .pm-vrow .vmeta  { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+    .pm-vbadge {
+      justify-self: end;
+      font-weight: 600;
+      font-family: ui-monospace, monospace;
+      padding: .15rem .5rem;
+      border-radius: 999px;
+      font-size: .72rem;
+      white-space: nowrap;
+    }
+    .pm-vbadge.up { background: #fef2f2; color: #b91c1c; }
+    .pm-vbadge.base { background: #dcfce7; color: #15803d; }
+    .pm-stale { color: #b45309; font-size: .72rem; margin-left: .35rem; flex: none; }
+    /* Narrow screens: drop the volume/spend column, keep name · price · badge. */
+    @media (max-width: 560px) {
+      .pm-vhead, .pm-vrow { grid-template-columns: minmax(0, 1fr) 84px 72px; }
+      .pm-vcol-vol { display: none; }
+    }
+
+    /* Portfolio table */
+    .pm-portfolio-save { font-weight: 700; font-family: ui-monospace, monospace; color: #15803d; white-space: nowrap; }
+    .pm-portfolio-empty { padding: 2.5rem 1rem; text-align: center; color: var(--text-muted); }
+    .pm-portfolio-empty i { font-size: 2rem; color: #cbd5e1; display: block; margin-bottom: .5rem; }
+
     /* ── Spending Breakdown ── */
     .sb-total {
       margin-bottom: 1.25rem;
@@ -451,6 +593,17 @@
           <h2><i class="fas fa-chart-area"></i> Purchase History</h2>
         </div>
         <div class="card-body">
+          <div class="pm-tabs-row">
+            <div class="pm-tabs" role="tablist">
+              <button class="pm-tab-btn active" data-tab="trend"><i class="fas fa-chart-line"></i> Trend</button>
+              <button class="pm-tab-btn" data-tab="vendor"><i class="fas fa-code-compare"></i> Vendor Compare</button>
+              <button class="pm-tab-btn" data-tab="portfolio"><i class="fas fa-list-ol"></i> Portfolio</button>
+            </div>
+            <span class="pm-tab-help" id="pmTabHelp" tabindex="0" role="note"
+                  aria-label="About this tab"
+                  data-tip="Trend shows how this product's price per unit has moved over time — each point is one purchase, coloured by supplier. Use it to spot creeping price rises, one-off spikes, or seasonal swings on the items you buy most."><i class="fas fa-circle-info"></i></span>
+          </div>
+          <div id="pmProductView">
           <div id="pmWarning" class="pm-warning hidden"></div>
           <div class="pm-chart-header">
             <div>
@@ -459,6 +612,7 @@
             </div>
             <div class="pm-chart-change" id="pmChartChange"></div>
           </div>
+          <div id="pmSavings" class="pm-savings hidden"></div>
           <div class="pm-chart-wrap">
             <canvas id="pmChart"></canvas>
             <div id="pmChartPlaceholder" class="pm-chart-placeholder">
@@ -467,20 +621,26 @@
             </div>
           </div>
           <div id="pmVendorLegend" class="pm-vendor-legend"></div>
+          <div id="pmVendorStrip" class="pm-vstrip"></div>
           <div class="table-scroll" style="margin-top: 1.25rem;">
             <table class="data-table">
               <thead>
                 <tr>
                   <th>Vendor</th>
+                  <th>Item</th>
                   <th>Invoice Date</th>
                   <th>Quantity</th>
                   <th>Price per Unit</th>
                 </tr>
               </thead>
               <tbody id="pmDetailBody">
-                <tr><td colspan="4" class="empty-row">Select a product to see its purchase history.</td></tr>
+                <tr><td colspan="5" class="empty-row">Select a product to see its purchase history.</td></tr>
               </tbody>
             </table>
+          </div>
+          </div><!-- /#pmProductView -->
+          <div id="pmPortfolioView" class="hidden">
+            <div id="pmPortfolioBody"></div>
           </div>
         </div>
       </section>

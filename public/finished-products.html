@@ -17,6 +17,49 @@
       left: 0;
       right: 0;
     }
+    /* Type-to-search picker for recipe & product lines (mirrors the Recipes tab). */
+    .product-suggestions {
+      display: none;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      margin-top: 6px;
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      box-shadow: 0 10px 28px rgba(15,23,42,.14);
+      max-height: 320px;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding: 4px;
+      z-index: 100;
+    }
+    .product-suggestion-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: .5rem;
+      padding: .5rem .6rem;
+      min-height: 38px;
+      border-radius: 7px;
+      font-size: .875rem;
+      cursor: pointer;
+      scroll-margin: 4px;
+    }
+    .product-suggestion-item:hover,
+    .product-suggestion-item.active { background: #eef2ff; }
+    .product-suggestion-item .psi-sub {
+      font-size: .72rem;
+      color: var(--text-muted);
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .product-suggestion-empty {
+      padding: .6rem;
+      font-size: .875rem;
+      color: var(--text-muted);
+    }
   </style>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
@@ -202,6 +245,6 @@
 
   <script src="/static/utils.js?v=20260724-1"></script>
   <script src="/static/inventory.js?v=20260721-5"></script>
-  <script src="/static/finished-products.js?v=20260724-1"></script>
+  <script src="/static/finished-products.js?v=20260726-1"></script>
 </body>
 </html>

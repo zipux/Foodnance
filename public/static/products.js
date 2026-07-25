@@ -34,7 +34,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   document.getElementById('toggleArchivedInput').addEventListener('change', toggleArchivedView);
   document.getElementById('openAddProductModal').addEventListener('click', openAddProductModal);
-  document.getElementById('openGroupProductsModal').addEventListener('click', openGroupProductsModal);
+  // Grouping is launched per product row now (see the Group button in renderProductTable).
 document.getElementById('saveProductBtn').addEventListener('click', saveGenericProduct);
   document.getElementById('closeModal').addEventListener('click', () => { _restoreEntrySnapshots(); closeModal('productModal'); });
   document.getElementById('cancelModal').addEventListener('click', () => { _restoreEntrySnapshots(); closeModal('productModal'); });
@@ -44,7 +44,9 @@ document.getElementById('saveProductBtn').addEventListener('click', saveGenericP
 
   // Entry form controls
   document.getElementById('openAddEntryBtn').addEventListener('click', openAddEntryForm);
-  document.getElementById('addAliasBtn').addEventListener('click', addAlias);
+  // Vendor names are learned automatically from invoices now; the manual add
+  // button only exists in older markup, so wire it only if it's present.
+  document.getElementById('addAliasBtn')?.addEventListener('click', addAlias);
   document.getElementById('eCost').addEventListener('input',       updateEntryCostPerUnit);
   document.getElementById('ePackQty').addEventListener('input',    updateEntryCostPerUnit);
   document.getElementById('eQtyOrdered').addEventListener('input', updateEntryCostPerUnit);
@@ -251,8 +253,8 @@ function renderProductTable() {
         <td>${latestCpu !== null ? fmt(latestCpu) + ' / ' + esc(latestUnit) : '—'}</td>
         <td style="color:var(--text-muted);font-size:.85rem">${lastPurchase}</td>
         <td onclick="event.stopPropagation()" style="white-space:nowrap">
-          <button class="btn btn-primary btn-icon" onclick="openEditProduct('${esc(g.id)}')" title="Edit product">
-            <i class="fas fa-pen"></i>
+          <button class="btn btn-icon" style="background:#4f46e5;color:#fff" onclick="openGroupProductsModal('${esc(g.id)}')" title="Group with interchangeable products">
+            <i class="fas fa-object-group"></i>
           </button>
           <button class="btn btn-icon" style="background:#6b7280;color:#fff" onclick="openMergeModal('${esc(g.id)}')" title="Merge into another product">
             <i class="fas fa-code-merge"></i>
@@ -358,6 +360,7 @@ async function openAddProductModal() {
   document.getElementById('entryForm').classList.remove('hidden');
 
   await loadSupplierDropdown();
+  updateStockUnitVisibility();   // new product: hidden, unit follows the first entry's pack unit
   openModal('productModal');
 }
 
@@ -439,6 +442,7 @@ async function openEditProduct(id) {
   document.getElementById('openAddEntryBtn').style.display = entries.length ? '' : 'none';
   _entriesShownCount = 10;
   renderEntriesTable(id);
+  updateStockUnitVisibility();   // show the picker only if suppliers disagree on units
   openModal('productModal');
 }
 
@@ -741,10 +745,13 @@ async function renderAliases(genericId) {
   wrap.style.display      = '';
   saveFirst.style.display = 'none';
 
-  // Vendor picker mirrors the entry form's supplier list, plus "Any vendor".
+  // Vendor picker only exists in the older manual-add markup; populate it when
+  // present so nothing breaks, but names are learned from invoices now.
   const sel = document.getElementById('aliasSupplier');
-  sel.innerHTML = '<option value="">Any vendor</option>' +
-    allSupplierList.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+  if (sel) {
+    sel.innerHTML = '<option value="">Any vendor</option>' +
+      allSupplierList.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+  }
 
   try {
     const data = await apiGet(`tables/product_aliases?generic_product_id=${encodeURIComponent(genericId)}`);
@@ -754,7 +761,7 @@ async function renderAliases(genericId) {
   }
 
   if (!_aliasesForProduct.length) {
-    listEl.innerHTML = `<div style="font-size:.82rem;color:var(--text-muted)">No vendor names yet.</div>`;
+    listEl.innerHTML = `<div style="font-size:.82rem;color:var(--text-muted)">No other supplier names yet — they'll appear here as you approve invoices.</div>`;
     return;
   }
 
@@ -1107,6 +1114,66 @@ function _inferStockUnit(g) {
   return newest ? String(newest.pack_unit).trim().toLowerCase() : '';
 }
 
+// Which stocking units are actually in use across a product's live entries, and
+// which suppliers bill in each. Map<unit, Set<vendor>>. More than one key is the
+// mixed-unit case (Yen kg vs Neptune lb) where the app can't pick a stocking
+// unit on its own — that's the only time we surface the "Stocked In" picker.
+function _stockUnitUsage(productId) {
+  const byUnit = new Map();
+  if (!productId) return byUnit;
+  allEntries
+    .filter(e => e.generic_product_id === productId && !e.voided_at && String(e.pack_unit || '').trim())
+    .forEach(e => {
+      const u = String(e.pack_unit).trim().toLowerCase();
+      if (!byUnit.has(u)) byUnit.set(u, new Set());
+      const v = (e.supplier_name || '').trim();
+      if (v) byUnit.get(u).add(v);
+    });
+  return byUnit;
+}
+
+// Show the "Stocked In" picker only when suppliers disagree on the unit; when
+// they agree (or there are no saved entries yet) the unit is derived silently
+// and the section is hidden. This keeps the mixed-unit safety — a declared
+// stocking unit everything converts into — without asking on every product.
+function updateStockUnitVisibility() {
+  const productId = document.getElementById('editProductId').value;
+  const section   = document.getElementById('stockUnitSection');
+  const note      = document.getElementById('stockUnitConflictNote');
+  const sel       = document.getElementById('pStockUnit');
+  if (!section || !sel) return;
+
+  const usage = _stockUnitUsage(productId);
+  const units = [...usage.keys()];
+
+  if (units.length >= 2) {
+    // Conflict — the user must choose. Leave whatever unit is selected (their
+    // declared base_unit, if any) and explain the clash in plain language.
+    section.style.display = '';
+    const parts = units.map(u => {
+      const vendors = [...usage.get(u)];
+      return vendors.length
+        ? `${vendors.join(', ')} bill${vendors.length === 1 ? 's' : ''} in ${u}`
+        : `some suppliers bill in ${u}`;
+    });
+    note.style.display = '';
+    note.innerHTML = `<i class="fas fa-triangle-exclamation"></i> ${esc(parts.join('; '))} — pick the unit you count and price this item in.`;
+    return;
+  }
+
+  // No conflict — hide the section. For an existing product the selection is
+  // already right (openEditProduct set it from the declared/inferred unit), so
+  // leave it untouched to avoid a silent unit change + inventory conversion. For
+  // a brand-new product the stocking unit follows the first purchase's pack unit.
+  section.style.display = 'none';
+  note.style.display = 'none';
+  if (!productId) {
+    const packUnitEl = document.getElementById('ePackUnit');
+    if (packUnitEl && packUnitEl.value) setSelectValueCI(sel, packUnitEl.value.trim().toLowerCase());
+  }
+  updatePackPreview();   // cascades the unit to the pack labels + reorder unit
+}
+
 function _isEach(unit) {
   return String(unit || '').trim().toLowerCase() === 'each';
 }
@@ -1201,11 +1268,13 @@ async function onPackUnitChange() {
       select.value = prevUnit;
       select.dataset.prevUnit = prevUnit;
       updateEntryCostPerUnit();
+      updateStockUnitVisibility();   // unit reverted — re-check for a conflict
       return;  // reverted — leave other entries alone
     }
     // "Keep anyway" — relabel only; convert whatever sibling entries can convert.
     await _convertAllEntriesToUnit(prevUnit, newUnit);
     updateEntryCostPerUnit();
+    updateStockUnitVisibility();   // some entries may still differ → conflict may show
     return;
   }
 
@@ -1218,6 +1287,7 @@ async function onPackUnitChange() {
 
   await _convertAllEntriesToUnit(prevUnit, newUnit);
   updateEntryCostPerUnit();
+  updateStockUnitVisibility();   // entries now share a unit → section hides; new product follows this unit
 }
 
 // Convert cost_per_unit + pack_unit for all sibling entries (not the one in the form).
@@ -1887,8 +1957,13 @@ window.confirmMerge       = confirmMerge;
 // merge the rest + remember absorbed names as vendor aliases).
 let _groupSelected = new Set();
 
-function openGroupProductsModal() {
+function openGroupProductsModal(preselectId) {
   _groupSelected = new Set();
+  // Launched from a product row: start with that product ticked so the user only
+  // needs to add its interchangeable siblings.
+  if (preselectId && allGeneric.some(g => g.id === preselectId && !g.deleted_at)) {
+    _groupSelected.add(preselectId);
+  }
   document.getElementById('groupGeneralName').value   = '';
   document.getElementById('groupProductSearch').value = '';
   renderGroupPicker();
