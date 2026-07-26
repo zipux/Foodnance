@@ -1404,17 +1404,19 @@ app.post('/api/bulk/upsert-products', async (c) => {
   let supplierName = ''
   let supplierCreated = false
 
+  const org = orgOf(c)
   const vendorName = (body.vendor_name || '').trim()
   if (vendorName) {
     let existingSupplier = await c.env.DB.prepare(
-      `SELECT id, name FROM suppliers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))`
-    ).bind(vendorName).first<{ id: string; name: string }>()
+      `SELECT id, name FROM suppliers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND org_id IS ?`
+    ).bind(vendorName, org).first<{ id: string; name: string }>()
 
     // No exact match: fuzzy-match against existing suppliers and reuse one for
     // near-identical names (auto tier) so a punctuation/typo variation doesn't
     // spawn a duplicate. Looser "suggest"-tier matches are left to the review UI.
     if (!existingSupplier) {
-      const all = await c.env.DB.prepare(`SELECT id, name FROM suppliers`).all<{ id: string; name: string }>()
+      const all = await c.env.DB.prepare(`SELECT id, name FROM suppliers WHERE org_id IS ?`)
+        .bind(org).all<{ id: string; name: string }>()
       const m = classifySupplierMatch(vendorName, all.results || [])
       if (m.decision === 'auto' && m.match) existingSupplier = m.match
     }
@@ -1427,8 +1429,8 @@ app.post('/api/bulk/upsert-products', async (c) => {
       supplierId   = uid()
       supplierName = vendorName
       await c.env.DB.prepare(
-        `INSERT INTO suppliers (id, name, contact, email, notes) VALUES (?, ?, '', '', '')`
-      ).bind(supplierId, vendorName).run()
+        `INSERT INTO suppliers (id, name, contact, email, notes, org_id) VALUES (?, ?, '', '', '', ?)`
+      ).bind(supplierId, vendorName, org).run()
       supplierCreated = true
     }
   }
@@ -1446,8 +1448,8 @@ app.post('/api/bulk/upsert-products', async (c) => {
     // the product views display. The vendor's wording is kept in
     // vendor_item_name below, so nothing is lost.
     let existing = await c.env.DB.prepare(
-      `SELECT id, name FROM generic_products WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND deleted_at IS NULL`
-    ).bind(name).first<{ id: string; name: string }>()
+      `SELECT id, name FROM generic_products WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND deleted_at IS NULL AND org_id IS ?`
+    ).bind(name, org).first<{ id: string; name: string }>()
 
     // 1b. Not found by name — try the aliases, most specific rule first.
     //
@@ -1459,13 +1461,16 @@ app.post('/api/bulk/upsert-products', async (c) => {
     // Supplier-specific wins so two vendors can use the same wording for
     // different items without one silently mislinking to the other.
     if (!existing && supplierId) {
+      // Both sides of the join are filtered: an alias row and the product it
+      // points at must belong to this business.
       const scoped = await c.env.DB.prepare(
         `SELECT pa.generic_product_id AS id, gp.name AS name FROM product_aliases pa
          JOIN generic_products gp ON gp.id = pa.generic_product_id
          WHERE LOWER(TRIM(pa.alias_name)) = LOWER(TRIM(?))
            AND pa.supplier_id = ?
-           AND gp.deleted_at IS NULL`
-      ).bind(name, supplierId).first<{ id: string; name: string }>()
+           AND gp.deleted_at IS NULL
+           AND pa.org_id IS ? AND gp.org_id IS ?`
+      ).bind(name, supplierId, org, org).first<{ id: string; name: string }>()
       if (scoped) existing = scoped
     }
     if (!existing) {
@@ -1474,8 +1479,9 @@ app.post('/api/bulk/upsert-products', async (c) => {
          JOIN generic_products gp ON gp.id = pa.generic_product_id
          WHERE LOWER(TRIM(pa.alias_name)) = LOWER(TRIM(?))
            AND pa.supplier_id IS NULL
-           AND gp.deleted_at IS NULL`
-      ).bind(name).first<{ id: string; name: string }>()
+           AND gp.deleted_at IS NULL
+           AND pa.org_id IS ? AND gp.org_id IS ?`
+      ).bind(name, org, org).first<{ id: string; name: string }>()
       if (aliasMatch) existing = aliasMatch
     }
 
@@ -1495,14 +1501,15 @@ app.post('/api/bulk/upsert-products', async (c) => {
       const isPlaceholder = !providedCategory || providedCategory === 'Ingredients' || providedCategory === 'Other'
       const category = isPlaceholder ? inferCategory(name) : providedCategory
       await c.env.DB.prepare(
-        `INSERT INTO generic_products (id, name, category, sub_unit_name, sub_unit_qty)
-         VALUES (?, ?, ?, ?, ?)`
+        `INSERT INTO generic_products (id, name, category, sub_unit_name, sub_unit_qty, org_id)
+         VALUES (?, ?, ?, ?, ?, ?)`
       ).bind(
         genericId,
         name,
         category,
         (p.sub_unit_name as string) || '',
-        p.sub_unit_qty ?? null
+        p.sub_unit_qty ?? null,
+        org
       ).run()
       createdGenerics++
     }
@@ -1548,8 +1555,8 @@ app.post('/api/bulk/upsert-products', async (c) => {
          (id, generic_product_id, generic_product_name, supplier_id, supplier_name,
           vendor_item_name, sku, pack_qty, pack_unit, cost, cost_per_unit,
           purchase_date, expiry_date, days_left, invoice_ref,
-          invoice_id, invoice_file_key, invoice_file_name, qty_ordered)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          invoice_id, invoice_file_key, invoice_file_name, qty_ordered, org_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       entryId, genericId, canonicalName,
       rowSupplierId, rowSupplierName,
@@ -1564,7 +1571,8 @@ app.post('/api/bulk/upsert-products', async (c) => {
       (p.invoice_id as string) || '',
       (p.invoice_file_key as string) || '',
       (p.invoice_file_name as string) || '',
-      qtyOrdered
+      qtyOrdered,
+      org
     ).run()
 
     saved++
