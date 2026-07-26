@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Log in — DoughMeter</title>
+  <meta name="robots" content="noindex" />
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <style>
+    /* Standalone like landing.html — does NOT load /static/style.css (app chrome).
+       Tokens copied from :root there; keep in sync if --primary changes. */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary:    #4f46e5;
+      --primary-d:  #3730a3;
+      --border:     #e2e8f0;
+      --text:       #1e293b;
+      --text-muted: #64748b;
+      --radius-sm:  8px;
+    }
+
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      color: var(--text);
+      background: linear-gradient(160deg, #eef2ff 0%, #f8fafc 45%, #f1f5f9 100%);
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      padding: 1.5rem;
+      font-size: 16px; line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .shell { width: 100%; max-width: 400px; }
+
+    .brand {
+      display: flex; align-items: center; justify-content: center; gap: .55rem;
+      font-weight: 800; font-size: 1.3rem; letter-spacing: -.01em;
+      color: var(--text); text-decoration: none; margin-bottom: 1.5rem;
+    }
+    .brand i { color: var(--primary); }
+
+    .card {
+      background: #fff; border: 1px solid var(--border);
+      border-radius: 14px; padding: 2rem 1.75rem;
+      box-shadow: 0 18px 48px rgba(15,23,42,.10);
+    }
+    .card h1 { font-size: 1.4rem; font-weight: 800; letter-spacing: -.02em; margin-bottom: .3rem; }
+    .card .lede { font-size: .92rem; color: var(--text-muted); margin-bottom: 1.5rem; }
+
+    label {
+      display: block; font-size: .82rem; font-weight: 600;
+      margin-bottom: .35rem; color: var(--text);
+    }
+    .field { margin-bottom: 1rem; }
+    input[type="email"], input[type="password"] {
+      width: 100%; font-family: inherit; font-size: .95rem;
+      padding: .65rem .8rem; color: var(--text);
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      background: #fff; transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    input:focus {
+      outline: none; border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(79,70,229,.12);
+    }
+
+    .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.25rem; }
+    .remember { display: flex; align-items: center; gap: .4rem; font-size: .85rem; color: var(--text-muted); }
+    .remember input { accent-color: var(--primary); }
+    .link { font-size: .85rem; color: var(--primary); text-decoration: none; font-weight: 500; }
+    .link:hover { text-decoration: underline; }
+
+    button.submit {
+      width: 100%; font-family: inherit; font-size: .98rem; font-weight: 600;
+      padding: .75rem 1rem; border: none; border-radius: var(--radius-sm);
+      color: #fff; cursor: pointer;
+      background: linear-gradient(180deg, var(--primary), var(--primary-d));
+      box-shadow: 0 2px 10px rgba(79,70,229,.28);
+      transition: transform .15s ease, box-shadow .15s ease;
+      display: flex; align-items: center; justify-content: center; gap: .5rem;
+    }
+    button.submit:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(79,70,229,.34); }
+
+    /* Early-access disclosure. DELETE THIS BLOCK (and .notice in the markup)
+       once /api/auth/login is wired and credentials are actually checked. */
+    .notice {
+      margin-top: 1.25rem; padding: .7rem .85rem;
+      background: #fffbeb; border: 1px solid #fde68a; border-radius: var(--radius-sm);
+      font-size: .82rem; color: #92400e;
+      display: flex; align-items: flex-start; gap: .5rem;
+    }
+    .notice i { margin-top: .15rem; }
+
+    .below { text-align: center; margin-top: 1.5rem; font-size: .88rem; color: var(--text-muted); }
+    .below a { color: var(--primary); text-decoration: none; font-weight: 500; }
+    .below a:hover { text-decoration: underline; }
+    .back { display: block; text-align: center; margin-top: 1rem; font-size: .85rem; color: var(--text-muted); text-decoration: none; }
+    .back:hover { color: var(--text); }
+  </style>
+</head>
+<body>
+
+  <div class="shell">
+    <a class="brand" href="/landing"><i class="fas fa-receipt"></i> DoughMeter</a>
+
+    <div class="card">
+      <h1>Log in</h1>
+      <p class="lede">Welcome back. Pick up where you left off.</p>
+
+      <!-- Fields are intentionally NOT `required` while the gate is open: the user
+           asked for entry with no credentials set up. When /api/auth/login exists,
+           add `required`, POST this form, and handle a 401. -->
+      <form id="loginForm" novalidate>
+        <div class="field">
+          <label for="email">Email</label>
+          <input type="email" id="email" name="email" autocomplete="username"
+                 placeholder="you@yourbusiness.com" />
+        </div>
+
+        <div class="field">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" autocomplete="current-password"
+                 placeholder="••••••••" />
+        </div>
+
+        <div class="row">
+          <label class="remember"><input type="checkbox" id="remember" /> Remember me</label>
+          <a class="link" href="mailto:simoneisonni@gmail.com?subject=DoughMeter%20—%20password%20help">Forgot password?</a>
+        </div>
+
+        <button type="submit" class="submit">
+          <i class="fas fa-arrow-right-to-bracket"></i> Log in
+        </button>
+      </form>
+
+      <div class="notice">
+        <i class="fas fa-circle-info"></i>
+        <span><strong>Early access.</strong> Sign-in isn't enforced yet — leave the fields
+        blank and continue.</span>
+      </div>
+    </div>
+
+    <p class="below">Don't have an account?
+      <a href="mailto:simoneisonni@gmail.com?subject=DoughMeter%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20DoughMeter.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">Request access</a>
+    </p>
+    <a class="back" href="/landing"><i class="fas fa-arrow-left"></i> Back to homepage</a>
+  </div>
+
+  <script>
+    // ── Placeholder gate ────────────────────────────────────────────────
+    // There is NO authentication behind this yet: it marks the session and
+    // forwards into the app. It is not a security boundary — app pages and
+    // /api/* are still reachable directly by URL.
+    //
+    // To make it real (Phase 1 of the accounts plan):
+    //   1. POST {email, password} to /api/auth/login
+    //   2. Backend sets a signed HttpOnly session cookie (needs SESSION_SECRET)
+    //   3. On 401 show an error here instead of forwarding
+    //   4. Drop the sessionStorage flag below — the cookie becomes the truth
+    const AFTER_LOGIN = '/home';   // Price Movers, the first tab in the app nav
+
+    document.getElementById('loginForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      try {
+        // Read but deliberately unused: keeps the wiring obvious for whoever
+        // swaps in the real POST.
+        const email = document.getElementById('email').value.trim();
+        sessionStorage.setItem('dm_gate', '1');
+        if (email) sessionStorage.setItem('dm_gate_email', email);
+      } catch (_) {
+        // Private-mode browsers can throw on storage — the gate must still open.
+      }
+      window.location.href = AFTER_LOGIN;
+    });
+  </script>
+
+</body>
+</html>
