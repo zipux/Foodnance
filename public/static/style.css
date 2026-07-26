@@ -559,20 +559,6 @@ body {
   box-shadow: 0 0 0 3px rgba(79,70,229,.1);
 }
 
-/* ===== MANUAL ROWS ===== */
-.manual-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)) 36px;
-  gap: .5rem;
-  align-items: end;
-  margin-bottom: .75rem;
-  padding: .75rem;
-  background: #fafbff;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-.manual-row .form-group label { font-size: .72rem; }
-
 /* ===== RECIPE LAYOUT ===== */
 .recipe-layout {
   display: grid;
@@ -693,7 +679,6 @@ body {
 }
 .detail-cost-box .label { font-weight: 600; color: var(--text); }
 .detail-cost-box .amount { font-size: 1.5rem; font-weight: 700; color: var(--primary); }
-.detail-cost-box .per-serving { font-size: .8rem; color: var(--text-muted); margin-top: .1rem; }
 
 /* ===== SUB-UNIT SECTION ===== */
 .sub-unit-section {

@@ -151,15 +151,6 @@
 /* The row left behind while its copy follows the pointer. */
 .sl-item.is-dragging { opacity: .35; }
 
-/* Where the row will land. */
-.sl-drop-marker {
-  height: 2px;
-  background: var(--primary);
-  border-radius: 2px;
-  margin: .15rem .6rem;
-  box-shadow: 0 0 0 3px rgba(79, 70, 229, .12);
-}
-
 /* Floating copy that tracks the pointer. */
 .sl-ghost {
   position: fixed;

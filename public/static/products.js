@@ -44,9 +44,6 @@ document.getElementById('saveProductBtn').addEventListener('click', saveGenericP
 
   // Entry form controls
   document.getElementById('openAddEntryBtn').addEventListener('click', openAddEntryForm);
-  // Vendor names are learned automatically from invoices now; the manual add
-  // button only exists in older markup, so wire it only if it's present.
-  document.getElementById('addAliasBtn')?.addEventListener('click', addAlias);
   document.getElementById('eCost').addEventListener('input',       updateEntryCostPerUnit);
   document.getElementById('ePackQty').addEventListener('input',    updateEntryCostPerUnit);
   document.getElementById('eQtyOrdered').addEventListener('input', updateEntryCostPerUnit);
@@ -724,11 +721,6 @@ async function loadSupplierDropdown() {
 
 let _aliasesForProduct = [];
 
-// Case/whitespace-insensitive text compare (names, not units).
-function _sameText(a, b) {
-  return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
-}
-
 async function renderAliases(genericId) {
   const wrap      = document.getElementById('aliasWrap');
   const saveFirst = document.getElementById('aliasSaveFirst');
@@ -744,14 +736,6 @@ async function renderAliases(genericId) {
   }
   wrap.style.display      = '';
   saveFirst.style.display = 'none';
-
-  // Vendor picker only exists in the older manual-add markup; populate it when
-  // present so nothing breaks, but names are learned from invoices now.
-  const sel = document.getElementById('aliasSupplier');
-  if (sel) {
-    sel.innerHTML = '<option value="">Any vendor</option>' +
-      allSupplierList.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
-  }
 
   try {
     const data = await apiGet(`tables/product_aliases?generic_product_id=${encodeURIComponent(genericId)}`);
@@ -781,43 +765,6 @@ async function renderAliases(genericId) {
   }).join('');
 }
 
-async function addAlias() {
-  const genericId = document.getElementById('editProductId').value;
-  if (!genericId) { showToast('Save the product first.', 'error'); return; }
-
-  const nameEl = document.getElementById('aliasName');
-  const name   = (nameEl.value || '').trim();
-  if (!name) { showToast('Enter the name that appears on the invoice.', 'error'); return; }
-
-  const supplierId = document.getElementById('aliasSupplier').value || null;
-
-  // An alias identical to the product's own name is redundant — the exact-name
-  // match already handles it.
-  const ownName = (document.getElementById('pName').value || '').trim();
-  if (_sameText(name, ownName)) {
-    showToast('That is already the product name.', 'error'); return;
-  }
-  // Same name + same scope twice would just be dead rows.
-  const dup = _aliasesForProduct.some(a =>
-    _sameText(a.alias_name, name) && (a.supplier_id || null) === supplierId);
-  if (dup) { showToast('That vendor name is already listed.', 'error'); return; }
-
-  try {
-    await apiPost('tables/product_aliases', {
-      alias_name:         name,
-      generic_product_id: genericId,
-      supplier_id:        supplierId,
-    });
-    nameEl.value = '';
-    document.getElementById('aliasSupplier').value = '';
-    hideAliasNameDropdown();
-    await renderAliases(genericId);
-    showToast('Vendor name added.', 'success');
-  } catch (e) {
-    showToast('Could not add vendor name: ' + e.message, 'error');
-  }
-}
-
 async function deleteAlias(id) {
   // Removing an alias only stops future invoices auto-linking by that name —
   // purchases already filed against the product are untouched.
@@ -832,116 +779,6 @@ async function deleteAlias(id) {
 }
 
 window.deleteAlias = deleteAlias;
-
-// ── Vendor-name autocomplete ───────────────────────────────────
-// The "Name on the invoice" field suggests wordings that have ACTUALLY appeared
-// on invoices (product_entries.vendor_item_name, already loaded in allEntries),
-// so the alias matches the real string. An alias only fires on an exact
-// (lower/trim) match, so a hand-typed typo would silently never link — picking a
-// real wording guarantees it works. Free-typing is still allowed for a wording
-// that hasn't been received yet.
-let _aliasSuggestions = [];
-
-// Build the ranked suggestion list for the current query, honouring the scope
-// filters: exclude the product's own name and names already added as aliases;
-// when a specific vendor is chosen, only that vendor's wordings; wordings that
-// already land on ANOTHER product (the substitute candidates) rank first.
-function _buildAliasSuggestions(query) {
-  const q          = (query || '').trim().toLowerCase();
-  const currentId  = document.getElementById('editProductId').value;
-  const ownName    = (document.getElementById('pName').value || '').trim().toLowerCase();
-  const supplierId = document.getElementById('aliasSupplier').value || '';
-  const already    = new Set(_aliasesForProduct.map(a => (a.alias_name || '').trim().toLowerCase()));
-
-  // Distinct wordings from purchase history, keyed case-insensitively.
-  const byWording = new Map();
-  for (const e of allEntries) {
-    const w = (e.vendor_item_name || '').trim();
-    if (!w) continue;
-    if (supplierId && e.supplier_id !== supplierId) continue;
-    const key = w.toLowerCase();
-    if (key === ownName) continue;   // same as this product's own name — redundant
-    if (already.has(key)) continue;  // already added here
-    let rec = byWording.get(key);
-    if (!rec) {
-      rec = { name: w, productIds: new Set(), productName: '', suppliers: new Set() };
-      byWording.set(key, rec);
-    }
-    if (e.generic_product_id) {
-      rec.productIds.add(e.generic_product_id);
-      // Prefer a name from an entry NOT on the current product (the substitute's
-      // own product name is the useful label here).
-      if (!rec.productName || e.generic_product_id !== currentId) {
-        rec.productName = e.generic_product_name || rec.productName;
-      }
-    }
-    if (e.supplier_name) rec.suppliers.add(e.supplier_name);
-  }
-
-  let list = Array.from(byWording.values())
-    // Drop wordings that ONLY ever land on THIS product — they already route
-    // here, so aliasing them adds nothing. Keep unmatched ones (empty set) and
-    // anything that touches another product.
-    .filter(r => !(r.productIds.size > 0 && [...r.productIds].every(id => id === currentId)));
-
-  if (q) list = list.filter(r => r.name.toLowerCase().includes(q));
-
-  // Substitute candidates (currently on a different product) first, then A–Z.
-  list.sort((a, b) => {
-    const aCand = [...a.productIds].some(id => id !== currentId) ? 0 : 1;
-    const bCand = [...b.productIds].some(id => id !== currentId) ? 0 : 1;
-    if (aCand !== bCand) return aCand - bCand;
-    return a.name.localeCompare(b.name);
-  });
-
-  return list.slice(0, 10).map(r => {
-    const productName = r.productName
-      || (r.productIds.size ? (allGeneric.find(g => r.productIds.has(g.id))?.name || '') : '');
-    const supArr = [...r.suppliers];
-    const sup = supArr.length === 0 ? '' : supArr.length === 1 ? supArr[0] : `${supArr.length} vendors`;
-    let context;
-    if (productName) context = `currently: ${productName}${sup ? ' · ' + sup : ''}`;
-    else if (sup)    context = `seen from ${sup}`;
-    else             context = 'not yet linked';
-    return { name: r.name, context };
-  });
-}
-
-function onAliasNameInput() {
-  const dd = document.getElementById('aliasNameDropdown');
-  if (!dd) return;
-  // Wait for a couple of characters before suggesting — otherwise focusing the
-  // field would dump every invoice wording in alphabetical order, which is noise.
-  const typed = (document.getElementById('aliasName').value || '').trim();
-  if (typed.length < 2) { dd.style.display = 'none'; return; }
-  _aliasSuggestions = _buildAliasSuggestions(typed);
-  if (!_aliasSuggestions.length) { dd.style.display = 'none'; return; }
-  dd.innerHTML = _aliasSuggestions.map((s, i) => `
-    <div class="merge-dd-item" onmousedown="selectAliasName(${i})"
-         style="padding:.5rem 1rem;cursor:pointer;font-size:.9rem;border-bottom:1px solid #f1f5f9"
-         onmouseover="this.style.background='#f0f9ff'" onmouseout="this.style.background=''">
-      <div style="font-weight:600">${esc(s.name)}</div>
-      <div style="color:var(--text-muted);font-size:.76rem;margin-top:.1rem">${esc(s.context)}</div>
-    </div>`).join('');
-  dd.style.display = 'block';
-}
-
-// mousedown (not click) so the pick registers before the input's blur fires.
-function selectAliasName(i) {
-  const s = _aliasSuggestions[i];
-  if (!s) return;
-  document.getElementById('aliasName').value = s.name;
-  hideAliasNameDropdown();
-}
-
-function hideAliasNameDropdown() {
-  const dd = document.getElementById('aliasNameDropdown');
-  if (dd) dd.style.display = 'none';
-}
-
-window.onAliasNameInput      = onAliasNameInput;
-window.selectAliasName       = selectAliasName;
-window.hideAliasNameDropdown = hideAliasNameDropdown;
 
 function openAddEntryForm() {
   document.getElementById('editEntryId').value    = '';
@@ -1639,52 +1476,6 @@ async function confirmEntryInventory() {
     btn.innerHTML = '<i class="fas fa-warehouse"></i> Add to Inventory';
   }
 }
-
-// ── Expose globally for recipes.js and finished-products.js ──
-window.productsAPI = {
-  allGeneric:     () => allGeneric,
-  allEntries:     () => allEntries,
-  entryPackQty,
-  entryPackUnit,
-};
-
-// ── bulkSaveProducts: used by invoice.js to save rows from an uploaded invoice ──
-// Each row has: { name, brand, sku, pack_size, cost, expiry_date, invoice_ref,
-//                 invoice_id, invoice_file_key, invoice_file_name }
-// Optional: vendor_name (string) — auto-creates the supplier if new.
-// Logic: find-or-create supplier + generic_product by name, always add a new product_entry.
-async function bulkSaveProducts(rows, vendorName = '') {
-  const valid = rows.filter(r => r.name && r.name.trim());
-  if (!valid.length) return 0;
-
-  try {
-    const result = await apiPost('bulk/upsert-products', {
-      vendor_name: vendorName || '',
-      products: valid,
-    });
-
-    // Refresh internal cache so inventory prompt can find the new records
-    const [gd, ed] = await Promise.all([
-      apiGet(`tables/${GENERIC_TABLE}?page=1&limit=500`),
-      apiGet(`tables/${ENTRIES_TABLE}?page=1&limit=1000`),
-    ]);
-    allGeneric = gd.data || [];
-    allEntries = ed.data || [];
-
-    // Return a result object so invoice.js can show a smart toast
-    return result;
-  } catch (e) {
-    console.error('bulkSaveProducts error:', e);
-    return { saved: 0, created_generics: 0, reused_generics: 0 };
-  }
-}
-window.bulkSaveProducts = bulkSaveProducts;
-
-// ── loadProducts: called by invoice.js after saving ───────────
-async function loadProducts() {
-  await loadAll();
-}
-window.loadProducts = loadProducts;
 
 // Reload unit dropdowns after manage-units changes
 registerUnitRefreshCallback(async () => {

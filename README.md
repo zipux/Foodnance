@@ -1,7 +1,7 @@
-# InvoiceDB — Production Cost, Inventory & Staff Certification Manager
+# DoughMeter — Production Cost, Inventory & Staff Certification Manager
 
 ## Project Overview
-- **Name**: InvoiceDB
+- **Name**: DoughMeter
 - **Goal**: Full-featured business management platform for food/product businesses
 - **Backend**: Hono + Cloudflare Workers (edge API)
 - **Storage**: Cloudflare D1 (SQLite database) + Cloudflare R2 (file storage)

@@ -456,14 +456,3 @@
   vertical-align: middle;
   box-shadow: 0 0 0 2px rgba(234, 179, 8, .15);
 }
-.inv-not-counted-label {
-  display: inline-block;
-  margin-left: .4rem;
-  font-size: .7rem;
-  font-weight: 600;
-  color: #854d0e;
-  background: #fef9c3;
-  padding: .1rem .4rem;
-  border-radius: 4px;
-  vertical-align: middle;
-}

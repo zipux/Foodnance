@@ -2119,32 +2119,3 @@ async function confirmInvPrompt(invoiceRef) {
   closeModal('invPromptModal');
   showToast(`${added} item(s) added to inventory!`, 'success');
 }
-
-// ── Expose helper for invoice.js to call after upload ──────────
-window.saveInvoiceRecord = async function({ vendor, invoiceNumber, invoiceDate, total, fileName, fileKey = '', fileUrl = '', paymentAccount = 'A/P', lines = [] }) {
-  const today = new Date().toISOString().slice(0, 10);
-  try {
-    const record = await apiPost(`tables/${INV_LIST_TABLE}`, {
-      vendor:           vendor          || '',
-      invoice_number:   invoiceNumber   || '',
-      invoice_date:     invoiceDate     || today,
-      upload_date:      today,
-      total:            parseFloat(total) || 0,
-      status:           'In Processing',
-      payment_account:  paymentAccount,
-      file_name:        fileName        || '',
-      file_key:         fileKey         || '',
-      file_url:         fileUrl         || '',
-      notes:            '',
-    });
-    // Save line items if provided
-    if (lines.length && record.id) {
-      await apiPost(`invoice-lines/${record.id}/replace`, { lines });
-    }
-    // Refresh invoice list if we're on the invoices page
-    if (typeof loadInvoices === 'function') await loadInvoices();
-    return record;
-  } catch (e) {
-    console.warn('Could not save invoice record:', e.message);
-  }
-};

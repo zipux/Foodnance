@@ -31,6 +31,10 @@ const PAGES = [
 const CREATED_AT_RUNTIME = new Set([
   'invPageFrame', 'invZoomImg', 'invPageLabel',
   'invPagePrev', 'invPageNext', 'invImgZoomWrap',
+  // "Close anyway" override, injected into the static #totalMismatchNote
+  // container by renderTotalMismatchNote(). Clearing that container on invoice
+  // open is what resets the override.
+  'totalMismatchOverride',
 ]);
 
 const t = suite('dom-ids');
