@@ -103,6 +103,12 @@
       <span class="brand"><i class="fas fa-receipt"></i> DoughMeter</span>
       <span class="pill" style="background:rgba(255,255,255,.2);color:#fff">Admin</span>
       <span class="spacer"></span>
+      <!-- Without this a super-admin lands here after signing in with no way to
+           reach their own data — the admin screen has none of the app's nav. -->
+      <a href="/home" style="color:#fff;text-decoration:none;font-size:.85rem;font-weight:600;opacity:.95"
+         title="Your own products, invoices and reports">
+        <i class="fas fa-arrow-right-to-bracket"></i> Open the app
+      </a>
       <span class="who" id="whoami"></span>
       <button id="logoutBtn"><i class="fas fa-arrow-right-from-bracket"></i> Sign out</button>
     </div>
