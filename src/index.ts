@@ -667,7 +667,109 @@ app.post('/api/auth/logout', async (c) => {
 app.get('/api/auth/me', async (c) => {
   const me = await currentUser(c)
   if (!me) return c.json({ error: 'Not signed in.' }, 401)
-  return c.json({ user: publicUser(me) })
+
+  // When a super-admin is viewing a customer's data, say so — the app uses this
+  // to show the warning bar, and it's how the operator knows whose numbers
+  // they're looking at.
+  let viewing_as = null
+  if (me.role === 'super_admin') {
+    const viewOrg = readCookie(c.req.header('cookie'), VIEW_ORG_COOKIE)
+    if (viewOrg) {
+      const o = await c.env.DB.prepare('SELECT id, name FROM organizations WHERE id = ?')
+        .bind(viewOrg).first<{ id: string; name: string }>()
+      if (o) viewing_as = o
+    }
+  }
+  return c.json({ user: publicUser(me), viewing_as })
+})
+
+// ── Super-admin: view a customer's data without their password ──
+// POST /api/admin/view-as   Body: { org_id }  — omit/null to stop viewing.
+//
+// Sets a cookie that orgOf() reads. The operator stays signed in AS THEMSELVES
+// throughout — they are not becoming the customer. That distinction is what
+// keeps the audit trail honest ("Simone viewed Bella's Pizzeria", not "Maria
+// did something at 2am"), and it means the customer's password stays entirely
+// their own business: they can change it whenever they like without ever
+// locking the operator out.
+app.post('/api/admin/view-as', async (c) => {
+  if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)
+
+  const body = await c.req.json().catch(() => ({})) as { org_id?: string | null }
+  const orgId = (body.org_id || '').trim()
+
+  if (!orgId) {
+    c.header('Set-Cookie', `${VIEW_ORG_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`)
+    return c.json({ ok: true, viewing_as: null })
+  }
+
+  const org = await c.env.DB.prepare('SELECT id, name FROM organizations WHERE id = ?')
+    .bind(orgId).first<{ id: string; name: string }>()
+  if (!org) return c.json({ error: 'Restaurant not found.' }, 404)
+
+  const secure = new URL(c.req.url).protocol === 'https:' ? ' Secure;' : ''
+  c.header('Set-Cookie',
+    `${VIEW_ORG_COOKIE}=${encodeURIComponent(org.id)}; Path=/; HttpOnly;${secure} SameSite=Lax; Max-Age=${60 * 60 * 8}`)
+  return c.json({ ok: true, viewing_as: org })
+})
+
+// ── Change your own password ──────────────────────────────────
+// Requires the current one, so a borrowed unlocked laptop can't be used to
+// lock the real owner out. No email involved: there is no reset link to send.
+app.post('/api/auth/change-password', async (c) => {
+  const me = await currentUser(c)
+  if (!me) return c.json({ error: 'Not signed in.' }, 401)
+
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const currentPassword = String(body.current_password || '')
+  const newPassword = String(body.new_password || '')
+  if (newPassword.length < MIN_PASSWORD_LEN) {
+    return c.json({ error: `New password must be at least ${MIN_PASSWORD_LEN} characters.` }, 400)
+  }
+
+  const row = await c.env.DB.prepare(
+    'SELECT password_hash, password_salt, password_iter FROM users WHERE id = ?',
+  ).bind(me.id).first<any>()
+  if (!row) return c.json({ error: 'Not signed in.' }, 401)
+
+  const ok = await verifyPassword(currentPassword, row.password_salt, row.password_hash, row.password_iter)
+  if (!ok) return c.json({ error: 'Current password is incorrect.' }, 403)
+
+  const salt = randomHex(16)
+  const hash = await hashPassword(newPassword, salt)
+  await c.env.DB.prepare(
+    'UPDATE users SET password_hash = ?, password_salt = ?, password_iter = ? WHERE id = ?',
+  ).bind(hash, salt, PBKDF2_ITERATIONS, me.id).run()
+
+  return c.json({ ok: true })
+})
+
+// ── Super-admin: reset someone's forgotten password ───────────
+// The manual-onboarding counterpart to a reset email: the operator sets a new
+// temporary password and tells the customer, exactly as at signup. Deliberately
+// does NOT reveal the old one — it is not recoverable, only replaceable.
+app.post('/api/admin/users/reset-password', async (c) => {
+  if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)
+
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const email = normalizeEmail(body.email)
+  const newPassword = String(body.new_password || '')
+  if (newPassword.length < MIN_PASSWORD_LEN) {
+    return c.json({ error: `Password must be at least ${MIN_PASSWORD_LEN} characters.` }, 400)
+  }
+
+  const user = await c.env.DB.prepare(
+    'SELECT id, email FROM users WHERE email = ? AND archived_at IS NULL',
+  ).bind(email).first<{ id: string; email: string }>()
+  if (!user) return c.json({ error: 'No account with that email.' }, 404)
+
+  const salt = randomHex(16)
+  const hash = await hashPassword(newPassword, salt)
+  await c.env.DB.prepare(
+    'UPDATE users SET password_hash = ?, password_salt = ?, password_iter = ? WHERE id = ?',
+  ).bind(hash, salt, PBKDF2_ITERATIONS, user.id).run()
+
+  return c.json({ ok: true, email: user.email })
 })
 
 // ── Super-admin: create a customer account ────────────────────
@@ -1052,13 +1154,32 @@ app.post('/api/invoices/:id/restore', async (c) => {
 // ─── File Upload (R2) ─────────────────────────────────────────
 // POST /api/upload  → multipart/form-data: field "file"
 // Returns: { key, url, name, size, type }
+// R2 has no per-row ownership, so the owner is encoded in the key itself:
+//   uploads/<orgSegment>/<uid>.<ext>
+// Reads verify that segment against the caller. Keys written before accounts
+// existed have no segment (uploads/<uid>.<ext>) and belong to the super-admin,
+// which is correct — all of them are Simone's.
+const SUPER_SEGMENT = '_super'
+
+function orgSegment(org: string | null): string {
+  return org || SUPER_SEGMENT
+}
+
+function orgFromKey(key: string): string | null {
+  const parts = String(key || '').split('/')
+  if (parts.length >= 3 && parts[0] === 'uploads') {
+    return parts[1] === SUPER_SEGMENT ? null : parts[1]
+  }
+  return null   // legacy, pre-accounts key
+}
+
 app.post('/api/upload', async (c) => {
   const formData = await c.req.formData()
   const file = formData.get('file') as File | null
   if (!file) return c.json({ error: 'No file provided' }, 400)
 
   const ext = file.name.split('.').pop()?.toLowerCase() || 'bin'
-  const key = `uploads/${uid()}.${ext}`
+  const key = `uploads/${orgSegment(orgOf(c))}/${uid()}.${ext}`
 
   await c.env.FILES.put(key, file.stream(), {
     httpMetadata: { contentType: file.type || 'application/octet-stream' },
@@ -1077,6 +1198,12 @@ app.post('/api/upload', async (c) => {
 // ─── File Download (R2) ───────────────────────────────────────
 app.get('/api/files/:prefix{.+}', async (c) => {
   const key = c.req.param('prefix')
+
+  // Ownership check BEFORE the fetch. An invoice photo is as sensitive as the
+  // invoice row it belongs to — prices, volumes, suppliers are all legible on
+  // it. 404 rather than 403 so the response doesn't confirm the key exists.
+  if (orgFromKey(key) !== orgOf(c)) return c.json({ error: 'File not found' }, 404)
+
   const obj = await c.env.FILES.get(key)
   if (!obj) return c.json({ error: 'File not found' }, 404)
 

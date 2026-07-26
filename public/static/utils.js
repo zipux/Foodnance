@@ -48,12 +48,16 @@ async function renderSessionChip() {
   const nav = document.querySelector('.navbar');
   if (!nav || document.getElementById('sessionChip')) return;
 
-  let me = null;
+  let me = null, viewingAs = null;
   try {
     const r = await fetch('/api/auth/me');
-    if (r.ok) me = (await r.json()).user;
+    if (r.ok) { const d = await r.json(); me = d.user; viewingAs = d.viewing_as; }
   } catch (_) { return; }
   if (!me) return;
+
+  // Viewing a customer's data: make that impossible to miss. Without this an
+  // operator could edit a customer's numbers believing they were their own.
+  if (viewingAs) renderViewingAsBar(viewingAs);
 
   const chip = document.createElement('div');
   chip.id = 'sessionChip';
@@ -75,6 +79,34 @@ async function renderSessionChip() {
     e.preventDefault();
     await fetch('/api/auth/logout', { method: 'POST' });
     location.href = '/login';
+  });
+}
+
+// Amber bar pinned to the top while a super-admin is viewing a customer's data.
+function renderViewingAsBar(org) {
+  if (document.getElementById('viewingAsBar')) return;
+  const bar = document.createElement('div');
+  bar.id = 'viewingAsBar';
+  bar.style.cssText =
+    'position:sticky;top:0;z-index:200;display:flex;align-items:center;gap:.6rem;' +
+    'padding:.5rem 1rem;background:#fef3c7;border-bottom:1px solid #fcd34d;' +
+    'color:#92400e;font-size:.85rem;font-weight:600';
+  bar.innerHTML = `
+    <i class="fas fa-eye"></i>
+    <span>Viewing <strong>${esc(org.name)}</strong> — you are signed in as yourself, not as them.</span>
+    <button id="exitViewAs" style="margin-left:auto;font-family:inherit;font-size:.8rem;font-weight:600;
+            cursor:pointer;background:#92400e;color:#fff;border:none;border-radius:6px;padding:.3rem .7rem">
+      Exit
+    </button>`;
+  document.body.insertBefore(bar, document.body.firstChild);
+
+  document.getElementById('exitViewAs').addEventListener('click', async () => {
+    await fetch('/api/admin/view-as', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ org_id: null }),
+    });
+    location.href = '/admin';
   });
 }
 

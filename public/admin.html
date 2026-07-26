@@ -272,7 +272,7 @@
         }
         box.innerHTML = `
           <table>
-            <thead><tr><th>Name</th><th>Owner</th><th>Type</th><th>People</th><th>Added</th></tr></thead>
+            <thead><tr><th>Name</th><th>Owner</th><th>Type</th><th>People</th><th>Added</th><th></th></tr></thead>
             <tbody>${rows.map(o => `
               <tr>
                 <td><strong>${esc(o.name)}</strong></td>
@@ -280,11 +280,33 @@
                 <td><span class="pill">${esc(o.account_type)}</span></td>
                 <td>${o.user_count}</td>
                 <td>${esc((o.created_at || '').split(' ')[0])}</td>
+                <td style="text-align:right">
+                  <button class="btn btn-ghost" onclick="viewAs('${esc(o.id)}','${esc(o.name)}')"
+                          title="See their data — you stay signed in as yourself">
+                    <i class="fas fa-eye"></i> View
+                  </button>
+                </td>
               </tr>`).join('')}
             </tbody>
           </table>`;
       } catch (_) {
         box.innerHTML = '<div class="empty">Could not load.</div>';
+      }
+    }
+
+    // Look at a customer's data without their password. You stay signed in as
+    // yourself the whole time — see the note on /api/admin/view-as.
+    async function viewAs(orgId, name) {
+      try {
+        const r = await fetch('/api/admin/view-as', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ org_id: orgId }),
+        });
+        if (!r.ok) { msg('Could not switch view.', 'bad'); return; }
+        location.href = '/home';   // land in the app, now showing their data
+      } catch (_) {
+        msg('Could not reach the server.', 'bad');
       }
     }
 
