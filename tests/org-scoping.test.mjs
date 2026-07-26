@@ -119,4 +119,33 @@ t.check(
     : '',
 );
 
+// A statement can mention org_id and still be broken: the check above is
+// textual, so it passes happily when the handler never declared the `org`
+// variable it binds. That is a runtime ReferenceError — a 500 on a page that
+// looked audited. It happened once (GET /api/pnl), which is why this exists.
+//
+// For each route handler, if its body binds `org` it must also declare it.
+// Comments must be stripped first: prose like "another org's row" or a mention
+// of org-scoping.test.mjs matches the same word and produced two false alarms
+// on the first run. A check that cries wolf gets ignored.
+const stripComments = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+
+const handlerStarts = [...src.matchAll(/^app\.(get|post|put|patch|delete)\(\s*'([^']+)'/gm)];
+const missingOrgDecl = [];
+for (let i = 0; i < handlerStarts.length; i++) {
+  const start = handlerStarts[i].index;
+  const end = i + 1 < handlerStarts.length ? handlerStarts[i + 1].index : src.length;
+  const body = stripComments(src.slice(start, end));
+  // Uses `org` as a bind argument but never defines it in this handler.
+  const usesOrg = /\borg\b(?!_id|Of|anization)/.test(body);
+  const declaresOrg = /\bconst\s+org\s*=/.test(body);
+  if (usesOrg && !declaresOrg) missingOrgDecl.push(`${handlerStarts[i][1].toUpperCase()} ${handlerStarts[i][2]}`);
+}
+
+t.check(
+  `handlers that bind org also declare it (${handlerStarts.length} routes)`,
+  missingOrgDecl.length === 0,
+  missingOrgDecl.length ? `undeclared in: ${missingOrgDecl.join(', ')}` : '',
+);
+
 t.done();

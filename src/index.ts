@@ -1027,8 +1027,8 @@ app.post('/api/invoices/:id/void', async (c) => {
     // Reverse the money side: flag the purchase entries this invoice created so
     // they stop counting toward Latest Price / price-movers / costing.
     c.env.DB.prepare(
-      "UPDATE product_entries SET voided_at = datetime('now') WHERE invoice_id = ?"
-    ).bind(id),
+      "UPDATE product_entries SET voided_at = datetime('now') WHERE invoice_id = ? AND org_id IS ?"
+    ).bind(id, org),
   ])
   return c.json({ id, voided_at: now, void_reason: reason })
 })
@@ -1248,9 +1248,10 @@ app.post('/api/ensure-invoice', async (c) => {
   const today = new Date().toISOString().slice(0, 10)
 
   // Check if invoice already exists for this file_key
+  const org = orgOf(c)
   const existing = await c.env.DB.prepare(
-    `SELECT id FROM invoices WHERE file_key = ?`
-  ).bind(body.file_key).first<{ id: string }>()
+    `SELECT id FROM invoices WHERE file_key = ? AND org_id IS ?`
+  ).bind(body.file_key, org).first<{ id: string }>()
 
   if (existing) {
     return c.json({ id: existing.id, created: false })
@@ -1261,9 +1262,10 @@ app.post('/api/ensure-invoice', async (c) => {
   await c.env.DB.prepare(
     `INSERT INTO invoices (id, vendor, invoice_number, invoice_date, upload_date, total,
        status, payment_account, file_name, file_key, file_url, notes,
-       tax_gst, tax_pst, delivery, fuel_surcharge, deposit, credit, other_cost, other_desc)
+       tax_gst, tax_pst, delivery, fuel_surcharge, deposit, credit, other_cost, other_desc,
+       org_id)
      VALUES (?, ?, ?, ?, ?, ?, 'In Processing', 'A/P', ?, ?, ?, '',
-             ?, ?, ?, 0, ?, ?, ?, ?)`
+             ?, ?, ?, 0, ?, ?, ?, ?, ?)`
   ).bind(
     invoiceId,
     body.vendor         || '',
@@ -1280,7 +1282,8 @@ app.post('/api/ensure-invoice', async (c) => {
     body.deposit    ?? 0,
     body.credit     ?? 0,
     body.other_cost ?? 0,
-    body.other_desc || ''
+    body.other_desc || '',
+    org
   ).run()
 
   return c.json({ id: invoiceId, created: true })
@@ -2562,13 +2565,13 @@ app.get('/api/product-mappings', async (c) => {
   if (!vendor) {
     // No vendor — return all mappings for client-side fuzzy matching
     const rows = await c.env.DB.prepare(
-      'SELECT * FROM product_mappings ORDER BY updated_at DESC'
-    ).all()
+      'SELECT * FROM product_mappings WHERE org_id IS ? ORDER BY updated_at DESC'
+    ).bind(orgOf(c)).all()
     return c.json({ data: rows.results })
   }
   const rows = await c.env.DB.prepare(
-    'SELECT * FROM product_mappings WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?)) ORDER BY updated_at DESC'
-  ).bind(vendor).all()
+    'SELECT * FROM product_mappings WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?)) AND org_id IS ? ORDER BY updated_at DESC'
+  ).bind(vendor, orgOf(c)).all()
   return c.json({ data: rows.results })
 })
 
@@ -2586,28 +2589,30 @@ app.post('/api/product-mappings', async (c) => {
     return c.json({ error: 'vendor_name, raw_ocr_text, and corrected_name are required' }, 400)
   }
 
+  const org = orgOf(c)
   const now = new Date().toISOString()
   const existing = await c.env.DB.prepare(
-    'SELECT id FROM product_mappings WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?)) AND LOWER(TRIM(raw_ocr_text)) = LOWER(TRIM(?))'
-  ).bind(body.vendor_name.trim(), body.raw_ocr_text.trim()).first<{ id: string }>()
+    'SELECT id FROM product_mappings WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?)) AND LOWER(TRIM(raw_ocr_text)) = LOWER(TRIM(?)) AND org_id IS ?'
+  ).bind(body.vendor_name.trim(), body.raw_ocr_text.trim(), org).first<{ id: string }>()
 
   if (existing) {
     await c.env.DB.prepare(
-      'UPDATE product_mappings SET corrected_name=?, corrected_brand=?, corrected_sku=?, corrected_pack_size=?, updated_at=? WHERE id=?'
+      'UPDATE product_mappings SET corrected_name=?, corrected_brand=?, corrected_sku=?, corrected_pack_size=?, updated_at=? WHERE id=? AND org_id IS ?'
     ).bind(
       body.corrected_name.trim(),
       body.corrected_brand?.trim() || '',
       body.corrected_sku?.trim() || '',
       body.corrected_pack_size?.trim() || '',
       now,
-      existing.id
+      existing.id,
+      org
     ).run()
     return c.json({ id: existing.id, created: false })
   }
 
   const id = uid()
   await c.env.DB.prepare(
-    'INSERT INTO product_mappings (id, vendor_name, raw_ocr_text, corrected_name, corrected_brand, corrected_sku, corrected_pack_size, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)'
+    'INSERT INTO product_mappings (id, vendor_name, raw_ocr_text, corrected_name, corrected_brand, corrected_sku, corrected_pack_size, created_at, updated_at, org_id) VALUES (?,?,?,?,?,?,?,?,?,?)'
   ).bind(
     id,
     body.vendor_name.trim(),
@@ -2616,7 +2621,7 @@ app.post('/api/product-mappings', async (c) => {
     body.corrected_brand?.trim() || '',
     body.corrected_sku?.trim() || '',
     body.corrected_pack_size?.trim() || '',
-    now, now
+    now, now, org
   ).run()
   return c.json({ id, created: true })
 })
@@ -2628,22 +2633,23 @@ app.post('/api/product-mappings', async (c) => {
 app.delete('/api/units/:id', async (c) => {
   const id    = c.req.param('id')
   const force = c.req.query('force') === 'true'
+  const org   = orgOf(c)
 
-  const unit = await c.env.DB.prepare(`SELECT * FROM units WHERE id = ?`)
-    .bind(id).first<{ id: number; name: string; sort_order: number }>()
+  const unit = await c.env.DB.prepare(`SELECT * FROM units WHERE id = ? AND org_id IS ?`)
+    .bind(id, org).first<{ id: number; name: string; sort_order: number }>()
   if (!unit) return c.json({ error: 'Not found' }, 404)
 
   if (!force) {
     const usage = await c.env.DB.prepare(
-      `SELECT COUNT(*) as count FROM product_entries WHERE pack_unit = ?`
-    ).bind(unit.name).first<{ count: number }>()
+      `SELECT COUNT(*) as count FROM product_entries WHERE pack_unit = ? AND org_id IS ?`
+    ).bind(unit.name, org).first<{ count: number }>()
     const count = usage?.count ?? 0
     if (count > 0) {
       return c.json({ warning: true, count, message: `Used by ${count} product entries` })
     }
   }
 
-  await c.env.DB.prepare(`DELETE FROM units WHERE id = ?`).bind(id).run()
+  await c.env.DB.prepare(`DELETE FROM units WHERE id = ? AND org_id IS ?`).bind(id, org).run()
   return c.body(null, 204)
 })
 
@@ -2656,23 +2662,24 @@ app.delete('/api/units/:id', async (c) => {
 app.delete('/api/categories/:id', async (c) => {
   const id    = c.req.param('id')
   const force = c.req.query('force') === 'true'
+  const org   = orgOf(c)
 
-  const cat = await c.env.DB.prepare(`SELECT * FROM categories WHERE id = ?`)
-    .bind(id).first<{ id: number; name: string; sort_order: number }>()
+  const cat = await c.env.DB.prepare(`SELECT * FROM categories WHERE id = ? AND org_id IS ?`)
+    .bind(id, org).first<{ id: number; name: string; sort_order: number }>()
   if (!cat) return c.json({ error: 'Not found' }, 404)
 
   if (!force) {
     const usage = await c.env.DB.prepare(
       `SELECT COUNT(*) as count FROM generic_products
-         WHERE deleted_at IS NULL AND LOWER(TRIM(category)) = LOWER(TRIM(?))`
-    ).bind(cat.name).first<{ count: number }>()
+         WHERE deleted_at IS NULL AND LOWER(TRIM(category)) = LOWER(TRIM(?)) AND org_id IS ?`
+    ).bind(cat.name, org).first<{ count: number }>()
     const count = usage?.count ?? 0
     if (count > 0) {
       return c.json({ warning: true, count, message: `Used by ${count} products` })
     }
   }
 
-  await c.env.DB.prepare(`DELETE FROM categories WHERE id = ?`).bind(id).run()
+  await c.env.DB.prepare(`DELETE FROM categories WHERE id = ? AND org_id IS ?`).bind(id, org).run()
   return c.body(null, 204)
 })
 
@@ -2698,6 +2705,7 @@ app.get('/api/spending-breakdown', async (c) => {
 
   const from = fromRaw || firstOfMonth
   const to   = toRaw   || todayStr
+  const org  = orgOf(c)
 
   // Aggregate invoice-level totals and other charges
   const totalsRow = await c.env.DB.prepare(`
@@ -2713,7 +2721,8 @@ app.get('/api/spending-breakdown', async (c) => {
       AND voided_at IS NULL
       AND invoice_date >= ?
       AND invoice_date <= ?
-  `).bind(from, to).first<{
+      AND org_id IS ?
+  `).bind(from, to, org).first<{
     invoice_count: number
     grand_total:   number
     taxes:         number
@@ -2733,9 +2742,10 @@ app.get('/api/spending-breakdown', async (c) => {
       AND voided_at IS NULL
       AND invoice_date >= ?
       AND invoice_date <= ?
+      AND org_id IS ?
     GROUP BY vendor
     ORDER BY amount DESC
-  `).bind(from, to).all<{ vendor: string; amount: number }>()
+  `).bind(from, to, org).all<{ vendor: string; amount: number }>()
 
   // By category: resolve from generic_products (real category) via product_entries,
   // falling back to invoice_lines.category (brand field) if no match found.
@@ -2748,10 +2758,12 @@ app.get('/api/spending-breakdown', async (c) => {
            FROM product_entries pe
            JOIN generic_products gp ON gp.id = pe.generic_product_id
            WHERE LOWER(TRIM(pe.generic_product_name)) = LOWER(TRIM(il.product_name))
+             AND pe.org_id IS ? AND gp.org_id IS ?
            LIMIT 1),
           (SELECT gp.category
            FROM generic_products gp
            WHERE LOWER(TRIM(gp.name)) = LOWER(TRIM(il.product_name))
+             AND gp.org_id IS ?
            LIMIT 1),
           'Uncategorized'
         ) AS category
@@ -2761,12 +2773,13 @@ app.get('/api/spending-breakdown', async (c) => {
         AND i.voided_at IS NULL
         AND i.invoice_date >= ?
         AND i.invoice_date <= ?
+        AND i.org_id IS ? AND il.org_id IS ?
     )
     SELECT category, SUM(COALESCE(line_total, 0)) AS amount
     FROM line_cats
     GROUP BY category
     ORDER BY amount DESC
-  `).bind(from, to).all<{ category: string; amount: number }>()
+  `).bind(org, org, org, from, to, org, org).all<{ category: string; amount: number }>()
 
   const round2 = (n: number) => Math.round(n * 100) / 100
   const pct    = (n: number) => total > 0 ? Math.round((n / total) * 1000) / 10 : 0
@@ -2807,6 +2820,7 @@ app.get('/api/spending-breakdown', async (c) => {
 // Cost model (Phase 1): "cost = what you purchased in the period" — line totals
 // of Closed, non-voided invoices dated in it. Not stock-take-adjusted COGS.
 app.get('/api/pnl', async (c) => {
+  const org = orgOf(c)
   const now = new Date()
   const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
   const monthRaw = (c.req.query('month') || '').trim()
@@ -2839,9 +2853,11 @@ app.get('/api/pnl', async (c) => {
         COALESCE(
           (SELECT gp.category FROM product_entries pe
              JOIN generic_products gp ON gp.id = pe.generic_product_id
-            WHERE LOWER(TRIM(pe.generic_product_name)) = LOWER(TRIM(il.product_name)) LIMIT 1),
+            WHERE LOWER(TRIM(pe.generic_product_name)) = LOWER(TRIM(il.product_name))
+              AND pe.org_id IS ? AND gp.org_id IS ? LIMIT 1),
           (SELECT gp.category FROM generic_products gp
-            WHERE LOWER(TRIM(gp.name)) = LOWER(TRIM(il.product_name)) LIMIT 1),
+            WHERE LOWER(TRIM(gp.name)) = LOWER(TRIM(il.product_name))
+              AND gp.org_id IS ? LIMIT 1),
           il.category,
           ''
         ) AS category
@@ -2850,17 +2866,19 @@ app.get('/api/pnl', async (c) => {
       WHERE i.status = 'Closed'
         AND i.voided_at IS NULL
         AND substr(i.invoice_date, 1, 7) BETWEEN ? AND ?
+        AND i.org_id IS ? AND il.org_id IS ?
     )
     SELECT
       COALESCE(
         (SELECT c.type FROM categories c
-          WHERE LOWER(TRIM(c.name)) = LOWER(TRIM(line_cats.category)) LIMIT 1),
+          WHERE LOWER(TRIM(c.name)) = LOWER(TRIM(line_cats.category))
+            AND c.org_id IS ? LIMIT 1),
         'food'
       ) AS type,
       SUM(COALESCE(amt, 0)) AS amount
     FROM line_cats
     GROUP BY type
-  `).bind(from, to).all<{ type: string; amount: number }>()
+  `).bind(org, org, org, from, to, org, org, org).all<{ type: string; amount: number }>()
 
   let food = 0, beverage = 0, supplies = 0
   for (const r of (typeRows.results ?? [])) {
@@ -2877,7 +2895,8 @@ app.get('/api/pnl', async (c) => {
     FROM invoices
     WHERE status = 'Closed' AND voided_at IS NULL
       AND substr(invoice_date, 1, 7) BETWEEN ? AND ?
-  `).bind(from, to).first<{ fees: number }>()
+      AND org_id IS ?
+  `).bind(from, to, org).first<{ fees: number }>()
 
   // Expense invoices (utilities, rent, insurance…): total by expense_category
   // for the month. These are operating costs, not COGS, and have no line items.
@@ -2887,9 +2906,10 @@ app.get('/api/pnl', async (c) => {
     FROM invoices
     WHERE invoice_kind = 'expense' AND status = 'Closed' AND voided_at IS NULL
       AND substr(invoice_date, 1, 7) BETWEEN ? AND ?
+      AND org_id IS ?
     GROUP BY category
     ORDER BY amount DESC
-  `).bind(from, to).all<{ category: string; amount: number }>()
+  `).bind(from, to, org).all<{ category: string; amount: number }>()
 
   const round2 = (n: number) => Math.round((n || 0) * 100) / 100
 
@@ -2911,14 +2931,16 @@ app.get('/api/pnl', async (c) => {
   const closingTake = await c.env.DB.prepare(`
     SELECT id, date(submitted_at) AS d FROM stock_takes
     WHERE status = 'submitted' AND submitted_at IS NOT NULL AND date(submitted_at) <= ?
+      AND org_id IS ?
     ORDER BY submitted_at DESC LIMIT 1
-  `).bind(periodEnd).first<{ id: string; d: string }>()
+  `).bind(periodEnd, org).first<{ id: string; d: string }>()
 
   const openingTake = await c.env.DB.prepare(`
     SELECT id, date(submitted_at) AS d FROM stock_takes
     WHERE status = 'submitted' AND submitted_at IS NOT NULL AND date(submitted_at) < ?
+      AND org_id IS ?
     ORDER BY submitted_at DESC LIMIT 1
-  `).bind(periodStart).first<{ id: string; d: string }>()
+  `).bind(periodStart, org).first<{ id: string; d: string }>()
 
   // Value one stock take's raw-material counts, grouped into food/beverage.
   // asOfDate prices each product at its most recent purchase on/before that date.
@@ -2928,25 +2950,29 @@ app.get('/api/pnl', async (c) => {
         SELECT
           COALESCE(
             (SELECT c.type FROM categories c
-              WHERE LOWER(TRIM(c.name)) = LOWER(TRIM(sti.category)) LIMIT 1),
+              WHERE LOWER(TRIM(c.name)) = LOWER(TRIM(sti.category))
+                AND c.org_id IS ? LIMIT 1),
             'food'
           ) AS type,
           sti.counted_qty * COALESCE(
             (SELECT pe.cost_per_unit FROM product_entries pe
               WHERE pe.generic_product_id = sti.item_id AND pe.voided_at IS NULL
                 AND pe.purchase_date != '' AND pe.purchase_date <= ?
+                AND pe.org_id IS ?
               ORDER BY pe.purchase_date DESC, pe.created_at DESC LIMIT 1),
             (SELECT pe.cost_per_unit FROM product_entries pe
               WHERE pe.generic_product_id = sti.item_id AND pe.voided_at IS NULL
+                AND pe.org_id IS ?
               ORDER BY pe.purchase_date DESC, pe.created_at DESC LIMIT 1),
             0
           ) AS val
         FROM stock_take_items sti
         WHERE sti.stock_take_id = ? AND sti.item_type = 'raw_material'
           AND sti.counted_qty IS NOT NULL
+          AND sti.org_id IS ?
       )
       SELECT type, SUM(COALESCE(val, 0)) AS amount FROM valued GROUP BY type
-    `).bind(asOfDate, takeId).all<{ type: string; amount: number }>()
+    `).bind(org, asOfDate, org, org, takeId, org).all<{ type: string; amount: number }>()
     let f = 0, b = 0
     for (const r of (rows.results ?? [])) {
       if (r.type === 'beverage') b += r.amount ?? 0
