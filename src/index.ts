@@ -1037,13 +1037,14 @@ app.post('/api/invoices/:id/void', async (c) => {
 // and un-flag the purchase entries so cost history counts again.
 app.post('/api/invoices/:id/restore', async (c) => {
   const { id } = c.req.param()
+  const org = orgOf(c)
   await c.env.DB.batch([
     c.env.DB.prepare(
-      "UPDATE invoices SET voided_at = NULL, void_reason = '' WHERE id = ?"
-    ).bind(id),
+      "UPDATE invoices SET voided_at = NULL, void_reason = '' WHERE id = ? AND org_id IS ?"
+    ).bind(id, org),
     c.env.DB.prepare(
-      "UPDATE product_entries SET voided_at = NULL WHERE invoice_id = ?"
-    ).bind(id),
+      "UPDATE product_entries SET voided_at = NULL WHERE invoice_id = ? AND org_id IS ?"
+    ).bind(id, org),
   ])
   return c.json({ id, voided_at: null, void_reason: '' })
 })
@@ -1102,8 +1103,16 @@ app.post('/api/invoice-lines/:invoice_id/replace', async (c) => {
     credit?: number; other_cost?: number; other_desc?: string
   }
 
+  const org = orgOf(c)
+  // Confirm the invoice belongs to this business before touching its lines —
+  // otherwise the delete-then-insert below would rewrite someone else's invoice.
+  const owner = await c.env.DB.prepare(
+    'SELECT id FROM invoices WHERE id = ? AND org_id IS ?'
+  ).bind(invoiceId, org).first()
+  if (!owner) return c.json({ error: 'Invoice not found' }, 404)
+
   // Delete existing lines
-  await c.env.DB.prepare('DELETE FROM invoice_lines WHERE invoice_id = ?').bind(invoiceId).run()
+  await c.env.DB.prepare('DELETE FROM invoice_lines WHERE invoice_id = ? AND org_id IS ?').bind(invoiceId, org).run()
 
   // Insert new lines
   for (const line of (body.lines || [])) {
@@ -1111,8 +1120,8 @@ app.post('/api/invoice-lines/:invoice_id/replace', async (c) => {
     const qty   = parseFloat(line.qty   as string) || 0
     const price = parseFloat(line.price as string) || 0
     await c.env.DB.prepare(
-      `INSERT INTO invoice_lines (id, invoice_id, product_name, vendor_item, category, item_code, packaging, price, qty, line_total)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO invoice_lines (id, invoice_id, product_name, vendor_item, category, item_code, packaging, price, qty, line_total, org_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       id, invoiceId,
       (line.product_name as string) || '',
@@ -1121,13 +1130,14 @@ app.post('/api/invoice-lines/:invoice_id/replace', async (c) => {
       (line.item_code    as string) || '',
       (line.packaging    as string) || '',
       price, qty,
-      parseFloat(line.line_total as string) || (price * qty)
+      parseFloat(line.line_total as string) || (price * qty),
+      org
     ).run()
   }
 
   // Update extra cost fields on invoice
   await c.env.DB.prepare(
-    `UPDATE invoices SET tax_pst=?, tax_gst=?, delivery=?, fuel_surcharge=0, deposit=?, credit=?, other_cost=?, other_desc=? WHERE id=?`
+    `UPDATE invoices SET tax_pst=?, tax_gst=?, delivery=?, fuel_surcharge=0, deposit=?, credit=?, other_cost=?, other_desc=? WHERE id=? AND org_id IS ?`
   ).bind(
     body.tax_pst    ?? 0,
     body.tax_gst    ?? 0,
@@ -1136,7 +1146,8 @@ app.post('/api/invoice-lines/:invoice_id/replace', async (c) => {
     body.credit     ?? 0,
     body.other_cost ?? 0,
     body.other_desc ?? '',
-    invoiceId
+    invoiceId,
+    org
   ).run()
 
   return c.json({ saved: (body.lines || []).length })
@@ -1150,8 +1161,8 @@ app.get('/api/vendor-fee-template', async (c) => {
   const vendor = (c.req.query('vendor') || '').trim()
   if (!vendor) return c.json({ error: 'vendor required' }, 400)
   const row = await c.env.DB.prepare(
-    `SELECT * FROM vendor_fee_templates WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?))`
-  ).bind(vendor).first()
+    `SELECT * FROM vendor_fee_templates WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?)) AND org_id IS ?`
+  ).bind(vendor, orgOf(c)).first()
   if (!row) return c.json({ found: false })
   return c.json({ found: true, template: row })
 })
@@ -1166,9 +1177,12 @@ app.post('/api/vendor-fee-template', async (c) => {
   }
   if (!body.vendor_name?.trim()) return c.json({ error: 'vendor_name required' }, 400)
 
+  const org = orgOf(c)
+  // Per business: two restaurants can both buy from "Sysco" and keep their own
+  // fee template for it.
   const existing = await c.env.DB.prepare(
-    `SELECT id FROM vendor_fee_templates WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?))`
-  ).bind(body.vendor_name.trim()).first<{ id: string }>()
+    `SELECT id FROM vendor_fee_templates WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?)) AND org_id IS ?`
+  ).bind(body.vendor_name.trim(), org).first<{ id: string }>()
 
   const now = new Date().toISOString()
   if (existing) {
@@ -1176,7 +1190,7 @@ app.post('/api/vendor-fee-template', async (c) => {
       `UPDATE vendor_fee_templates SET
          delivery=?, fuel_surcharge=?, tax_gst=?, tax_pst=?,
          other_cost=?, other_desc=?, use_percent=?, notes=?, updated_at=?
-       WHERE id=?`
+       WHERE id=? AND org_id IS ?`
     ).bind(
       body.delivery       ?? 0,
       body.fuel_surcharge ?? 0,
@@ -1187,7 +1201,8 @@ app.post('/api/vendor-fee-template', async (c) => {
       body.use_percent    ?? 0,
       body.notes          ?? '',
       now,
-      existing.id
+      existing.id,
+      org
     ).run()
     return c.json({ saved: true, id: existing.id, created: false })
   } else {
@@ -1195,8 +1210,8 @@ app.post('/api/vendor-fee-template', async (c) => {
     await c.env.DB.prepare(
       `INSERT INTO vendor_fee_templates
          (id, vendor_name, delivery, fuel_surcharge, tax_gst, tax_pst,
-          other_cost, other_desc, use_percent, notes, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+          other_cost, other_desc, use_percent, notes, updated_at, org_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
     ).bind(
       id, body.vendor_name.trim(),
       body.delivery       ?? 0,
@@ -1207,7 +1222,8 @@ app.post('/api/vendor-fee-template', async (c) => {
       body.other_desc     ?? '',
       body.use_percent    ?? 0,
       body.notes          ?? '',
-      now
+      now,
+      org
     ).run()
     return c.json({ saved: true, id, created: true })
   }
@@ -1281,12 +1297,16 @@ app.post('/api/suppliers/match', async (c) => {
   if (!name) return c.json({ decision: 'none', match: null, score: 0 })
 
   // Exact (case/space-insensitive) match short-circuits — nothing to correct.
+  const org = orgOf(c)
   const exact = await c.env.DB.prepare(
-    `SELECT id, name FROM suppliers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))`
-  ).bind(name).first<{ id: string; name: string }>()
+    `SELECT id, name FROM suppliers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND org_id IS ?`
+  ).bind(name, org).first<{ id: string; name: string }>()
   if (exact) return c.json({ decision: 'exact', match: exact, score: 1 })
 
-  const all = await c.env.DB.prepare(`SELECT id, name FROM suppliers`).all<{ id: string; name: string }>()
+  // Fuzzy matching must only consider THIS business's suppliers, or an invoice
+  // could be auto-corrected to a vendor name belonging to another restaurant.
+  const all = await c.env.DB.prepare(`SELECT id, name FROM suppliers WHERE org_id IS ?`)
+    .bind(org).all<{ id: string; name: string }>()
   return c.json(classifySupplierMatch(name, all.results || []))
 })
 
@@ -1301,43 +1321,46 @@ app.put('/api/suppliers/:id', async (c) => {
   const newName = (body.name || '').trim()
   if (!newName) return c.json({ error: 'name required' }, 400)
 
-  const current = await c.env.DB.prepare('SELECT name FROM suppliers WHERE id = ?')
-    .bind(id).first<{ name: string }>()
+  const org = orgOf(c)
+  const current = await c.env.DB.prepare('SELECT name FROM suppliers WHERE id = ? AND org_id IS ?')
+    .bind(id, org).first<{ name: string }>()
   if (!current) return c.json({ error: 'Supplier not found' }, 404)
   const oldName = current.name
 
   // Update the supplier row itself
   await c.env.DB.prepare(
-    'UPDATE suppliers SET name = ?, contact = ?, email = ?, notes = ? WHERE id = ?'
-  ).bind(newName, body.contact ?? '', body.email ?? '', body.notes ?? '', id).run()
+    'UPDATE suppliers SET name = ?, contact = ?, email = ?, notes = ? WHERE id = ? AND org_id IS ?'
+  ).bind(newName, body.contact ?? '', body.email ?? '', body.notes ?? '', id, org).run()
 
   // Cascade only when the name actually changed (ignoring case/space)
   if (oldName.trim().toLowerCase() !== newName.toLowerCase()) {
     await c.env.DB.batch([
+      // Name-matched, so org-scoped: renaming your "Sysco" must not rewrite
+      // another restaurant's invoices and purchase history.
       c.env.DB.prepare(
-        'UPDATE product_entries SET supplier_name = ? WHERE supplier_id = ? OR LOWER(TRIM(supplier_name)) = LOWER(TRIM(?))'
-      ).bind(newName, id, oldName),
+        'UPDATE product_entries SET supplier_name = ? WHERE (supplier_id = ? OR LOWER(TRIM(supplier_name)) = LOWER(TRIM(?))) AND org_id IS ?'
+      ).bind(newName, id, oldName, org),
       c.env.DB.prepare(
-        'UPDATE invoices SET vendor = ? WHERE LOWER(TRIM(vendor)) = LOWER(TRIM(?))'
-      ).bind(newName, oldName),
+        'UPDATE invoices SET vendor = ? WHERE LOWER(TRIM(vendor)) = LOWER(TRIM(?)) AND org_id IS ?'
+      ).bind(newName, oldName, org),
       c.env.DB.prepare(
-        'UPDATE product_mappings SET vendor_name = ? WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?))'
-      ).bind(newName, oldName),
+        'UPDATE product_mappings SET vendor_name = ? WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?)) AND org_id IS ?'
+      ).bind(newName, oldName, org),
     ])
 
     // vendor_fee_templates.vendor_name is UNIQUE — renaming into an existing
     // one would violate the constraint, so drop the old row in that case.
     const clashTmpl = await c.env.DB.prepare(
-      'SELECT id FROM vendor_fee_templates WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?))'
-    ).bind(newName).first<{ id: string }>()
+      'SELECT id FROM vendor_fee_templates WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?)) AND org_id IS ?'
+    ).bind(newName, org).first<{ id: string }>()
     if (clashTmpl) {
       await c.env.DB.prepare(
-        'DELETE FROM vendor_fee_templates WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?))'
-      ).bind(oldName).run()
+        'DELETE FROM vendor_fee_templates WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?)) AND org_id IS ?'
+      ).bind(oldName, org).run()
     } else {
       await c.env.DB.prepare(
-        'UPDATE vendor_fee_templates SET vendor_name = ? WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?))'
-      ).bind(newName, oldName).run()
+        'UPDATE vendor_fee_templates SET vendor_name = ? WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?)) AND org_id IS ?'
+      ).bind(newName, oldName, org).run()
     }
   }
 
