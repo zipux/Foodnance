@@ -778,14 +778,35 @@ async function handleAddPageFile(e) {
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Reading page…'; }
 
   try {
+    // 0. Same quality gate + downscale the upload page applies (shared
+    //    image-preproc.js). Without this a page added here could be blurrier or
+    //    darker than one the upload page would have rejected, and full-size
+    //    phone photos were being sent over the wire for no accuracy gain.
+    //    PDFs skip it — the pipeline is raster-only.
+    let pageFile = file;
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+    if (!isPdf && typeof preprocessImage === 'function') {
+      if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking quality…';
+      const pre = await preprocessImage(file);
+      if (pre.rejected) {
+        // Reject before spending an API call on an unreadable page.
+        showToast('Page not added — ' + pre.reason, 'error');
+        return;
+      }
+      pageFile = pre.file;
+      if (pre.warnings.length) console.info('Add-page preprocessing:', pre.warnings.join('; '));
+      if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Reading page…';
+    }
+
     // 1. Store the page image in R2 (non-fatal if it fails — parsing still runs)
+    //    Stores the preprocessed file so R2 matches what Claude actually read.
     let pageKey = '';
-    try { pageKey = (await apiUploadFile(file)).key || ''; }
+    try { pageKey = (await apiUploadFile(pageFile)).key || ''; }
     catch (upErr) { console.warn('Extra-page upload failed (continuing):', upErr.message); }
 
     // 2. Parse the new page with Claude
     const fd = new FormData();
-    fd.append('file', file);
+    fd.append('file', pageFile);
     const resp = await fetch('/api/ai/parse-invoice', { method: 'POST', body: fd });
     const data = await resp.json();
     if (!resp.ok || data.error) throw new Error(data.error || `Server error ${resp.status}`);
