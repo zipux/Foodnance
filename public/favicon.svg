@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="DoughMeter">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4f46e5"/>
+      <stop offset="1" stop-color="#3730a3"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#g)"/>
+  <!-- Gauge arc: the "meter" half of the name. -->
+  <path d="M16 42a16 16 0 1 1 32 0"
+        fill="none" stroke="#ffffff" stroke-width="5.5"
+        stroke-linecap="round" opacity=".95"/>
+  <!-- Needle, swung right of centre: costs trending up is the thing it measures. -->
+  <path d="M32 42 L41 27" fill="none" stroke="#ffffff" stroke-width="5"
+        stroke-linecap="round"/>
+  <circle cx="32" cy="42" r="4.2" fill="#ffffff"/>
+</svg>

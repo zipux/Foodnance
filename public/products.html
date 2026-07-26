@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Private application surface: keep out of search results. The
+       marketing page (public/index.html) is the only indexable page. -->
+  <meta name="robots" content="noindex, nofollow" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <title>Products — DoughMeter</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260717-6" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand"><i class="fas fa-receipt"></i> DoughMeter</div>
+    <div class="nav-links">
+      <a href="/home.html"><i class="fas fa-chart-line"></i> Price Movers</a>
+      <a href="/upload-invoice.html"><i class="fas fa-file-invoice"></i> Upload Invoice</a>
+      <a href="/invoices.html"><i class="fas fa-list-alt"></i> Invoices</a>
+      <a href="/pnl.html"><i class="fas fa-chart-pie"></i> P&amp;L</a>
+      <a href="/products.html" class="active"><i class="fas fa-boxes"></i> Products</a>
+      <a href="/recipes.html"><i class="fas fa-utensils"></i> Recipes</a>
+      <a href="/finished-products.html"><i class="fas fa-tag"></i> Finished Products</a>
+      <a href="/inventory.html"><i class="fas fa-warehouse"></i> Inventory</a>
+      <a href="/suppliers.html"><i class="fas fa-truck"></i> Suppliers</a>
+      <a href="/staff.html"><i class="fas fa-users"></i> Staff</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="page-header">
+      <h1><i class="fas fa-boxes"></i> Product Database</h1>
+      <p>Manage generic products and their supplier entries. Click any product to view or add supplier pricing.</p>
+    </div>
+
+    <section class="card" id="productSection">
+      <div class="card-header">
+        <h2><i class="fas fa-database"></i> Products</h2>
+        <div class="header-actions">
+          <input type="text" id="searchInput" class="search-input" placeholder="Search products…" />
+          <label class="switch-toggle" title="Show archived products">
+            <input type="checkbox" id="toggleArchivedInput" />
+            <span class="switch-track"><span class="switch-thumb"></span></span>
+            <span class="switch-label">Archived</span>
+          </label>
+<button class="btn btn-primary" id="openAddProductModal"><i class="fas fa-plus"></i> Add Product</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div id="productStats" class="stats-row"></div>
+        <div class="table-scroll">
+          <table class="data-table" id="productTable">
+            <thead>
+              <tr>
+                <th>Product Name</th>
+                <th>Category</th>
+                <th>Suppliers</th>
+                <th>Latest Price / Unit</th>
+                <th>Last Purchased</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="productBody">
+              <tr><td colspan="6" class="empty-row"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination" id="pagination"></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- PRODUCT MODAL -->
+  <div class="modal-overlay hidden" id="productModal">
+    <div class="modal" style="max-width:780px">
+      <div class="modal-header">
+        <h3 id="modalTitle">Add Product</h3>
+        <button class="modal-close" id="closeModal"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editProductId" />
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Generic Product Name *</label>
+            <input type="text" id="pName" placeholder="e.g. Cream, Yeast, Grana Padano" />
+          </div>
+          <div class="form-group">
+            <label>Category *</label>
+            <!-- Options populated by populateCategoryDropdown() in products.js -->
+            <select id="pCategory">
+              <option value="">— Select category —</option>
+            </select>
+          </div>
+        </div>
+        <div class="sub-unit-section" style="margin-top:1.25rem;border-color:#c7d2fe">
+          <div class="sub-unit-header" style="justify-content:space-between">
+            <span><i class="fas fa-truck"></i> Supplier Entries</span>
+            <button class="btn btn-primary btn-sm" id="openAddEntryBtn" style="display:none">
+              <i class="fas fa-plus"></i> Add Supplier Entry
+            </button>
+          </div>
+          <div id="entryForm" class="entry-form hidden">
+            <input type="hidden" id="editEntryId" />
+            <div class="form-grid" style="grid-template-columns:1fr 1fr">
+              <div class="form-group">
+                <label>Vendor *</label>
+                <select id="eSupplier"><option value="">— Select vendor —</option></select>
+              </div>
+              <div class="form-group">
+                <label>Vendor Item Name</label>
+                <input type="text" id="eVendorName" placeholder="e.g. Rossi Parmesan Grated" />
+              </div>
+              <div class="form-group">
+                <label>SKU</label>
+                <input type="text" id="eSku" placeholder="e.g. GP-1KG" />
+              </div>
+              <div class="form-group" style="grid-column:1/-1">
+                <label>Pack Size *</label>
+                <div class="pack-size-row" style="align-items:center;flex-wrap:wrap">
+                  <input type="number" id="ePackQty" placeholder="e.g. 5" min="0" step="any" style="max-width:80px;flex:none" />
+                  <select id="ePackUnit">
+                    <option value="">Loading…</option>
+                  </select>
+                  <span style="color:var(--text-muted);padding:0 .2rem;font-size:1rem;font-weight:500">×</span>
+                  <span style="font-size:.82rem;color:var(--text-muted);white-space:nowrap">Qty Ordered</span>
+                  <input type="number" id="eQtyOrdered" placeholder="1" min="1" step="1" style="max-width:70px;flex:none" />
+                  <span style="color:var(--text-muted);padding:0 .2rem;font-size:1rem;font-weight:500">=</span>
+                  <span style="font-size:.85rem;color:var(--text-muted);white-space:nowrap">Total: <strong id="ePackTotal" style="color:var(--text)">—</strong></span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Cost ($) *</label>
+                <input type="number" id="eCost" step="0.01" placeholder="0.00" />
+              </div>
+              <div class="form-group">
+                <label>Cost per Unit</label>
+                <div class="cost-per-unit-box" id="eCostPerUnitBox">
+                  <i class="fas fa-calculator"></i>
+                  <span id="eCostPerUnitDisplay">Enter cost &amp; pack size</span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Purchase Date</label>
+                <input type="date" id="ePurchaseDate" />
+              </div>
+              <div class="form-group">
+                <label>Expiry / Best Before</label>
+                <input type="date" id="eExpiry" />
+              </div>
+              <div class="form-group" style="grid-column:1/-1">
+                <label>Invoice Ref</label>
+                <div style="display:flex;gap:.5rem;align-items:center">
+                  <input type="text" id="eInvoiceRef" placeholder="—" style="flex:1;background:#f1f5f9;cursor:default" readonly />
+                  <!-- hidden file input -->
+                  <input type="file" id="eInvoiceFile" accept=".pdf,.png,.jpg,.jpeg,.webp"
+                         style="display:none" onchange="handleEntryInvoiceFile(this)" />
+                  <!-- attach button -->
+                  <button type="button" id="eInvoiceAttachBtn" class="btn btn-secondary btn-sm"
+                          onclick="document.getElementById('eInvoiceFile').click()"
+                          title="Attach invoice file (PDF or image)">
+                    <i class="fas fa-paperclip"></i> Attach
+                  </button>
+                  <!-- view button — shown only once a file is attached -->
+                  <button type="button" id="eInvoiceViewBtn" class="btn btn-primary btn-sm hidden"
+                          onclick="openEntryInvoiceFile()" title="View attached invoice">
+                    <i class="fas fa-eye"></i> View
+                  </button>
+                </div>
+                <!-- upload progress / filename badge -->
+                <div id="eInvoiceFileBadge" style="margin-top:.35rem;font-size:.8rem;color:var(--text-muted);display:none">
+                  <i class="fas fa-spinner fa-spin" id="eInvoiceFileSpinner" style="display:none"></i>
+                  <i class="fas fa-file-alt" id="eInvoiceFileIcon"></i>
+                  <span id="eInvoiceFileName"></span>
+                  <button type="button" onclick="clearEntryInvoiceFile()"
+                          style="background:none;border:none;cursor:pointer;color:#ef4444;margin-left:.4rem;font-size:.85rem"
+                          title="Remove attachment"><i class="fas fa-times"></i></button>
+                </div>
+                <!-- hidden state fields -->
+                <input type="hidden" id="eInvoiceFileKey" />
+              </div>
+            </div>
+          </div>
+          <div id="entriesTableWrap" style="margin-top:.75rem">
+            <div id="entriesPlaceholder" style="color:var(--text-muted);font-size:.85rem;padding:.5rem 0">
+              Save the product first to add supplier entries.
+            </div>
+            <div class="table-scroll hidden" id="entriesTableScroll">
+              <table class="data-table" id="entriesTable">
+                <thead>
+                  <tr>
+                    <th>Vendor</th><th>Vendor Item</th><th>Pack Size</th><th>Cost</th>
+                    <th>Cost/Unit</th><th>Purchase Date</th><th>Expiry</th><th>Invoice</th><th>Variance</th><th></th>
+                  </tr>
+                </thead>
+                <tbody id="entriesBody"></tbody>
+              </table>
+            </div>
+            <div id="entriesShowMore" style="text-align:center;margin-top:.5rem;display:none">
+              <button class="btn btn-secondary btn-sm" onclick="showMoreEntries()">
+                <i class="fas fa-chevron-down"></i> Show more
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="sub-unit-section" style="margin-top:1.25rem">
+          <div class="sub-unit-header">
+            <i class="fas fa-tags"></i> Vendor Names
+            <span class="sub-unit-hint">Other names suppliers use for this item</span>
+          </div>
+          <small style="display:block;color:var(--text-muted);font-size:.78rem;margin-bottom:.6rem">
+            Other names suppliers use for this item — Neptune calling your Small Tomatoes
+            "Grape Tomatoes" — learned automatically when you approve invoices, so future invoices link to
+            this product instead of creating a duplicate. Remove any that were linked by mistake.
+          </small>
+          <div id="aliasSaveFirst" style="display:none;font-size:.82rem;color:var(--text-muted);padding:.5rem .75rem;background:#f8fafc;border:1px dashed var(--border);border-radius:6px">
+            Save the product first — vendor names are added automatically from invoices.
+          </div>
+          <div id="aliasWrap" style="display:none">
+            <div id="aliasList"></div>
+          </div>
+        </div>
+        <div class="sub-unit-section" id="stockUnitSection" style="margin-top:1.25rem">
+          <div class="sub-unit-header">
+            <i class="fas fa-scale-balanced"></i> Stocked In
+            <span class="sub-unit-hint">The unit this item is counted and priced in</span>
+          </div>
+          <small style="display:block;color:var(--text-muted);font-size:.78rem;margin-bottom:.6rem">
+            Suppliers may invoice this item in different units — one bills by kg, another by lb. Everything is
+            converted into the unit you pick here, so stock counts and price comparisons stay consistent.
+          </small>
+          <div id="stockUnitConflictNote" style="display:none;font-size:.8rem;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:.5rem .7rem;margin-bottom:.6rem"></div>
+          <div class="form-grid" style="grid-template-columns:1fr 1fr">
+            <div class="form-group">
+              <label>Stocking unit *</label>
+              <select id="pStockUnit">
+                <option value="lb">lb</option>
+                <option value="kg">kg</option>
+                <option value="g">g</option>
+                <option value="oz">oz</option>
+                <option value="l">L</option>
+                <option value="ml">ml</option>
+                <option value="each">each</option>
+              </select>
+            </div>
+            <div></div>
+          </div>
+        </div>
+        <div class="sub-unit-section" style="margin-top:1.25rem">
+          <div class="sub-unit-header">
+            <i class="fas fa-cubes"></i> Sub-unit Breakdown
+            <span class="sub-unit-hint">Optional — e.g. 1 Dozen = 12 Eggs</span>
+          </div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Sub-unit Name</label>
+              <input type="text" id="pSubUnitName" placeholder="e.g. Egg, Bottle, Can" />
+            </div>
+            <div class="form-group">
+              <label>Units per Pack</label>
+              <input type="number" id="pSubUnitQty" placeholder="e.g. 12" min="1" step="1" />
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:.75rem">
+            <label>Average Weight per Unit (kg)</label>
+            <input type="number" id="pAvgWeight" placeholder="e.g. 0.300" min="0" step="0.001" />
+            <small style="color:var(--text-muted);font-size:.78rem">Used for recipe costing of items sold by each (e.g. 0.300 kg per fennel)</small>
+          </div>
+        </div>
+        <div class="sub-unit-section" style="margin-top:1.25rem">
+          <div class="sub-unit-header">
+            <i class="fas fa-boxes-stacked"></i> Pack Sizes
+            <span class="sub-unit-hint">Optional — count this item by case / bag as well as by weight</span>
+          </div>
+          <small style="display:block;color:var(--text-muted);font-size:.78rem;margin-bottom:.6rem">
+            For items bought in packs (e.g. a case of pepperoni = 25&nbsp;lb = 5 bags × 5&nbsp;lb). Enter the
+            weight of one pack at each level and the stock-take screen will let you count cases, bags and loose
+            weight, adding them up automatically. Leave blank to count this item by weight only.
+          </small>
+          <div class="form-grid" style="grid-template-columns:1fr 1fr">
+            <div class="form-group">
+              <label>Pack weights are in</label>
+              <input type="text" id="pBaseUnitEcho" readonly style="background:#f1f5f9;cursor:default" />
+              <small style="color:var(--text-muted);font-size:.78rem">Set by the stocking unit above</small>
+            </div>
+            <div></div>
+            <div class="form-group">
+              <label>Middle pack name</label>
+              <input type="text" id="pMidName" placeholder="e.g. bag, can, bottle" />
+            </div>
+            <div class="form-group">
+              <label>Weight per <span id="pMidNameEcho">middle pack</span></label>
+              <div class="pack-size-row" style="align-items:center">
+                <input type="number" id="pMidLb" placeholder="e.g. 5" min="0" step="any" style="max-width:100px;flex:none" />
+                <span id="pMidUnitEcho" style="color:var(--text-muted)">lb</span>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Top pack name</label>
+              <input type="text" id="pTopName" placeholder="e.g. case, box, flat" />
+            </div>
+            <div class="form-group">
+              <label>Weight per <span id="pTopNameEcho">top pack</span></label>
+              <div class="pack-size-row" style="align-items:center">
+                <input type="number" id="pTopLb" placeholder="e.g. 25" min="0" step="any" style="max-width:100px;flex:none" />
+                <span id="pTopUnitEcho" style="color:var(--text-muted)">lb</span>
+              </div>
+            </div>
+          </div>
+          <div id="pPackPreview" style="margin-top:.6rem;font-size:.82rem;color:var(--text-muted);display:none"></div>
+        </div>
+        <div class="sub-unit-section" style="margin-top:1.25rem">
+          <div class="sub-unit-header">
+            <i class="fas fa-bell"></i> Low-stock Alert
+            <span class="sub-unit-hint">Optional — get warned when stock runs low</span>
+          </div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Reorder Level</label>
+              <input type="number" id="pReorderLevel" placeholder="e.g. 5" min="0" step="any" />
+            </div>
+            <div class="form-group">
+              <label>Unit</label>
+              <input type="text" id="pReorderUnit" placeholder="—" readonly style="background:#f1f5f9;cursor:default" />
+            </div>
+          </div>
+          <small style="color:var(--text-muted);font-size:.78rem">Unit follows the supplier entry's unit of measure. Flags this product as Low Stock on the Inventory page (and in the daily email) when its quantity falls to or below this number. Leave blank for no alert.</small>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelModal">Cancel</button>
+        <button class="btn btn-success" id="saveProductBtn"><i class="fas fa-save"></i> Save Product</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- ADD-TO-INVENTORY PROMPT -->
+  <div class="modal-overlay hidden" id="entryInvModal">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-header">
+        <h3><i class="fas fa-warehouse"></i> Add to Inventory?</h3>
+        <button class="modal-close" id="closeEntryInvModal"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <p style="margin-bottom:1rem;color:var(--text-muted);font-size:.9rem">
+          Supplier entry saved. Would you like to add this stock to Raw Materials inventory?
+        </p>
+        <div id="entryInvDetails" style="background:#f8faff;border:1px solid #c7d2fe;border-radius:8px;padding:.75rem 1rem;margin-bottom:1rem;font-size:.88rem"></div>
+        <div class="form-grid" style="grid-template-columns:1fr 1fr">
+          <div class="form-group">
+            <label>Quantity to Add</label>
+            <input type="number" id="entryInvQty" min="0.001" step="0.001" placeholder="0.00" />
+          </div>
+          <div class="form-group">
+            <label>Unit</label>
+            <input type="text" id="entryInvUnit" readonly style="background:#f1f5f9;cursor:default" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Note (optional)</label>
+          <input type="text" id="entryInvNote" placeholder="e.g. Invoice INV-2025-001" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="skipEntryInvBtn">Skip</button>
+        <button class="btn btn-success" id="confirmEntryInvBtn"><i class="fas fa-warehouse"></i> Add to Inventory</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MANAGE UNITS MODAL -->
+  <div class="modal-overlay hidden" id="manageUnitsModal">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header">
+        <h3><i class="fas fa-sliders-h"></i> Manage Units</h3>
+        <button class="modal-close" onclick="closeModal('manageUnitsModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <div id="manageUnitsList" style="margin-bottom:1rem;max-height:320px;overflow-y:auto"></div>
+        <div style="display:flex;gap:.5rem;align-items:center">
+          <input type="text" id="newUnitName" placeholder="New unit name…" style="flex:1"
+                 onkeydown="if(event.key==='Enter') addUnit()" />
+          <button class="btn btn-primary btn-sm" onclick="addUnit()">
+            <i class="fas fa-plus"></i> Add
+          </button>
+        </div>
+        <div id="manageUnitsError" style="color:#dc2626;font-size:.82rem;margin-top:.35rem;display:none"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('manageUnitsModal')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MANAGE CATEGORIES MODAL -->
+  <div class="modal-overlay hidden" id="manageCategoriesModal">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header">
+        <h3><i class="fas fa-tags"></i> Manage Categories</h3>
+        <button class="modal-close" onclick="closeModal('manageCategoriesModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <div id="manageCategoriesList" style="margin-bottom:1rem;max-height:320px;overflow-y:auto"></div>
+        <div style="display:flex;gap:.5rem;align-items:center">
+          <input type="text" id="newCategoryName" placeholder="New category name…" style="flex:1"
+                 onkeydown="if(event.key==='Enter') addCategory()" />
+          <select id="newCategoryType" title="Category type" style="flex:0 0 auto;padding:.4rem">
+            <option value="food">Food</option>
+            <option value="beverage">Beverage</option>
+            <option value="supplies">Supplies</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="addCategory()">
+            <i class="fas fa-plus"></i> Add
+          </button>
+        </div>
+        <div id="manageCategoriesError" style="color:#dc2626;font-size:.82rem;margin-top:.35rem;display:none"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('manageCategoriesModal')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MERGE PRODUCT MODAL -->
+  <div class="modal-overlay hidden" id="mergeProductModal">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header">
+        <h3><i class="fas fa-code-merge"></i> Merge Product</h3>
+        <button class="modal-close" onclick="closeMergeModal()"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="mergeSourceId" />
+        <div class="form-group" style="margin-bottom:1rem">
+          <label style="font-size:.82rem;color:var(--text-muted)">Merging (will be removed)</label>
+          <div id="mergeSourceName" style="font-weight:600;font-size:1rem;padding:.5rem .75rem;background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;color:#dc2626"></div>
+        </div>
+        <div class="form-group" style="margin-bottom:.4rem">
+          <label style="font-size:.82rem;color:var(--text-muted)">Surviving product <span style="color:#dc2626">*</span></label>
+          <div style="position:relative">
+            <input type="text" id="mergeSurvivingSearch" placeholder="Type to search products…"
+                   autocomplete="off" oninput="onMergeSearchInput()"
+                   style="width:100%;box-sizing:border-box" />
+            <div id="mergeSurvivingDropdown"
+                 style="display:none;position:absolute;top:100%;left:0;right:0;z-index:9999;
+                        background:#fff;border:1px solid #cbd5e1;border-radius:0 0 6px 6px;
+                        max-height:220px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.12)"></div>
+          </div>
+        </div>
+        <div id="mergeSurvivingChosen" style="display:none;padding:.45rem .75rem;background:#f0fdf4;border:1px solid #86efac;border-radius:6px;font-size:.88rem;color:#16a34a;margin-top:.35rem"></div>
+        <p style="font-size:.78rem;color:var(--text-muted);margin-top:.9rem;line-height:1.5">
+          All purchase history, inventory stock, and recipe references will be transferred to the surviving product.
+          The merged product will be hidden from the products list.
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeMergeModal()">Cancel</button>
+        <button class="btn btn-danger" id="confirmMergeBtn" disabled onclick="confirmMerge()">
+          <i class="fas fa-code-merge"></i> Confirm Merge
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MERGE ALIAS CONFIRMATION MODAL -->
+  <div class="modal-overlay hidden" id="mergeAliasModal">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-header">
+        <h3><i class="fas fa-tag"></i> Remember this name?</h3>
+        <button class="modal-close" onclick="closeModal('mergeAliasModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <p id="mergeAliasMsg" style="line-height:1.6;font-size:.93rem"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('mergeAliasModal')">No thanks</button>
+        <button class="btn btn-primary" id="mergeAliasYesBtn"><i class="fas fa-check"></i> Yes, remember it</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- GROUP PRODUCTS MODAL -->
+  <div class="modal-overlay hidden" id="groupProductsModal">
+    <div class="modal" style="max-width:540px">
+      <div class="modal-header">
+        <h3><i class="fas fa-object-group"></i> Group Products</h3>
+        <button class="modal-close" onclick="closeModal('groupProductsModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:.82rem;color:var(--text-muted);margin-bottom:1rem;line-height:1.55">
+          Combine products you buy <strong>interchangeably</strong> (e.g. cherry &amp; grape tomatoes)
+          into one product under a general name. Every supplier's invoices stay listed underneath,
+          each with its own price. Different from <em>Merge</em>, which is only for fixing accidental duplicates.
+        </p>
+        <div class="form-group" style="margin-bottom:.9rem">
+          <label>General name <span style="color:#dc2626">*</span></label>
+          <input type="text" id="groupGeneralName" placeholder="e.g. Tomatoes" autocomplete="off"
+                 oninput="updateGroupState()" style="width:100%;box-sizing:border-box" />
+        </div>
+        <div class="form-group" style="margin-bottom:.3rem">
+          <label>Combine these products <span style="color:#dc2626">*</span></label>
+          <input type="text" id="groupProductSearch" placeholder="Type to filter…" autocomplete="off"
+                 oninput="renderGroupPicker()" style="width:100%;box-sizing:border-box;margin-bottom:.5rem" />
+          <div id="groupProductList" style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:6px"></div>
+        </div>
+        <div id="groupHint" style="font-size:.8rem;color:var(--text-muted);margin-top:.55rem;min-height:1.1rem"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('groupProductsModal')">Cancel</button>
+        <button class="btn btn-primary" id="confirmGroupBtn" disabled onclick="confirmGroup()">
+          <i class="fas fa-object-group"></i> Group
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/utils.js?v=20260724-1"></script>
+  <script src="/static/inventory.js?v=20260721-5"></script>
+  <script src="/static/suppliers.js?v=20260714-1"></script>
+  <script src="/static/products.js?v=20260726-2"></script>
+
+  <!-- ── Inline invoice-file viewer modal (shared, lightweight) ── -->
+  <div class="modal-overlay hidden" id="entryFileViewModal">
+    <div class="modal" style="max-width:860px">
+      <div class="modal-header">
+        <h3><i class="fas fa-file-invoice"></i> <span id="entryFileViewTitle">Invoice</span></h3>
+        <button class="modal-close" onclick="closeModal('entryFileViewModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body" style="padding:.75rem">
+        <div id="entryFileViewContent" style="min-height:200px"></div>
+      </div>
+      <div class="modal-footer">
+        <a id="entryFileViewOpen" href="#" target="_blank" class="btn btn-primary btn-sm">
+          <i class="fas fa-external-link-alt"></i> Open in New Tab
+        </a>
+        <a id="entryFileViewDownload" href="#" download class="btn btn-secondary btn-sm">
+          <i class="fas fa-download"></i> Download
+        </a>
+        <button class="btn btn-secondary" onclick="closeModal('entryFileViewModal')">Close</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

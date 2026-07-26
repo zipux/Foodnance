@@ -3,6 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Private application surface: keep out of search results. The
+       marketing page (public/index.html) is the only indexable page. -->
+  <meta name="robots" content="noindex, nofollow" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <title>Recipe Builder — DoughMeter</title>
   <link rel="stylesheet" href="/static/style.css?v=20260717-6" />
   <style>
@@ -203,7 +207,7 @@
       <a href="/upload-invoice.html"><i class="fas fa-file-invoice"></i> Upload Invoice</a>
       <a href="/invoices.html"><i class="fas fa-list-alt"></i> Invoices</a>
       <a href="/pnl.html"><i class="fas fa-chart-pie"></i> P&amp;L</a>
-      <a href="/index.html"><i class="fas fa-boxes"></i> Products</a>
+      <a href="/products.html"><i class="fas fa-boxes"></i> Products</a>
       <a href="/recipes.html" class="active"><i class="fas fa-utensils"></i> Recipes</a>
       <a href="/finished-products.html"><i class="fas fa-tag"></i> Finished Products</a>
       <a href="/inventory.html"><i class="fas fa-warehouse"></i> Inventory</a>

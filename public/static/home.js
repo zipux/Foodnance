@@ -739,7 +739,7 @@ function sbNavigate(label) {
   if (sbView === 'vendor') {
     window.location.href = `/invoices.html?vendor=${encodeURIComponent(label)}`;
   } else {
-    window.location.href = `/index.html?category=${encodeURIComponent(label)}`;
+    window.location.href = `/products.html?category=${encodeURIComponent(label)}`;
   }
 }
 

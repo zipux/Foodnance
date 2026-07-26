@@ -18,7 +18,7 @@ import { suite } from './helpers/assert.mjs';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
 const PAGES = [
-  ['index.html',             'products.js'],
+  ['products.html',          'products.js'],
   ['home.html',              'home.js'],
   ['inventory.html',         'inventory.js'],
   ['invoices.html',          'invoices.js'],

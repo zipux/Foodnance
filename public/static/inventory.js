@@ -295,7 +295,7 @@ function renderInventory() {
     // opens a focused name/category editor in place (stays on the Inventory page);
     // the href is a fallback so open-in-new-tab still lands on the full product.
     const nameHtml = r.item_type === 'raw_material'
-      ? `<a class="inv-name-link" href="/index.html#${esc(r.item_id)}" onclick="openInvEditProduct('${esc(r.item_id)}');return false;" title="Edit name / category"><strong>${esc(r.item_name)}</strong></a>`
+      ? `<a class="inv-name-link" href="/products.html#${esc(r.item_id)}" onclick="openInvEditProduct('${esc(r.item_id)}');return false;" title="Edit name / category"><strong>${esc(r.item_name)}</strong></a>`
       : `<strong>${esc(r.item_name)}</strong>`;
 
     return `
@@ -451,7 +451,7 @@ function openInvEditProduct(itemId) {
   document.getElementById('invEditProductId').value = g.id;
   document.getElementById('invEditName').value      = g.name || '';
   _fillInvCategorySelect(document.getElementById('invEditCategory'), g.category || '');
-  document.getElementById('invEditFullLink').href   = `/index.html#${g.id}`;
+  document.getElementById('invEditFullLink').href   = `/products.html#${g.id}`;
   openModal('invEditProductModal');
 }
 

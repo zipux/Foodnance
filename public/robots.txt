@@ -1,0 +1,57 @@
+# DoughMeter — crawler policy
+#
+# ── CURRENTLY CLOSED TO SEARCH ENGINES ──────────────────────────────
+# The site is only reachable on its *.pages.dev deployment URL, which is
+# not the domain we intend to rank. Cloudflare Pages does not 301 the
+# pages.dev host to a custom domain, so anything indexed now would linger
+# as a permanent duplicate competing with the real site.
+#
+# ON DOMAIN LAUNCH, do these three things:
+#   1. Delete the two "Disallow: /" lines in the block below and uncomment
+#      the LAUNCH block underneath it.
+#   2. Remove the `noindex` robots meta from public/index.html.
+#   3. Update every absolute URL to the real domain — canonical + og:url
+#      in index.html, and the <loc> entries in sitemap.xml.
+# ────────────────────────────────────────────────────────────────────
+
+User-agent: *
+Disallow: /
+
+# ── LAUNCH BLOCK — uncomment when the real domain is live ────────────
+# User-agent: *
+# Allow: /
+#
+# # Private application surface: thin JS shells with no search value, and
+# # no reason to publish the feature map. Also carry a noindex meta tag,
+# # which is the binding signal — robots.txt only asks crawlers not to fetch.
+# Disallow: /products.html
+# Disallow: /products
+# Disallow: /invoices
+# Disallow: /invoices.html
+# Disallow: /inventory
+# Disallow: /inventory.html
+# Disallow: /recipes
+# Disallow: /recipes.html
+# Disallow: /finished-products
+# Disallow: /finished-products.html
+# Disallow: /suppliers
+# Disallow: /suppliers.html
+# Disallow: /staff
+# Disallow: /staff.html
+# Disallow: /certifications
+# Disallow: /certifications.html
+# Disallow: /stock-take
+# Disallow: /stock-take.html
+# Disallow: /storage-layout
+# Disallow: /storage-layout.html
+# Disallow: /upload-invoice
+# Disallow: /upload-invoice.html
+# Disallow: /pnl
+# Disallow: /pnl.html
+# Disallow: /home
+# Disallow: /home.html
+# Disallow: /login
+# Disallow: /login.html
+# Disallow: /api/
+#
+# Sitemap: https://REPLACE-WITH-REAL-DOMAIN/sitemap.xml
