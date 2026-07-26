@@ -528,14 +528,17 @@ app.post('/api/inventory/:id/adjust', async (c) => {
     return c.json({ error: 'new_quantity and change must be numbers' }, 400)
   }
 
+  const org = orgOf(c)
+  // The scoped lookup doubles as the authorisation check: another business's
+  // row simply isn't found, so the adjustment can't be applied to it.
   const row = await c.env.DB.prepare(
-    `SELECT id, item_id, item_type, item_name FROM inventory WHERE id = ?`
-  ).bind(invId).first<{ id: string; item_id: string; item_type: string; item_name: string }>()
+    `SELECT id, item_id, item_type, item_name FROM inventory WHERE id = ? AND org_id IS ?`
+  ).bind(invId, org).first<{ id: string; item_id: string; item_type: string; item_name: string }>()
   if (!row) return c.json({ error: 'Inventory row not found' }, 404)
 
   const now = new Date().toISOString()
   const statements = [
-    c.env.DB.prepare(`UPDATE inventory SET quantity = ? WHERE id = ?`).bind(newQty, invId),
+    c.env.DB.prepare(`UPDATE inventory SET quantity = ? WHERE id = ? AND org_id IS ?`).bind(newQty, invId, org),
   ]
 
   // A zero-change adjustment is a no-op worth recording nothing for.
@@ -543,12 +546,12 @@ app.post('/api/inventory/:id/adjust', async (c) => {
     statements.push(
       c.env.DB.prepare(
         `INSERT INTO stock_log
-           (id, inventory_id, item_id, item_type, item_name, change, reason, reason_code, note, lot_number, moved_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?)`
+           (id, inventory_id, item_id, item_type, item_name, change, reason, reason_code, note, lot_number, moved_at, org_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)`
       ).bind(
         uid(), invId, row.item_id, row.item_type, row.item_name,
         change, (body.reason || '').trim() || 'Manual adjustment',
-        (body.reason_code || '').trim(), (body.note || '').trim(), now
+        (body.reason_code || '').trim(), (body.note || '').trim(), now, org
       )
     )
   }
@@ -929,8 +932,9 @@ app.put('/api/generic_products/:id', async (c) => {
   const newName = (body.name || '').trim()
   if (!newName) return c.json({ error: 'name required' }, 400)
 
-  const current = await c.env.DB.prepare('SELECT name FROM generic_products WHERE id = ?')
-    .bind(id).first<{ name: string }>()
+  const org = orgOf(c)
+  const current = await c.env.DB.prepare('SELECT name FROM generic_products WHERE id = ? AND org_id IS ?')
+    .bind(id, org).first<{ name: string }>()
   if (!current) return c.json({ error: 'Product not found' }, 404)
   const oldName = current.name
 
@@ -939,7 +943,7 @@ app.put('/api/generic_products/:id', async (c) => {
        SET name = ?, category = ?, sub_unit_name = ?, sub_unit_qty = ?, avg_weight_per_unit = ?,
            reorder_level = ?, reorder_unit = ?,
            base_unit = ?, mid_name = ?, mid_lb = ?, top_name = ?, top_lb = ?
-     WHERE id = ?`
+     WHERE id = ? AND org_id IS ?`
   ).bind(
     newName,
     body.category ?? '',
@@ -953,7 +957,8 @@ app.put('/api/generic_products/:id', async (c) => {
     body.mid_lb ?? null,
     body.top_name ?? '',
     body.top_lb ?? null,
-    id
+    id,
+    org
   ).run()
 
   // Always keep the raw-material inventory row in sync with the product's live
@@ -961,29 +966,31 @@ app.put('/api/generic_products/:id', async (c) => {
   // NOT matched by name anywhere, so it must be pushed here or the Inventory
   // page (badges + category chips) drifts from the Products page.
   await c.env.DB.prepare(
-    "UPDATE inventory SET item_name = ?, category = ? WHERE item_id = ? AND item_type = 'raw_material'"
-  ).bind(newName, body.category ?? '', id).run()
+    "UPDATE inventory SET item_name = ?, category = ? WHERE item_id = ? AND item_type = 'raw_material' AND org_id IS ?"
+  ).bind(newName, body.category ?? '', id, org).run()
 
   // Cascade the name only when it actually changed (ignoring case/space) to the
   // remaining tables where the name is denormalized. (inventory is handled above,
   // unconditionally, since it also carries category.)
   if (oldName.trim().toLowerCase() !== newName.toLowerCase()) {
     await c.env.DB.batch([
+      // Each cascade is org-scoped: these match on NAME, so without the filter
+      // renaming your "Olive Oil" would rewrite every other business's too.
       c.env.DB.prepare(
-        'UPDATE product_entries SET generic_product_name = ? WHERE generic_product_id = ? OR LOWER(TRIM(generic_product_name)) = LOWER(TRIM(?))'
-      ).bind(newName, id, oldName),
+        'UPDATE product_entries SET generic_product_name = ? WHERE (generic_product_id = ? OR LOWER(TRIM(generic_product_name)) = LOWER(TRIM(?))) AND org_id IS ?'
+      ).bind(newName, id, oldName, org),
       c.env.DB.prepare(
-        'UPDATE invoice_lines SET product_name = ? WHERE LOWER(TRIM(product_name)) = LOWER(TRIM(?))'
-      ).bind(newName, oldName),
+        'UPDATE invoice_lines SET product_name = ? WHERE LOWER(TRIM(product_name)) = LOWER(TRIM(?)) AND org_id IS ?'
+      ).bind(newName, oldName, org),
       c.env.DB.prepare(
-        'UPDATE product_mappings SET corrected_name = ? WHERE LOWER(TRIM(corrected_name)) = LOWER(TRIM(?))'
-      ).bind(newName, oldName),
+        'UPDATE product_mappings SET corrected_name = ? WHERE LOWER(TRIM(corrected_name)) = LOWER(TRIM(?)) AND org_id IS ?'
+      ).bind(newName, oldName, org),
       c.env.DB.prepare(
-        'UPDATE recipe_items SET product_name = ? WHERE product_id = ?'
-      ).bind(newName, id),
+        'UPDATE recipe_items SET product_name = ? WHERE product_id = ? AND org_id IS ?'
+      ).bind(newName, id, org),
       c.env.DB.prepare(
-        'UPDATE stock_log SET item_name = ? WHERE item_id = ?'
-      ).bind(newName, id),
+        'UPDATE stock_log SET item_name = ? WHERE item_id = ? AND org_id IS ?'
+      ).bind(newName, id, org),
     ])
   }
 
@@ -1008,14 +1015,15 @@ app.post('/api/invoices/:id/void', async (c) => {
   const { id } = c.req.param()
   const body = await c.req.json().catch(() => ({})) as { reason?: string }
   const reason = (body.reason || '').trim()
-  const inv = await c.env.DB.prepare('SELECT id FROM invoices WHERE id = ?')
-    .bind(id).first<{ id: string }>()
+  const org = orgOf(c)
+  const inv = await c.env.DB.prepare('SELECT id FROM invoices WHERE id = ? AND org_id IS ?')
+    .bind(id, org).first<{ id: string }>()
   if (!inv) return c.json({ error: 'Invoice not found' }, 404)
   const now = new Date().toISOString()
   await c.env.DB.batch([
     c.env.DB.prepare(
-      "UPDATE invoices SET voided_at = datetime('now'), void_reason = ? WHERE id = ?"
-    ).bind(reason, id),
+      "UPDATE invoices SET voided_at = datetime('now'), void_reason = ? WHERE id = ? AND org_id IS ?"
+    ).bind(reason, id, org),
     // Reverse the money side: flag the purchase entries this invoice created so
     // they stop counting toward Latest Price / price-movers / costing.
     c.env.DB.prepare(
