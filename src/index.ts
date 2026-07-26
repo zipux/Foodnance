@@ -1655,36 +1655,40 @@ function convertUnitCost(
 // copy, then soft-delete the absorbed product. Extracted so Merge (duplicates)
 // and Group (interchangeable items) stay identical under the hood — including
 // the full name cascade.
+// `org` is threaded through rather than filtered at the call site: every
+// statement below matches on id OR name, so an unscoped one would rewrite
+// another business's history.
 async function mergeInto(
   db: D1Database,
   merged: { id: string; name: string },
-  surviving: { id: string; name: string }
+  surviving: { id: string; name: string },
+  org: string | null
 ) {
   // 1. Re-link product_entries (the purchase/cost history)
   await db.prepare(
-    'UPDATE product_entries SET generic_product_id = ?, generic_product_name = ? WHERE generic_product_id = ?'
-  ).bind(surviving.id, surviving.name, merged.id).run()
+    'UPDATE product_entries SET generic_product_id = ?, generic_product_name = ? WHERE generic_product_id = ? AND org_id IS ?'
+  ).bind(surviving.id, surviving.name, merged.id, org).run()
 
   // 2. Merge inventory rows (pool the stock into one bin)
-  const mergedInv = await db.prepare('SELECT id, quantity FROM inventory WHERE item_id = ?')
-    .bind(merged.id).first<{ id: string; quantity: number }>()
+  const mergedInv = await db.prepare('SELECT id, quantity FROM inventory WHERE item_id = ? AND org_id IS ?')
+    .bind(merged.id, org).first<{ id: string; quantity: number }>()
   if (mergedInv) {
-    const survivingInv = await db.prepare('SELECT id FROM inventory WHERE item_id = ?')
-      .bind(surviving.id).first<{ id: string }>()
+    const survivingInv = await db.prepare('SELECT id FROM inventory WHERE item_id = ? AND org_id IS ?')
+      .bind(surviving.id, org).first<{ id: string }>()
     if (survivingInv) {
-      await db.prepare('UPDATE inventory SET quantity = quantity + ? WHERE item_id = ?')
-        .bind(mergedInv.quantity, surviving.id).run()
-      await db.prepare('DELETE FROM inventory WHERE item_id = ?').bind(merged.id).run()
+      await db.prepare('UPDATE inventory SET quantity = quantity + ? WHERE item_id = ? AND org_id IS ?')
+        .bind(mergedInv.quantity, surviving.id, org).run()
+      await db.prepare('DELETE FROM inventory WHERE item_id = ? AND org_id IS ?').bind(merged.id, org).run()
     } else {
       // No surviving inventory row — reassign the merged row
-      await db.prepare('UPDATE inventory SET item_id = ?, item_name = ? WHERE item_id = ?')
-        .bind(surviving.id, surviving.name, merged.id).run()
+      await db.prepare('UPDATE inventory SET item_id = ?, item_name = ? WHERE item_id = ? AND org_id IS ?')
+        .bind(surviving.id, surviving.name, merged.id, org).run()
     }
   }
 
   // 3. Re-link recipe_items
-  await db.prepare('UPDATE recipe_items SET product_id = ?, product_name = ? WHERE product_id = ?')
-    .bind(surviving.id, surviving.name, merged.id).run()
+  await db.prepare('UPDATE recipe_items SET product_id = ?, product_name = ? WHERE product_id = ? AND org_id IS ?')
+    .bind(surviving.id, surviving.name, merged.id, org).run()
 
   // 3b. Cascade the surviving identity to the remaining tables where the merged
   // product's name/id is denormalized (invoice_lines, product_mappings, stock_log).
@@ -1693,36 +1697,36 @@ async function mergeInto(
   await db.batch([
     db.prepare(
       `UPDATE invoice_lines SET generic_product_id = ?, product_name = ?
-        WHERE generic_product_id = ? OR LOWER(TRIM(product_name)) = LOWER(TRIM(?))`
-    ).bind(surviving.id, surviving.name, merged.id, merged.name),
-    db.prepare('UPDATE product_mappings SET corrected_name = ? WHERE LOWER(TRIM(corrected_name)) = LOWER(TRIM(?))')
-      .bind(surviving.name, merged.name),
-    db.prepare('UPDATE stock_log SET item_id = ?, item_name = ? WHERE item_id = ?')
-      .bind(surviving.id, surviving.name, merged.id),
+        WHERE (generic_product_id = ? OR LOWER(TRIM(product_name)) = LOWER(TRIM(?))) AND org_id IS ?`
+    ).bind(surviving.id, surviving.name, merged.id, merged.name, org),
+    db.prepare('UPDATE product_mappings SET corrected_name = ? WHERE LOWER(TRIM(corrected_name)) = LOWER(TRIM(?)) AND org_id IS ?')
+      .bind(surviving.name, merged.name, org),
+    db.prepare('UPDATE stock_log SET item_id = ?, item_name = ? WHERE item_id = ? AND org_id IS ?')
+      .bind(surviving.id, surviving.name, merged.id, org),
   ])
 
   // 4. Soft-delete the merged product
-  await db.prepare("UPDATE generic_products SET deleted_at = datetime('now') WHERE id = ?")
-    .bind(merged.id).run()
+  await db.prepare("UPDATE generic_products SET deleted_at = datetime('now') WHERE id = ? AND org_id IS ?")
+    .bind(merged.id, org).run()
 }
 
 // Rename a product and cascade the new name to every denormalized copy. Name-only
 // (does not touch category/units), used by Group when it renames the survivor to
 // the umbrella name. Mirrors the cascade inside PUT /api/generic_products/:id.
-async function cascadeRename(db: D1Database, id: string, oldName: string, newName: string) {
-  await db.prepare('UPDATE generic_products SET name = ? WHERE id = ?').bind(newName, id).run()
-  await db.prepare("UPDATE inventory SET item_name = ? WHERE item_id = ? AND item_type = 'raw_material'")
-    .bind(newName, id).run()
+async function cascadeRename(db: D1Database, id: string, oldName: string, newName: string, org: string | null) {
+  await db.prepare('UPDATE generic_products SET name = ? WHERE id = ? AND org_id IS ?').bind(newName, id, org).run()
+  await db.prepare("UPDATE inventory SET item_name = ? WHERE item_id = ? AND item_type = 'raw_material' AND org_id IS ?")
+    .bind(newName, id, org).run()
   if (oldName.trim().toLowerCase() !== newName.trim().toLowerCase()) {
     await db.batch([
-      db.prepare('UPDATE product_entries SET generic_product_name = ? WHERE generic_product_id = ? OR LOWER(TRIM(generic_product_name)) = LOWER(TRIM(?))')
-        .bind(newName, id, oldName),
-      db.prepare('UPDATE invoice_lines SET product_name = ? WHERE LOWER(TRIM(product_name)) = LOWER(TRIM(?))')
-        .bind(newName, oldName),
-      db.prepare('UPDATE product_mappings SET corrected_name = ? WHERE LOWER(TRIM(corrected_name)) = LOWER(TRIM(?))')
-        .bind(newName, oldName),
-      db.prepare('UPDATE recipe_items SET product_name = ? WHERE product_id = ?').bind(newName, id),
-      db.prepare('UPDATE stock_log SET item_name = ? WHERE item_id = ?').bind(newName, id),
+      db.prepare('UPDATE product_entries SET generic_product_name = ? WHERE (generic_product_id = ? OR LOWER(TRIM(generic_product_name)) = LOWER(TRIM(?))) AND org_id IS ?')
+        .bind(newName, id, oldName, org),
+      db.prepare('UPDATE invoice_lines SET product_name = ? WHERE LOWER(TRIM(product_name)) = LOWER(TRIM(?)) AND org_id IS ?')
+        .bind(newName, oldName, org),
+      db.prepare('UPDATE product_mappings SET corrected_name = ? WHERE LOWER(TRIM(corrected_name)) = LOWER(TRIM(?)) AND org_id IS ?')
+        .bind(newName, oldName, org),
+      db.prepare('UPDATE recipe_items SET product_name = ? WHERE product_id = ? AND org_id IS ?').bind(newName, id, org),
+      db.prepare('UPDATE stock_log SET item_name = ? WHERE item_id = ? AND org_id IS ?').bind(newName, id, org),
     ])
   }
 }
@@ -1738,16 +1742,19 @@ app.post('/api/products/merge', async (c) => {
   if (merged_id === surviving_id)
     return c.json({ error: 'Cannot merge a product with itself' }, 400)
 
+  const org = orgOf(c)
   const merged = await c.env.DB.prepare(
-    'SELECT id, name FROM generic_products WHERE id = ? AND deleted_at IS NULL'
-  ).bind(merged_id).first<{ id: string; name: string }>()
+    'SELECT id, name FROM generic_products WHERE id = ? AND deleted_at IS NULL AND org_id IS ?'
+  ).bind(merged_id, org).first<{ id: string; name: string }>()
   const surviving = await c.env.DB.prepare(
-    'SELECT id, name FROM generic_products WHERE id = ? AND deleted_at IS NULL'
-  ).bind(surviving_id).first<{ id: string; name: string }>()
+    'SELECT id, name FROM generic_products WHERE id = ? AND deleted_at IS NULL AND org_id IS ?'
+  ).bind(surviving_id, org).first<{ id: string; name: string }>()
   if (!merged)    return c.json({ error: 'Merged product not found' }, 404)
   if (!surviving) return c.json({ error: 'Surviving product not found' }, 404)
 
-  await mergeInto(c.env.DB, merged, surviving)
+  // Both sides resolved within this business, so a cross-business merge is
+  // impossible: one of them simply isn't found.
+  await mergeInto(c.env.DB, merged, surviving, org)
   return c.json({ ok: true, merged_name: merged.name, surviving_name: surviving.name })
 })
 
@@ -1766,10 +1773,11 @@ app.post('/api/products/group', async (c) => {
   if (ids.length < 2)  return c.json({ error: 'Select at least two products to group' }, 400)
 
   // Load every selected product (active only).
+  const org = orgOf(c)
   const products: { id: string; name: string }[] = []
   for (const id of ids) {
-    const p = await c.env.DB.prepare('SELECT id, name FROM generic_products WHERE id = ? AND deleted_at IS NULL')
-      .bind(id).first<{ id: string; name: string }>()
+    const p = await c.env.DB.prepare('SELECT id, name FROM generic_products WHERE id = ? AND deleted_at IS NULL AND org_id IS ?')
+      .bind(id, org).first<{ id: string; name: string }>()
     if (!p) return c.json({ error: `Product not found or archived: ${id}` }, 404)
     products.push(p)
   }
@@ -1778,24 +1786,24 @@ app.post('/api/products/group', async (c) => {
   // is renamed to the umbrella name; the rest are merged into it.
   const survivor = products.find(p => p.name.trim().toLowerCase() === generalName.toLowerCase()) || products[0]
   if (survivor.name.trim().toLowerCase() !== generalName.toLowerCase()) {
-    await cascadeRename(c.env.DB, survivor.id, survivor.name, generalName)
+    await cascadeRename(c.env.DB, survivor.id, survivor.name, generalName, org)
   }
   const surviving = { id: survivor.id, name: generalName }
 
   let grouped = 0
   for (const p of products) {
     if (p.id === survivor.id) continue
-    await mergeInto(c.env.DB, p, surviving)
+    await mergeInto(c.env.DB, p, surviving, org)
     // Remember the absorbed name so future invoices with that wording route in.
     const aliasName = p.name.trim()
     if (aliasName && aliasName.toLowerCase() !== generalName.toLowerCase()) {
       const dup = await c.env.DB.prepare(
-        'SELECT id FROM product_aliases WHERE generic_product_id = ? AND LOWER(TRIM(alias_name)) = LOWER(TRIM(?)) AND supplier_id IS NULL'
-      ).bind(survivor.id, aliasName).first()
+        'SELECT id FROM product_aliases WHERE generic_product_id = ? AND LOWER(TRIM(alias_name)) = LOWER(TRIM(?)) AND supplier_id IS NULL AND org_id IS ?'
+      ).bind(survivor.id, aliasName, org).first()
       if (!dup) {
         await c.env.DB.prepare(
-          'INSERT INTO product_aliases (id, alias_name, generic_product_id, supplier_id) VALUES (?, ?, ?, NULL)'
-        ).bind(uid(), aliasName, survivor.id).run()
+          'INSERT INTO product_aliases (id, alias_name, generic_product_id, supplier_id, org_id) VALUES (?, ?, ?, NULL, ?)'
+        ).bind(uid(), aliasName, survivor.id, org).run()
       }
     }
     grouped++
@@ -2034,15 +2042,18 @@ app.get('/api/price-movers', async (c) => {
 // Returns the in-progress stock take (if any), with its items.
 // If none exists, returns { active: null }.
 app.get('/api/stock-take/active', async (c) => {
+  const org = orgOf(c)
+  // Per business: one restaurant's stock take in progress must not appear on
+  // another's counting screen.
   const take = await c.env.DB.prepare(
-    `SELECT * FROM stock_takes WHERE status = 'in_progress' ORDER BY started_at DESC LIMIT 1`
-  ).first<Record<string, unknown>>()
+    `SELECT * FROM stock_takes WHERE status = 'in_progress' AND org_id IS ? ORDER BY started_at DESC LIMIT 1`
+  ).bind(org).first<Record<string, unknown>>()
 
   if (!take) return c.json({ active: null })
 
   const items = await c.env.DB.prepare(
-    `SELECT * FROM stock_take_items WHERE stock_take_id = ?`
-  ).bind(take.id).all()
+    `SELECT * FROM stock_take_items WHERE stock_take_id = ? AND org_id IS ?`
+  ).bind(take.id, org).all()
 
   return c.json({ active: take, items: items.results })
 })
@@ -2052,44 +2063,47 @@ app.get('/api/stock-take/active', async (c) => {
 // as a stock_take_items row with counted_qty = NULL.
 // If an in-progress stock take already exists, returns it instead.
 app.post('/api/stock-take/start', async (c) => {
+  const org = orgOf(c)
   const existing = await c.env.DB.prepare(
-    `SELECT * FROM stock_takes WHERE status = 'in_progress' ORDER BY started_at DESC LIMIT 1`
-  ).first<Record<string, unknown>>()
+    `SELECT * FROM stock_takes WHERE status = 'in_progress' AND org_id IS ? ORDER BY started_at DESC LIMIT 1`
+  ).bind(org).first<Record<string, unknown>>()
 
   if (existing) {
     const items = await c.env.DB.prepare(
-      `SELECT * FROM stock_take_items WHERE stock_take_id = ?`
-    ).bind(existing.id).all()
+      `SELECT * FROM stock_take_items WHERE stock_take_id = ? AND org_id IS ?`
+    ).bind(existing.id, org).all()
     return c.json({ stock_take: existing, items: items.results, resumed: true })
   }
 
   const stockTakeId = uid()
+  // The snapshot must cover only this business's inventory, or the count sheet
+  // would list another restaurant's items.
   const inv = await c.env.DB.prepare(
-    `SELECT id, item_id, item_type, item_name, category, quantity, unit FROM inventory`
-  ).all<{ id: string; item_id: string; item_type: string; item_name: string; category: string; quantity: number; unit: string }>()
+    `SELECT id, item_id, item_type, item_name, category, quantity, unit FROM inventory WHERE org_id IS ?`
+  ).bind(org).all<{ id: string; item_id: string; item_type: string; item_name: string; category: string; quantity: number; unit: string }>()
 
   const items = inv.results || []
 
   await c.env.DB.prepare(
-    `INSERT INTO stock_takes (id, status, total_items, counted_items) VALUES (?, 'in_progress', ?, 0)`
-  ).bind(stockTakeId, items.length).run()
+    `INSERT INTO stock_takes (id, status, total_items, counted_items, org_id) VALUES (?, 'in_progress', ?, 0, ?)`
+  ).bind(stockTakeId, items.length, org).run()
 
   // Bulk-insert snapshot rows
   const statements = items.map(r =>
     c.env.DB.prepare(
       `INSERT INTO stock_take_items
-         (id, stock_take_id, inventory_id, item_id, item_type, item_name, category, unit, expected_qty)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(uid(), stockTakeId, r.id, r.item_id, r.item_type, r.item_name, r.category || '', r.unit || '', r.quantity || 0)
+         (id, stock_take_id, inventory_id, item_id, item_type, item_name, category, unit, expected_qty, org_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(uid(), stockTakeId, r.id, r.item_id, r.item_type, r.item_name, r.category || '', r.unit || '', r.quantity || 0, org)
   )
   if (statements.length) await c.env.DB.batch(statements)
 
   const created = await c.env.DB.prepare(
-    `SELECT * FROM stock_takes WHERE id = ?`
-  ).bind(stockTakeId).first()
+    `SELECT * FROM stock_takes WHERE id = ? AND org_id IS ?`
+  ).bind(stockTakeId, org).first()
   const itemRows = await c.env.DB.prepare(
-    `SELECT * FROM stock_take_items WHERE stock_take_id = ?`
-  ).bind(stockTakeId).all()
+    `SELECT * FROM stock_take_items WHERE stock_take_id = ? AND org_id IS ?`
+  ).bind(stockTakeId, org).all()
 
   return c.json({ stock_take: created, items: itemRows.results, resumed: false }, 201)
 })
@@ -2111,14 +2125,16 @@ app.post('/api/stock-take/:id/submit', async (c) => {
     }>
   }
 
-  const take = await c.env.DB.prepare(`SELECT * FROM stock_takes WHERE id = ?`).bind(stockTakeId).first<Record<string, unknown>>()
+  const org = orgOf(c)
+  const take = await c.env.DB.prepare(`SELECT * FROM stock_takes WHERE id = ? AND org_id IS ?`)
+    .bind(stockTakeId, org).first<Record<string, unknown>>()
   if (!take) return c.json({ error: 'Stock take not found' }, 404)
   if (take.status !== 'in_progress') return c.json({ error: 'Stock take is not in progress' }, 400)
 
   // Load all snapshot rows for this take, keyed by id
   const snapshotRows = await c.env.DB.prepare(
-    `SELECT * FROM stock_take_items WHERE stock_take_id = ?`
-  ).bind(stockTakeId).all<{
+    `SELECT * FROM stock_take_items WHERE stock_take_id = ? AND org_id IS ?`
+  ).bind(stockTakeId, org).all<{
     id: string; inventory_id: string; item_id: string; item_type: string
     item_name: string; expected_qty: number; unit: string
   }>()
@@ -2142,7 +2158,7 @@ app.post('/api/stock-take/:id/submit', async (c) => {
 
     // 1. Update inventory quantity
     statements.push(
-      c.env.DB.prepare(`UPDATE inventory SET quantity = ? WHERE id = ?`).bind(counted, snap.inventory_id)
+      c.env.DB.prepare(`UPDATE inventory SET quantity = ? WHERE id = ? AND org_id IS ?`).bind(counted, snap.inventory_id, org)
     )
 
     // 2. Update stock_take_items snapshot
@@ -2150,8 +2166,8 @@ app.post('/api/stock-take/:id/submit', async (c) => {
       c.env.DB.prepare(
         `UPDATE stock_take_items
            SET counted_qty = ?, variance = ?, reason = ?, reason_code = ?, counted_at = ?
-         WHERE id = ?`
-      ).bind(counted, variance, reason, reasonCode, now, snap.id)
+         WHERE id = ? AND org_id IS ?`
+      ).bind(counted, variance, reason, reasonCode, now, snap.id, org)
     )
 
     // 3. Log a stock movement (only if variance != 0).
@@ -2163,13 +2179,13 @@ app.post('/api/stock-take/:id/submit', async (c) => {
       statements.push(
         c.env.DB.prepare(
           `INSERT INTO stock_log
-             (id, inventory_id, item_id, item_type, item_name, change, reason, reason_code, note, lot_number, moved_at, stock_take_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)`
+             (id, inventory_id, item_id, item_type, item_name, change, reason, reason_code, note, lot_number, moved_at, stock_take_id, org_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)`
         ).bind(
           uid(), snap.inventory_id, snap.item_id, snap.item_type, snap.item_name,
           variance, reason || 'Stock take', reasonCode || 'stock_take',
           `Stock take: expected ${expected}, counted ${counted}`,
-          now, stockTakeId
+          now, stockTakeId, org
         )
       )
     }
@@ -2178,8 +2194,8 @@ app.post('/api/stock-take/:id/submit', async (c) => {
   // 4. Mark the stock take submitted
   statements.push(
     c.env.DB.prepare(
-      `UPDATE stock_takes SET status = 'submitted', submitted_at = ?, counted_items = ? WHERE id = ?`
-    ).bind(now, countedCount, stockTakeId)
+      `UPDATE stock_takes SET status = 'submitted', submitted_at = ?, counted_items = ? WHERE id = ? AND org_id IS ?`
+    ).bind(now, countedCount, stockTakeId, org)
   )
 
   if (statements.length) await c.env.DB.batch(statements)
@@ -2202,13 +2218,14 @@ app.patch('/api/stock-take/items/:id', async (c) => {
     `UPDATE stock_take_items
         SET counted_qty = ?, reason = ?, reason_code = ?,
             counted_at = CASE WHEN ? IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END
-      WHERE id = ?`
+      WHERE id = ? AND org_id IS ?`
   ).bind(
     body.counted_qty ?? null,
     body.reason ?? '',
     (body.reason_code || '').trim(),
     body.counted_qty ?? null,
-    itemId
+    itemId,
+    orgOf(c)
   ).run()
   return c.json({ ok: true })
 })
@@ -2219,8 +2236,8 @@ app.post('/api/stock-take/:id/cancel', async (c) => {
   // Hard delete so the next "Start Stock Take" creates a fresh session.
   // stock_take_items cascade-deletes via the FK ON DELETE CASCADE.
   await c.env.DB.prepare(
-    `DELETE FROM stock_takes WHERE id = ? AND status = 'in_progress'`
-  ).bind(stockTakeId).run()
+    `DELETE FROM stock_takes WHERE id = ? AND status = 'in_progress' AND org_id IS ?`
+  ).bind(stockTakeId, orgOf(c)).run()
   return c.json({ ok: true })
 })
 
@@ -2229,15 +2246,16 @@ app.post('/api/stock-take/:id/cancel', async (c) => {
 // MOST RECENTLY SUBMITTED stock take. Inventory rows with no record in that
 // take (e.g. created after the take was submitted) are omitted.
 app.get('/api/stock-take/latest-statuses', async (c) => {
+  const org = orgOf(c)
   const latest = await c.env.DB.prepare(
-    `SELECT id, submitted_at FROM stock_takes WHERE status = 'submitted' ORDER BY submitted_at DESC LIMIT 1`
-  ).first<{ id: string; submitted_at: string }>()
+    `SELECT id, submitted_at FROM stock_takes WHERE status = 'submitted' AND org_id IS ? ORDER BY submitted_at DESC LIMIT 1`
+  ).bind(org).first<{ id: string; submitted_at: string }>()
 
   if (!latest) return c.json({ stock_take_id: null, statuses: {} })
 
   const rows = await c.env.DB.prepare(
-    `SELECT inventory_id, counted_qty FROM stock_take_items WHERE stock_take_id = ?`
-  ).bind(latest.id).all<{ inventory_id: string; counted_qty: number | null }>()
+    `SELECT inventory_id, counted_qty FROM stock_take_items WHERE stock_take_id = ? AND org_id IS ?`
+  ).bind(latest.id, org).all<{ inventory_id: string; counted_qty: number | null }>()
 
   const statuses: Record<string, 'counted' | 'not_counted'> = {}
   for (const r of (rows.results || [])) {
