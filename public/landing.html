@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DoughMeter — Know your real food cost</title>
+  <meta name="description" content="DoughMeter turns a photo of your supplier invoice into true food cost, live recipe margins and a real P&amp;L. Built for independent restaurants, bakeries and commissaries." />
+
+  <!-- Open Graph: controls the preview when the link is shared -->
+  <meta property="og:title" content="DoughMeter — Know your real food cost" />
+  <meta property="og:description" content="Photograph an invoice. Your recipe costs, margins and P&amp;L update themselves." />
+  <meta property="og:type" content="website" />
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <style>
+    /* Landing page is deliberately standalone — it does NOT load /static/style.css,
+       which is app-chrome (tables, modals, stat chips) and would only add weight.
+       The tokens below are copied from style.css so the brand stays consistent;
+       if --primary changes there, change it here too. */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary:    #4f46e5;
+      --primary-d:  #3730a3;
+      --success:    #059669;
+      --danger:     #dc2626;
+      --warning:    #d97706;
+      --bg:         #ffffff;
+      --bg-alt:     #f8fafc;
+      --border:     #e2e8f0;
+      --text:       #1e293b;
+      --text-muted: #64748b;
+      --radius:     12px;
+      --radius-sm:  8px;
+      --shadow:     0 2px 16px rgba(0,0,0,.08);
+      --shadow-lg:  0 18px 48px rgba(15,23,42,.14);
+      --maxw:       1080px;
+    }
+
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      font-size: 16px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 1.25rem; }
+
+    /* ===== NAV ===== */
+    header.nav {
+      position: sticky; top: 0; z-index: 50;
+      background: rgba(255,255,255,.86);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: var(--maxw); margin: 0 auto; padding: .85rem 1.25rem;
+      display: flex; align-items: center; gap: 1rem;
+    }
+    .brand {
+      display: flex; align-items: center; gap: .55rem;
+      font-weight: 800; font-size: 1.15rem; letter-spacing: -.01em;
+      color: var(--text); text-decoration: none;
+    }
+    .brand i { color: var(--primary); }
+    .nav-spacer { flex: 1; }
+    .nav-link {
+      color: var(--text-muted); text-decoration: none; font-size: .92rem;
+      font-weight: 500; padding: .4rem .6rem; border-radius: 6px;
+    }
+    .nav-link:hover { color: var(--text); background: var(--bg-alt); }
+
+    /* ===== BUTTONS ===== */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+      font-family: inherit; font-size: .95rem; font-weight: 600;
+      padding: .7rem 1.25rem; border-radius: var(--radius-sm);
+      text-decoration: none; border: 1px solid transparent; cursor: pointer;
+      transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
+      white-space: nowrap;
+    }
+    .btn-primary {
+      background: linear-gradient(180deg, var(--primary), var(--primary-d));
+      color: #fff; box-shadow: 0 2px 10px rgba(79,70,229,.28);
+    }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(79,70,229,.34); }
+    .btn-ghost { background: #fff; color: var(--text); border-color: var(--border); }
+    .btn-ghost:hover { background: var(--bg-alt); }
+    .btn-lg { font-size: 1rem; padding: .85rem 1.6rem; }
+
+    /* ===== HERO ===== */
+    .hero { padding: 4.5rem 0 3rem; text-align: center; }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: .45rem;
+      font-size: .8rem; font-weight: 600; letter-spacing: .02em;
+      color: var(--primary); background: #eef2ff;
+      border: 1px solid #e0e7ff; border-radius: 999px;
+      padding: .35rem .8rem; margin-bottom: 1.4rem;
+    }
+    h1 {
+      font-size: clamp(2.1rem, 5.5vw, 3.4rem);
+      line-height: 1.1; letter-spacing: -.03em; font-weight: 800;
+      max-width: 20ch; margin: 0 auto 1.1rem;
+    }
+    h1 .accent {
+      background: linear-gradient(120deg, var(--primary), #7c6cf0);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .sub {
+      font-size: clamp(1rem, 2.2vw, 1.18rem); color: var(--text-muted);
+      max-width: 56ch; margin: 0 auto 2rem;
+    }
+    .cta-row { display: flex; gap: .7rem; justify-content: center; flex-wrap: wrap; }
+    .cta-note { font-size: .84rem; color: var(--text-muted); margin-top: .9rem; }
+
+    /* ===== PRODUCT PREVIEW ===== */
+    .preview {
+      margin: 3rem auto 0; max-width: 940px;
+      background: #fff; border: 1px solid var(--border);
+      border-radius: 14px; box-shadow: var(--shadow-lg);
+      overflow: hidden; text-align: left;
+    }
+    .preview-bar {
+      display: flex; align-items: center; gap: .45rem;
+      padding: .7rem .9rem; background: linear-gradient(90deg, var(--primary-d), var(--primary));
+    }
+    .preview-bar .dot { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,.35); }
+    .preview-bar .title {
+      color: #fff; font-size: .85rem; font-weight: 600; margin-left: .5rem;
+      display: flex; align-items: center; gap: .4rem;
+    }
+    .preview-bar .example-tag {
+      margin-left: auto; font-size: .68rem; font-weight: 600; letter-spacing: .04em;
+      text-transform: uppercase; color: rgba(255,255,255,.8);
+      border: 1px solid rgba(255,255,255,.3); border-radius: 4px; padding: .1rem .4rem;
+    }
+    .preview-body { padding: 1.1rem; background: #f8fafc; }
+    .kpi-row {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: .7rem; margin-bottom: 1rem;
+    }
+    .kpi {
+      background: #fff; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: .7rem .85rem;
+    }
+    .kpi .label {
+      font-size: .68rem; font-weight: 600; letter-spacing: .05em;
+      text-transform: uppercase; color: var(--text-muted); margin-bottom: .25rem;
+    }
+    .kpi .value { font-size: 1.35rem; font-weight: 700; letter-spacing: -.02em; }
+    .kpi .delta { font-size: .76rem; font-weight: 600; }
+    .up   { color: var(--danger); }
+    .down { color: var(--success); }
+
+    .mover-list { background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+    .mover {
+      display: flex; align-items: center; gap: .7rem;
+      padding: .62rem .85rem; border-bottom: 1px solid #f1f5f9; font-size: .88rem;
+    }
+    .mover:last-child { border-bottom: none; }
+    .mover .name { font-weight: 600; }
+    .mover .vendor { color: var(--text-muted); font-size: .78rem; }
+    .mover .num { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .pill {
+      font-size: .68rem; font-weight: 600; padding: .12rem .45rem;
+      border-radius: 4px; background: #eef2ff; color: var(--primary-d);
+    }
+
+    /* ===== SECTIONS ===== */
+    section { padding: 3.5rem 0; }
+    .section-alt { background: var(--bg-alt); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    .section-head { text-align: center; max-width: 60ch; margin: 0 auto 2.5rem; }
+    h2 {
+      font-size: clamp(1.5rem, 3.4vw, 2.1rem); letter-spacing: -.02em;
+      font-weight: 800; line-height: 1.2; margin-bottom: .7rem;
+    }
+    .section-head p { color: var(--text-muted); font-size: 1.02rem; }
+
+    .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(268px, 1fr)); }
+    .card {
+      background: #fff; border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.4rem;
+      transition: transform .15s ease, box-shadow .15s ease;
+    }
+    .card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+    .card .icon {
+      width: 40px; height: 40px; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.05rem; margin-bottom: .9rem;
+      background: #eef2ff; color: var(--primary);
+    }
+    .card h3 { font-size: 1.04rem; font-weight: 700; margin-bottom: .4rem; letter-spacing: -.01em; }
+    .card p { font-size: .92rem; color: var(--text-muted); }
+
+    /* ===== STEPS ===== */
+    .steps { display: grid; gap: 1.6rem; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); counter-reset: step; }
+    .step { position: relative; padding-top: 2.9rem; }
+    .step::before {
+      counter-increment: step; content: counter(step);
+      position: absolute; top: 0; left: 0;
+      width: 2.1rem; height: 2.1rem; border-radius: 50%;
+      background: linear-gradient(180deg, var(--primary), var(--primary-d));
+      color: #fff; font-weight: 700; font-size: .95rem;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 2px 8px rgba(79,70,229,.3);
+    }
+    .step h3 { font-size: 1.04rem; font-weight: 700; margin-bottom: .35rem; }
+    .step p { font-size: .92rem; color: var(--text-muted); }
+
+    /* ===== AUDIENCE ===== */
+    .who { display: flex; gap: .6rem; flex-wrap: wrap; justify-content: center; }
+    .who span {
+      background: #fff; border: 1px solid var(--border); border-radius: 999px;
+      padding: .45rem 1rem; font-size: .9rem; font-weight: 500;
+      display: inline-flex; align-items: center; gap: .45rem;
+    }
+    .who i { color: var(--primary); }
+
+    /* ===== FINAL CTA ===== */
+    .final {
+      background: linear-gradient(135deg, var(--primary-d), var(--primary));
+      color: #fff; border-radius: 16px; padding: 3rem 1.5rem; text-align: center;
+    }
+    .final h2 { color: #fff; }
+    .final p { color: rgba(255,255,255,.88); max-width: 52ch; margin: 0 auto 1.6rem; }
+    .final .btn-primary {
+      background: #fff; color: var(--primary-d);
+      box-shadow: 0 4px 16px rgba(15,23,42,.2);
+    }
+    .final .cta-note { color: rgba(255,255,255,.75); }
+
+    /* ===== FOOTER ===== */
+    footer {
+      border-top: 1px solid var(--border); padding: 2rem 0;
+      font-size: .87rem; color: var(--text-muted);
+    }
+    .foot-inner { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    footer a { color: var(--text-muted); text-decoration: none; }
+    footer a:hover { color: var(--text); text-decoration: underline; }
+
+    @media (max-width: 640px) {
+      .hero { padding: 3rem 0 2rem; }
+      section { padding: 2.5rem 0; }
+      .nav-inner { padding: .7rem 1rem; }
+      .brand { font-size: 1.05rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="#top"><i class="fas fa-receipt"></i> DoughMeter</a>
+      <div class="nav-spacer"></div>
+      <a class="nav-link" href="#features">Features</a>
+      <a class="nav-link" href="#how">How it works</a>
+      <a class="btn btn-primary" href="mailto:simoneisonni@gmail.com?subject=DoughMeter%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20DoughMeter.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
+        Request access
+      </a>
+    </div>
+  </header>
+
+  <a id="top"></a>
+
+  <!-- ══ HERO ══ -->
+  <div class="hero wrap">
+    <div class="eyebrow"><i class="fas fa-bolt"></i> Now onboarding first customers</div>
+
+    <h1>Know your <span class="accent">real food cost</span></h1>
+
+    <p class="sub">
+      Photograph a supplier invoice. DoughMeter reads every line, updates the cost of every
+      recipe that uses those ingredients, and tells you which vendor just raised prices —
+      before it quietly eats your margin.
+    </p>
+
+    <div class="cta-row">
+      <a class="btn btn-primary btn-lg" href="mailto:simoneisonni@gmail.com?subject=DoughMeter%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20DoughMeter.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
+        <i class="fas fa-envelope"></i> Request access
+      </a>
+      <a class="btn btn-ghost btn-lg" href="#how">See how it works</a>
+    </div>
+    <p class="cta-note">Early access — we set your account up with you, one business at a time.</p>
+
+    <!-- Illustrative UI, not a customer's data. Swap for a real screenshot when ready. -->
+    <div class="preview">
+      <div class="preview-bar">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="title"><i class="fas fa-chart-line"></i> Price Movers</span>
+        <span class="example-tag">Example</span>
+      </div>
+      <div class="preview-body">
+        <div class="kpi-row">
+          <div class="kpi">
+            <div class="label">Food cost %</div>
+            <div class="value">31.4%</div>
+            <div class="delta down"><i class="fas fa-arrow-down"></i> 2.1 pts vs last month</div>
+          </div>
+          <div class="kpi">
+            <div class="label">Purchases (Jul)</div>
+            <div class="value">$18,240</div>
+            <div class="delta">42 invoices processed</div>
+          </div>
+          <div class="kpi">
+            <div class="label">Overpaying by</div>
+            <div class="value up">$412</div>
+            <div class="delta">vs cheapest vendor</div>
+          </div>
+        </div>
+
+        <div class="mover-list">
+          <div class="mover">
+            <div>
+              <div class="name">Tomatoes, Roma</div>
+              <div class="vendor">Neptune Foods · 20 lb case</div>
+            </div>
+            <span class="pill">switched vendor</span>
+            <span class="num down">−9.3%</span>
+          </div>
+          <div class="mover">
+            <div>
+              <div class="name">White Flour</div>
+              <div class="vendor">Almi Wholesale · 25 kg bag</div>
+            </div>
+            <span class="num up">+14.2%</span>
+          </div>
+          <div class="mover">
+            <div>
+              <div class="name">Mozzarella, shredded</div>
+              <div class="vendor">Yen Distribution · 5 kg</div>
+            </div>
+            <span class="num up">+6.8%</span>
+          </div>
+          <div class="mover">
+            <div>
+              <div class="name">Olive Oil, extra virgin</div>
+              <div class="vendor">Terra Imports · 5 L tin</div>
+            </div>
+            <span class="num down">−3.1%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ FEATURES ══ -->
+  <section id="features" class="section-alt">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Everything downstream of an invoice, handled</h2>
+        <p>Most tools stop at bookkeeping. DoughMeter carries the number all the way through
+           to what a plate actually costs you.</p>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <div class="icon"><i class="fas fa-camera"></i></div>
+          <h3>Invoices read for you</h3>
+          <p>Photo or PDF in, itemised lines out — product, pack size, unit price. It flags a
+             total that doesn't add up, so a typo never becomes a wrong food cost.</p>
+        </div>
+        <div class="card">
+          <div class="icon"><i class="fas fa-arrow-trend-up"></i></div>
+          <h3>Price movers &amp; vendor compare</h3>
+          <p>See exactly which items went up, by how much, and which supplier is cheapest for
+             the same item — with the dollar figure you'd save by switching.</p>
+        </div>
+        <div class="card">
+          <div class="icon"><i class="fas fa-book-open"></i></div>
+          <h3>Recipe &amp; product costing</h3>
+          <p>Cost every recipe from live ingredient prices, then build finished products from
+             recipes. When flour goes up, every affected margin updates itself.</p>
+        </div>
+        <div class="card">
+          <div class="icon"><i class="fas fa-boxes-stacked"></i></div>
+          <h3>Stock takes that reconcile</h3>
+          <p>Count by storage area in walk order, on a phone, offline if the walk-in has no
+             signal. See counted versus expected, and what the variance cost you.</p>
+        </div>
+        <div class="card">
+          <div class="icon"><i class="fas fa-chart-pie"></i></div>
+          <h3>P&amp;L with true COGS</h3>
+          <p>Monthly profit and loss from real purchases, with the option to swap in
+             stock-take-based true cost of goods instead of purchases alone.</p>
+        </div>
+        <div class="card">
+          <div class="icon"><i class="fas fa-id-card"></i></div>
+          <h3>Certifications that don't lapse</h3>
+          <p>Track food-safety certificates per staff member and get told what's expiring
+             before an inspector is the one who notices.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ HOW IT WORKS ══ -->
+  <section id="how">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Three steps, then it runs</h2>
+        <p>The only recurring work is the part you already do — receiving invoices.</p>
+      </div>
+
+      <div class="steps">
+        <div class="step">
+          <h3>Send the invoice</h3>
+          <p>Photograph it on your phone as it arrives, or upload the PDF. Every line is
+             extracted and matched to the products you already have.</p>
+        </div>
+        <div class="step">
+          <h3>Approve in seconds</h3>
+          <p>Check the extracted lines, fix anything odd, approve. Stock goes up, costs
+             update, and the invoice lands in your P&amp;L.</p>
+        </div>
+        <div class="step">
+          <h3>Act on what changed</h3>
+          <p>Open Price Movers to see what a supplier quietly raised, which recipes now cost
+             more, and where you're paying above the best price available.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ WHO IT'S FOR ══ -->
+  <section class="section-alt">
+    <div class="wrap">
+      <div class="section-head" style="margin-bottom:1.6rem">
+        <h2>Built for independents</h2>
+        <p>Small teams buying from several suppliers, where a few points of food cost is the
+           difference between a good and a bad month.</p>
+      </div>
+      <div class="who">
+        <span><i class="fas fa-utensils"></i> Restaurants</span>
+        <span><i class="fas fa-bread-slice"></i> Bakeries</span>
+        <span><i class="fas fa-warehouse"></i> Commissaries</span>
+        <span><i class="fas fa-mug-hot"></i> Cafés</span>
+        <span><i class="fas fa-pizza-slice"></i> Pizzerias</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ FINAL CTA ══ -->
+  <section>
+    <div class="wrap">
+      <div class="final">
+        <h2>Find out what your food actually costs</h2>
+        <p>We're onboarding the first businesses now, hands-on. Tell us a little about your
+           operation and we'll set you up.</p>
+        <a class="btn btn-primary btn-lg" href="mailto:simoneisonni@gmail.com?subject=DoughMeter%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20DoughMeter.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
+          <i class="fas fa-envelope"></i> Request access
+        </a>
+        <p class="cta-note" style="margin-top:1rem">No card, no commitment — a conversation first.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap foot-inner">
+      <a class="brand" href="#top" style="font-size:1rem"><i class="fas fa-receipt"></i> DoughMeter</a>
+      <div class="nav-spacer"></div>
+      <span>&copy; 2026 DoughMeter</span>
+      <a href="mailto:simoneisonni@gmail.com">Contact</a>
+    </div>
+  </footer>
+
+</body>
+</html>
