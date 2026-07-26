@@ -86,15 +86,16 @@
     }
     button.submit:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(79,70,229,.34); }
 
-    /* Early-access disclosure. DELETE THIS BLOCK (and .notice in the markup)
-       once /api/auth/login is wired and credentials are actually checked. */
-    .notice {
-      margin-top: 1.25rem; padding: .7rem .85rem;
-      background: #fffbeb; border: 1px solid #fde68a; border-radius: var(--radius-sm);
-      font-size: .82rem; color: #92400e;
-      display: flex; align-items: flex-start; gap: .5rem;
+    /* Sign-in failure message. Hidden until the server rejects a login. */
+    .error {
+      display: none; margin-bottom: 1rem; padding: .7rem .85rem;
+      background: #fef2f2; border: 1px solid #fecaca; border-radius: var(--radius-sm);
+      font-size: .85rem; color: #991b1b;
+      align-items: flex-start; gap: .5rem;
     }
-    .notice i { margin-top: .15rem; }
+    .error.show { display: flex; }
+    .error i { margin-top: .15rem; }
+    button.submit[disabled] { opacity: .65; cursor: default; transform: none; }
 
     .below { text-align: center; margin-top: 1.5rem; font-size: .88rem; color: var(--text-muted); }
     .below a { color: var(--primary); text-decoration: none; font-weight: 500; }
@@ -112,19 +113,21 @@
       <h1>Log in</h1>
       <p class="lede">Welcome back. Pick up where you left off.</p>
 
-      <!-- Fields are intentionally NOT `required` while the gate is open: the user
-           asked for entry with no credentials set up. When /api/auth/login exists,
-           add `required`, POST this form, and handle a 401. -->
-      <form id="loginForm" novalidate>
+      <div class="error" id="loginError">
+        <i class="fas fa-circle-exclamation"></i>
+        <span id="loginErrorText"></span>
+      </div>
+
+      <form id="loginForm">
         <div class="field">
           <label for="email">Email</label>
-          <input type="email" id="email" name="email" autocomplete="username"
+          <input type="email" id="email" name="email" autocomplete="username" required
                  placeholder="you@yourbusiness.com" />
         </div>
 
         <div class="field">
           <label for="password">Password</label>
-          <input type="password" id="password" name="password" autocomplete="current-password"
+          <input type="password" id="password" name="password" autocomplete="current-password" required
                  placeholder="••••••••" />
         </div>
 
@@ -138,11 +141,6 @@
         </button>
       </form>
 
-      <div class="notice">
-        <i class="fas fa-circle-info"></i>
-        <span><strong>Early access.</strong> Sign-in isn't enforced yet — leave the fields
-        blank and continue.</span>
-      </div>
     </div>
 
     <p class="below">Don't have an account?
@@ -152,30 +150,69 @@
   </div>
 
   <script>
-    // ── Placeholder gate ────────────────────────────────────────────────
-    // There is NO authentication behind this yet: it marks the session and
-    // forwards into the app. It is not a security boundary — app pages and
-    // /api/* are still reachable directly by URL.
-    //
-    // To make it real (Phase 1 of the accounts plan):
-    //   1. POST {email, password} to /api/auth/login
-    //   2. Backend sets a signed HttpOnly session cookie (needs SESSION_SECRET)
-    //   3. On 401 show an error here instead of forwarding
-    //   4. Drop the sessionStorage flag below — the cookie becomes the truth
-    const AFTER_LOGIN = '/home';   // Price Movers, the first tab in the app nav
+    // Real sign-in. The server replies with a signed HttpOnly session cookie,
+    // which the browser then sends on every /api/* request automatically —
+    // there is nothing to store here, and no token JavaScript can read.
+    const AFTER_LOGIN       = '/home';    // Price Movers, first tab in the app
+    const AFTER_LOGIN_ADMIN = '/admin';   // super-admin goes to the admin screen
 
-    document.getElementById('loginForm').addEventListener('submit', function (e) {
+    // If the session expired mid-task, utils.js sends the user here with
+    // ?next=/wherever — return them there instead of dumping them on /home.
+    // Only same-site paths are honoured, so ?next=https://evil.example can't
+    // turn this page into an open redirect.
+    function destinationFor(user) {
+      const next = new URLSearchParams(location.search).get('next') || '';
+      if (next.startsWith('/') && !next.startsWith('//')) return next;
+      return (user && user.is_super_admin) ? AFTER_LOGIN_ADMIN : AFTER_LOGIN;
+    }
+
+    const form    = document.getElementById('loginForm');
+    const errBox  = document.getElementById('loginError');
+    const errText = document.getElementById('loginErrorText');
+    const btn     = form.querySelector('button.submit');
+    const btnHtml = btn.innerHTML;
+
+    function showError(msg) {
+      errText.textContent = msg;
+      errBox.classList.add('show');
+    }
+
+    // Already signed in? Skip the form entirely.
+    fetch('/api/auth/me')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d && d.user) location.href = destinationFor(d.user); })
+      .catch(() => {});
+
+    form.addEventListener('submit', async function (e) {
       e.preventDefault();
+      errBox.classList.remove('show');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Signing in…';
+
       try {
-        // Read but deliberately unused: keeps the wiring obvious for whoever
-        // swaps in the real POST.
-        const email = document.getElementById('email').value.trim();
-        sessionStorage.setItem('dm_gate', '1');
-        if (email) sessionStorage.setItem('dm_gate_email', email);
+        const resp = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            email:    document.getElementById('email').value.trim(),
+            password: document.getElementById('password').value,
+          }),
+        });
+        const data = await resp.json().catch(() => ({}));
+
+        if (!resp.ok) {
+          showError(data.error || 'Could not sign in. Please try again.');
+          return;
+        }
+        // Back to where they were if the session expired mid-task, else
+        // admin screen for super-admins and the app for everyone else.
+        location.href = destinationFor(data.user);
       } catch (_) {
-        // Private-mode browsers can throw on storage — the gate must still open.
+        showError('Could not reach the server. Check your connection and try again.');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = btnHtml;
       }
-      window.location.href = AFTER_LOGIN;
     });
   </script>
 

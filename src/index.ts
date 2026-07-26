@@ -5,15 +5,165 @@ type Bindings = {
   DB: D1Database
   FILES: R2Bucket
   ANTHROPIC_API_KEY: string     // secret set via wrangler / .dev.vars
+  SESSION_SECRET: string        // secret — signs session cookies; see auth section
 }
 
-const app = new Hono<{ Bindings: Bindings }>()
+const app = new Hono<{ Bindings: Bindings; Variables: { user: SessionUser } }>()
 
 app.use('*', cors())
+
+// ══════════════════════════════════════════════════════════════
+// API AUTH GATE — every /api/* route requires a session
+// ══════════════════════════════════════════════════════════════
+// Registered before any route so it runs first regardless of where handlers
+// are declared further down. The body executes per request, so referencing
+// helpers defined later in the file is fine.
+//
+// Fail-closed by design: if SESSION_SECRET is unset, currentUser() returns
+// null and everything 401s. A misconfigured server serves nothing rather than
+// serving everyone's data.
+//
+// Before this existed, `curl .../api/tables/invoices` returned every row to
+// anyone on the internet. Do not add routes to PUBLIC_API without a reason
+// that survives that sentence.
+const PUBLIC_API = new Set([
+  '/api/auth/login',      // can't require a session to create one
+  '/api/auth/logout',     // clearing a cookie needn't be authenticated
+  '/api/auth/me',         // its whole job is answering "am I signed in?" (401 when not)
+  '/api/auth/bootstrap',  // first-run only; refuses once any user exists
+])
+
+app.use('/api/*', async (c, next) => {
+  if (PUBLIC_API.has(new URL(c.req.url).pathname)) return next()
+
+  const me = await currentUser(c)
+  if (!me) return c.json({ error: 'Not signed in.' }, 401)
+
+  // Downstream handlers read the caller from here rather than re-querying.
+  c.set('user', me)
+  await next()
+})
 
 // ─── Helper: generate uid ─────────────────────────────────────
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+}
+
+// ══════════════════════════════════════════════════════════════
+// AUTH — password hashing + signed session cookies
+// ══════════════════════════════════════════════════════════════
+// No library: PBKDF2-SHA256 and HMAC both come from Web Crypto, which is
+// available in Workers. Passwords are never stored or logged in the clear.
+//
+// Iteration count is a deliberate compromise. OWASP wants far more for
+// PBKDF2-SHA256, but Workers bill CPU time and login has to stay responsive,
+// so 100k is the balance. It is stored PER USER (users.password_iter) so it
+// can be raised later and old passwords re-hashed on next successful login
+// rather than being invalidated.
+const PBKDF2_ITERATIONS = 100_000
+const SESSION_TTL_SECONDS = 60 * 60 * 24 * 14   // 14 days
+const SESSION_COOKIE = 'dm_session'
+
+function toHex(buf: ArrayBuffer): string {
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+function randomHex(bytes: number): string {
+  const a = new Uint8Array(bytes)
+  crypto.getRandomValues(a)
+  return [...a].map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+// Constant-time string compare. A plain === leaks how many leading characters
+// matched via timing, which is enough to forge a signature byte by byte.
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
+
+async function hashPassword(password: string, salt: string, iterations = PBKDF2_ITERATIONS): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits'],
+  )
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: new TextEncoder().encode(salt), iterations, hash: 'SHA-256' },
+    key, 256,
+  )
+  return toHex(bits)
+}
+
+async function verifyPassword(password: string, salt: string, expected: string, iterations: number): Promise<boolean> {
+  const actual = await hashPassword(password, salt, iterations || PBKDF2_ITERATIONS)
+  return timingSafeEqual(actual, expected)
+}
+
+async function hmac(secret: string, message: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
+  )
+  return toHex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message)))
+}
+
+// Session token = "<userId>.<expiryEpochSeconds>.<hmac>". Self-contained, so
+// there is no session table to read on every request; revocation is by
+// changing SESSION_SECRET (logs everyone out) or archiving the user.
+async function signSession(secret: string, userId: string, expiresAt: number): Promise<string> {
+  const payload = `${userId}.${expiresAt}`
+  return `${payload}.${await hmac(secret, payload)}`
+}
+
+async function readSession(secret: string, token: string): Promise<{ userId: string } | null> {
+  if (!token) return null
+  const parts = token.split('.')
+  if (parts.length !== 3) return null
+  const [userId, expStr, sig] = parts
+  const payload = `${userId}.${expStr}`
+  if (!timingSafeEqual(sig, await hmac(secret, payload))) return null
+  const exp = parseInt(expStr, 10)
+  if (!Number.isFinite(exp) || exp * 1000 < Date.now()) return null
+  return { userId }
+}
+
+function readCookie(header: string | undefined, name: string): string {
+  if (!header) return ''
+  for (const part of header.split(';')) {
+    const [k, ...v] = part.trim().split('=')
+    if (k === name) return decodeURIComponent(v.join('='))
+  }
+  return ''
+}
+
+function sessionCookieHeader(token: string, url: string, maxAge: number): string {
+  // Secure must be omitted over plain http or the browser silently drops the
+  // cookie — which breaks `npm run dev` on localhost while working in prod.
+  const secure = new URL(url).protocol === 'https:' ? ' Secure;' : ''
+  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly;${secure} SameSite=Lax; Max-Age=${maxAge}`
+}
+
+type SessionUser = {
+  id: string; email: string; role: string; org_id: string | null;
+  name: string; org_name: string | null; account_type: string | null;
+}
+
+// Resolves the caller from their cookie, or null when signed out. Reads the
+// user fresh each time so archiving a user takes effect immediately.
+async function currentUser(c: any): Promise<SessionUser | null> {
+  const secret = c.env.SESSION_SECRET
+  if (!secret) return null
+  const token = readCookie(c.req.header('cookie'), SESSION_COOKIE)
+  const session = await readSession(secret, token)
+  if (!session) return null
+  const row = await c.env.DB.prepare(
+    `SELECT u.id, u.email, u.role, u.org_id, u.name,
+            o.name AS org_name, o.account_type
+       FROM users u
+       LEFT JOIN organizations o ON o.id = u.org_id
+      WHERE u.id = ? AND u.archived_at IS NULL`,
+  ).bind(session.userId).first()
+  return (row as SessionUser) || null
 }
 
 // ─── Supplier name matching ────────────────────────────────────
@@ -223,16 +373,17 @@ function inferCategory(name: string): string {
 // "unassigned" list. Items come from the inventory rows, so this is exactly
 // the set a stock take would cover.
 app.get('/api/storage-layout', async (c) => {
+  const org = orgOf(c)
   const [sections, placements, inv] = await Promise.all([
-    c.env.DB.prepare(`SELECT * FROM storage_sections ORDER BY sort_order, name`).all<{
+    c.env.DB.prepare(`SELECT * FROM storage_sections WHERE org_id IS ? ORDER BY sort_order, name`).bind(org).all<{
       id: string; name: string; sort_order: number
     }>(),
-    c.env.DB.prepare(`SELECT * FROM item_placements`).all<{
+    c.env.DB.prepare(`SELECT * FROM item_placements WHERE org_id IS ?`).bind(org).all<{
       item_id: string; item_type: string; section_id: string; sort_order: number
     }>(),
     c.env.DB.prepare(
-      `SELECT item_id, item_type, item_name, category, unit FROM inventory ORDER BY item_name`
-    ).all<{ item_id: string; item_type: string; item_name: string; category: string; unit: string }>(),
+      `SELECT item_id, item_type, item_name, category, unit FROM inventory WHERE org_id IS ? ORDER BY item_name`
+    ).bind(org).all<{ item_id: string; item_type: string; item_name: string; category: string; unit: string }>(),
   ])
 
   const placedBy = new Map(
@@ -266,19 +417,21 @@ app.post('/api/storage-layout/sections', async (c) => {
   const clean = (name || '').trim()
   if (!clean) return c.json({ error: 'Section name is required' }, 400)
 
+  const org = orgOf(c)
+  // Uniqueness is per business — two restaurants may both have a "Walk-in".
   const dupe = await c.env.DB.prepare(
-    `SELECT id FROM storage_sections WHERE LOWER(name) = LOWER(?)`
-  ).bind(clean).first()
+    `SELECT id FROM storage_sections WHERE LOWER(name) = LOWER(?) AND org_id IS ?`
+  ).bind(clean, org).first()
   if (dupe) return c.json({ error: 'A section with that name already exists' }, 409)
 
   const max = await c.env.DB.prepare(
-    `SELECT COALESCE(MAX(sort_order), -1) AS m FROM storage_sections`
-  ).first<{ m: number }>()
+    `SELECT COALESCE(MAX(sort_order), -1) AS m FROM storage_sections WHERE org_id IS ?`
+  ).bind(org).first<{ m: number }>()
 
   const id = uid()
   await c.env.DB.prepare(
-    `INSERT INTO storage_sections (id, name, sort_order) VALUES (?, ?, ?)`
-  ).bind(id, clean, (max?.m ?? -1) + 1).run()
+    `INSERT INTO storage_sections (id, name, sort_order, org_id) VALUES (?, ?, ?, ?)`
+  ).bind(id, clean, (max?.m ?? -1) + 1, org).run()
 
   return c.json({ id, name: clean, sort_order: (max?.m ?? -1) + 1 }, 201)
 })
@@ -290,12 +443,13 @@ app.patch('/api/storage-layout/sections/:id', async (c) => {
   const clean = (name || '').trim()
   if (!clean) return c.json({ error: 'Section name is required' }, 400)
 
+  const org = orgOf(c)
   const dupe = await c.env.DB.prepare(
-    `SELECT id FROM storage_sections WHERE LOWER(name) = LOWER(?) AND id != ?`
-  ).bind(clean, id).first()
+    `SELECT id FROM storage_sections WHERE LOWER(name) = LOWER(?) AND id != ? AND org_id IS ?`
+  ).bind(clean, id, org).first()
   if (dupe) return c.json({ error: 'A section with that name already exists' }, 409)
 
-  await c.env.DB.prepare(`UPDATE storage_sections SET name = ? WHERE id = ?`).bind(clean, id).run()
+  await c.env.DB.prepare(`UPDATE storage_sections SET name = ? WHERE id = ? AND org_id IS ?`).bind(clean, id, org).run()
   return c.json({ ok: true })
 })
 
@@ -304,9 +458,10 @@ app.patch('/api/storage-layout/sections/:id', async (c) => {
 // untouched and simply fall back to "Unassigned".
 app.delete('/api/storage-layout/sections/:id', async (c) => {
   const id = c.req.param('id')
+  const org = orgOf(c)
   await c.env.DB.batch([
-    c.env.DB.prepare(`DELETE FROM item_placements WHERE section_id = ?`).bind(id),
-    c.env.DB.prepare(`DELETE FROM storage_sections WHERE id = ?`).bind(id),
+    c.env.DB.prepare(`DELETE FROM item_placements WHERE section_id = ? AND org_id IS ?`).bind(id, org),
+    c.env.DB.prepare(`DELETE FROM storage_sections WHERE id = ? AND org_id IS ?`).bind(id, org),
   ])
   return c.json({ ok: true })
 })
@@ -324,24 +479,26 @@ app.put('/api/storage-layout/order', async (c) => {
     placements?: Array<{ item_id: string; item_type: string; section_id: string; sort_order: number }>
   }
 
+  const org = orgOf(c)
   const statements: D1PreparedStatement[] = []
 
   for (const [i, sectionId] of (body.sections || []).entries()) {
     statements.push(
-      c.env.DB.prepare(`UPDATE storage_sections SET sort_order = ? WHERE id = ?`).bind(i, sectionId)
+      c.env.DB.prepare(`UPDATE storage_sections SET sort_order = ? WHERE id = ? AND org_id IS ?`).bind(i, sectionId, org)
     )
   }
 
   if (body.placements) {
     // Replace wholesale: anything not in the payload is unassigned by omission.
-    statements.push(c.env.DB.prepare(`DELETE FROM item_placements`))
+    // Scoped: wiping every business's placements here would be catastrophic.
+    statements.push(c.env.DB.prepare(`DELETE FROM item_placements WHERE org_id IS ?`).bind(org))
     for (const p of body.placements) {
       if (!p.item_id || !p.item_type || !p.section_id) continue
       statements.push(
         c.env.DB.prepare(
-          `INSERT INTO item_placements (id, item_id, item_type, section_id, sort_order)
-           VALUES (?, ?, ?, ?, ?)`
-        ).bind(uid(), p.item_id, p.item_type, p.section_id, Number(p.sort_order) || 0)
+          `INSERT INTO item_placements (id, item_id, item_type, section_id, sort_order, org_id)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        ).bind(uid(), p.item_id, p.item_type, p.section_id, Number(p.sort_order) || 0, org)
       )
     }
   }
@@ -400,6 +557,212 @@ app.post('/api/inventory/:id/adjust', async (c) => {
   return c.json({ ok: true, quantity: newQty, change })
 })
 
+// ══════════════════════════════════════════════════════════════
+// AUTH ROUTES  (declared before the generic CRUD — Hono matches in order)
+// ══════════════════════════════════════════════════════════════
+// There is deliberately NO signup endpoint. Accounts are created by the
+// super-admin on /api/admin/organizations after an actual conversation with
+// the customer — see the accounts plan. That removes the whole email
+// dependency: no verification mail, no password-reset mail, no bot defence.
+
+const MIN_PASSWORD_LEN = 8
+
+function normalizeEmail(s: unknown): string {
+  return String(s || '').trim().toLowerCase()
+}
+
+function publicUser(u: SessionUser) {
+  return {
+    id: u.id, email: u.email, name: u.name, role: u.role,
+    org_id: u.org_id, org_name: u.org_name, account_type: u.account_type,
+    is_super_admin: u.role === 'super_admin',
+  }
+}
+
+// One-time bootstrap: creates the very first super-admin. Because there is no
+// signup page, without this there would be no way to get the first account in.
+// It refuses once ANY user exists, so it cannot be used to add a second
+// back-door admin later.
+app.post('/api/auth/bootstrap', async (c) => {
+  if (!c.env.SESSION_SECRET) return c.json({ error: 'SESSION_SECRET is not configured on the server.' }, 500)
+
+  const existing = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM users`).first<{ n: number }>()
+  if ((existing?.n || 0) > 0) {
+    return c.json({ error: 'Already set up. Bootstrap is only available before the first account exists.' }, 409)
+  }
+
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const email = normalizeEmail(body.email)
+  const password = String(body.password || '')
+  if (!email.includes('@')) return c.json({ error: 'A valid email is required.' }, 400)
+  if (password.length < MIN_PASSWORD_LEN) {
+    return c.json({ error: `Password must be at least ${MIN_PASSWORD_LEN} characters.` }, 400)
+  }
+
+  const id = uid()
+  const salt = randomHex(16)
+  const hash = await hashPassword(password, salt)
+  await c.env.DB.prepare(
+    `INSERT INTO users (id, org_id, email, password_hash, password_salt, password_iter, role, name)
+     VALUES (?, NULL, ?, ?, ?, ?, 'super_admin', ?)`,
+  ).bind(id, email, hash, salt, PBKDF2_ITERATIONS, String(body.name || '')).run()
+
+  return c.json({ ok: true, id, email, role: 'super_admin' })
+})
+
+app.post('/api/auth/login', async (c) => {
+  if (!c.env.SESSION_SECRET) return c.json({ error: 'SESSION_SECRET is not configured on the server.' }, 500)
+
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const email = normalizeEmail(body.email)
+  const password = String(body.password || '')
+
+  const row = await c.env.DB.prepare(
+    `SELECT id, email, password_hash, password_salt, password_iter, role
+       FROM users WHERE email = ? AND archived_at IS NULL`,
+  ).bind(email).first<any>()
+
+  // Same message and roughly the same work whether the address is unknown or
+  // the password is wrong — otherwise this endpoint becomes a way to discover
+  // which emails have accounts.
+  if (!row) {
+    await hashPassword(password, 'no-such-user-dummy-salt')
+    return c.json({ error: 'Email or password is incorrect.' }, 401)
+  }
+  const ok = await verifyPassword(password, row.password_salt, row.password_hash, row.password_iter)
+  if (!ok) return c.json({ error: 'Email or password is incorrect.' }, 401)
+
+  const expiresAt = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS
+  const token = await signSession(c.env.SESSION_SECRET, row.id, expiresAt)
+
+  await c.env.DB.prepare(`UPDATE users SET last_login_at = datetime('now') WHERE id = ?`).bind(row.id).run()
+
+  c.header('Set-Cookie', sessionCookieHeader(token, c.req.url, SESSION_TTL_SECONDS))
+
+  // Load the user by id rather than calling currentUser(): the cookie was just
+  // written to the RESPONSE, so the incoming request still has none and
+  // currentUser() would read null. The frontend needs this to know where to
+  // send the person after signing in (admin screen vs the app).
+  const me = await c.env.DB.prepare(
+    `SELECT u.id, u.email, u.role, u.org_id, u.name,
+            o.name AS org_name, o.account_type
+       FROM users u
+       LEFT JOIN organizations o ON o.id = u.org_id
+      WHERE u.id = ?`,
+  ).bind(row.id).first<SessionUser>()
+
+  return c.json({ ok: true, user: me ? publicUser(me) : null })
+})
+
+app.post('/api/auth/logout', async (c) => {
+  // Max-Age=0 expires the cookie immediately.
+  c.header('Set-Cookie', sessionCookieHeader('', c.req.url, 0))
+  return c.json({ ok: true })
+})
+
+// The frontend's "am I signed in?" check. 200 with the user, or 401.
+app.get('/api/auth/me', async (c) => {
+  const me = await currentUser(c)
+  if (!me) return c.json({ error: 'Not signed in.' }, 401)
+  return c.json({ user: publicUser(me) })
+})
+
+// ── Super-admin: create a customer account ────────────────────
+// This is the manual-onboarding path that replaces a signup page. Creates the
+// organization and its owner user together, since one is useless without the
+// other.
+async function requireSuperAdmin(c: any): Promise<SessionUser | null> {
+  const me = await currentUser(c)
+  if (!me || me.role !== 'super_admin') return null
+  return me
+}
+
+app.get('/api/admin/organizations', async (c) => {
+  if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)
+  const { results } = await c.env.DB.prepare(
+    `SELECT o.id, o.name, o.account_type, o.created_at, o.archived_at,
+            (SELECT COUNT(*) FROM users u WHERE u.org_id = o.id AND u.archived_at IS NULL) AS user_count,
+            (SELECT email FROM users u WHERE u.org_id = o.id AND u.role = 'owner'
+              ORDER BY u.created_at LIMIT 1) AS owner_email
+       FROM organizations o
+      ORDER BY o.created_at DESC`,
+  ).all()
+  return c.json({ data: results || [] })
+})
+
+app.post('/api/admin/organizations', async (c) => {
+  if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)
+
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const name = String(body.name || '').trim()
+  const email = normalizeEmail(body.owner_email)
+  const password = String(body.owner_password || '')
+  const accountType = String(body.account_type || 'restaurant')
+
+  if (!name) return c.json({ error: 'Restaurant name is required.' }, 400)
+  if (!email.includes('@')) return c.json({ error: 'A valid owner email is required.' }, 400)
+  if (password.length < MIN_PASSWORD_LEN) {
+    return c.json({ error: `Password must be at least ${MIN_PASSWORD_LEN} characters.` }, 400)
+  }
+  if (!['restaurant', 'commissary'].includes(accountType)) {
+    return c.json({ error: 'Account type must be restaurant or commissary.' }, 400)
+  }
+
+  const clash = await c.env.DB.prepare(`SELECT id FROM users WHERE email = ?`).bind(email).first()
+  if (clash) return c.json({ error: 'That email already has an account.' }, 409)
+
+  const orgId = uid()
+  const userId = uid()
+  const salt = randomHex(16)
+  const hash = await hashPassword(password, salt)
+
+  // Both inserts in one batch so a failure can't leave an organization with
+  // no owner (D1 runs a batch as a transaction).
+  await c.env.DB.batch([
+    c.env.DB.prepare(`INSERT INTO organizations (id, name, account_type) VALUES (?, ?, ?)`)
+      .bind(orgId, name, accountType),
+    c.env.DB.prepare(
+      `INSERT INTO users (id, org_id, email, password_hash, password_salt, password_iter, role, name)
+       VALUES (?, ?, ?, ?, ?, ?, 'owner', ?)`,
+    ).bind(userId, orgId, email, hash, salt, PBKDF2_ITERATIONS, String(body.owner_name || '')),
+  ])
+
+  return c.json({ ok: true, organization: { id: orgId, name, account_type: accountType },
+                  owner: { id: userId, email } })
+})
+
+// ══════════════════════════════════════════════════════════════
+// ORG SCOPING — which business's data may this request touch?
+// ══════════════════════════════════════════════════════════════
+// Every tenant table carries org_id (migration 0035). Reads filter on it,
+// writes stamp it. `tests/org-scoping.test.mjs` statically audits every SQL
+// statement in this file and fails the build if one touches a tenant table
+// without mentioning org_id — so a forgotten filter is caught mechanically
+// rather than by review.
+//
+// Use `org_id IS ?` and NOT `org_id = ?`. SQLite's `=` never matches NULL, and
+// NULL is a real value here: it means the super-admin's own pre-accounts data.
+// `IS` is the NULL-safe comparison and binds parameters fine.
+const VIEW_ORG_COOKIE = 'dm_view_org'
+
+function orgOf(c: any): string | null {
+  const user = c.get('user') as SessionUser | undefined
+  if (!user) return null
+  // A super-admin sees their own (NULL) data by default, or a customer's while
+  // "viewing as" — they never need that customer's password to do it.
+  if (user.role === 'super_admin') {
+    return readCookie(c.req.header('cookie'), VIEW_ORG_COOKIE) || null
+  }
+  return user.org_id
+}
+
+// org_id is server-assigned, never client-supplied. Without this a customer
+// could POST {"org_id": "<someone else's id>"} and write into their data.
+function stripOrgId(body: Record<string, unknown>): Record<string, unknown> {
+  const { org_id, ...rest } = body
+  return rest
+}
+
 // ─── Generic table CRUD helper ────────────────────────────────
 // GET /api/tables/:table  – list all rows (or filtered)
 // GET /api/tables/:table/:id – get one
@@ -428,11 +791,14 @@ app.get('/api/tables/:table', async (c) => {
   const l = Math.min(500, parseInt(limit || '500'))
   const offset = (p - 1) * l
 
-  let where = ''
-  const args: string[] = []
-  const filterEntries = Object.entries(filters)
+  // Ownership filter first, so it can never be dropped by a later branch.
+  // A client-supplied ?org_id= is ignored — ownership comes from the session.
+  let where = 'WHERE org_id IS ?'
+  const args: any[] = [orgOf(c)]
+
+  const filterEntries = Object.entries(filters).filter(([k]) => k !== 'org_id')
   if (filterEntries.length) {
-    where = 'WHERE ' + filterEntries.map(([k]) => `${k} = ?`).join(' AND ')
+    where += ' AND ' + filterEntries.map(([k]) => `${k} = ?`).join(' AND ')
     filterEntries.forEach(([, v]) => args.push(v))
   }
 
@@ -440,7 +806,7 @@ app.get('/api/tables/:table', async (c) => {
   // not count toward Latest Price / costing anywhere they're read. (Restore
   // clears the flag and they reappear.)
   if (table === 'product_entries') {
-    where = where ? `${where} AND voided_at IS NULL` : 'WHERE voided_at IS NULL'
+    where += ' AND voided_at IS NULL'
   }
 
   const rows = await c.env.DB.prepare(
@@ -454,7 +820,11 @@ app.get('/api/tables/:table', async (c) => {
 app.get('/api/tables/:table/:id', async (c) => {
   const { table, id } = c.req.param()
   if (!ALLOWED_TABLES.includes(table)) return c.json({ error: 'Unknown table' }, 400)
-  const row = await c.env.DB.prepare(`SELECT * FROM ${table} WHERE id = ?`).bind(id).first()
+  // Another org's row reports 404, not 403 — a different status would confirm
+  // the id exists, which is itself a leak.
+  const row = await c.env.DB.prepare(
+    `SELECT * FROM ${table} WHERE id = ? AND org_id IS ?`,
+  ).bind(id, orgOf(c)).first()
   if (!row) return c.json({ error: 'Not found' }, 404)
   return c.json(row)
 })
@@ -466,8 +836,10 @@ const INTEGER_PK_TABLES = ['units', 'categories']
 app.post('/api/tables/:table', async (c) => {
   const table = c.req.param('table')
   if (!ALLOWED_TABLES.includes(table)) return c.json({ error: 'Unknown table' }, 400)
-  const body = await c.req.json() as Record<string, unknown>
+  const body = stripOrgId(await c.req.json() as Record<string, unknown>)
   if (!body.id && !INTEGER_PK_TABLES.includes(table)) body.id = uid()
+  // Stamped from the session, after stripping any client-supplied value.
+  body.org_id = orgOf(c)
   const keys = Object.keys(body)
   const vals = Object.values(body)
   const result = await c.env.DB.prepare(
@@ -481,12 +853,15 @@ app.post('/api/tables/:table', async (c) => {
 app.put('/api/tables/:table/:id', async (c) => {
   const { table, id } = c.req.param()
   if (!ALLOWED_TABLES.includes(table)) return c.json({ error: 'Unknown table' }, 400)
-  const body = await c.req.json() as Record<string, unknown>
+  const body = stripOrgId(await c.req.json() as Record<string, unknown>)
   body.id = id
   const keys = Object.keys(body)
   const vals = Object.values(body)
   const setCols = keys.map(k => `${k} = ?`).join(', ')
-  await c.env.DB.prepare(`UPDATE ${table} SET ${setCols} WHERE id = ?`).bind(...vals, id).run()
+  // org_id is in the WHERE, never the SET: a row cannot be moved between orgs.
+  await c.env.DB.prepare(
+    `UPDATE ${table} SET ${setCols} WHERE id = ? AND org_id IS ?`,
+  ).bind(...vals, id, orgOf(c)).run()
   return c.json({ id, ...body })
 })
 
@@ -494,11 +869,13 @@ app.put('/api/tables/:table/:id', async (c) => {
 app.patch('/api/tables/:table/:id', async (c) => {
   const { table, id } = c.req.param()
   if (!ALLOWED_TABLES.includes(table)) return c.json({ error: 'Unknown table' }, 400)
-  const body = await c.req.json() as Record<string, unknown>
+  const body = stripOrgId(await c.req.json() as Record<string, unknown>)
   const keys = Object.keys(body)
   if (!keys.length) return c.json({ error: 'No fields to update' }, 400)
   const setCols = keys.map(k => `${k} = ?`).join(', ')
-  await c.env.DB.prepare(`UPDATE ${table} SET ${setCols} WHERE id = ?`).bind(...Object.values(body), id).run()
+  await c.env.DB.prepare(
+    `UPDATE ${table} SET ${setCols} WHERE id = ? AND org_id IS ?`,
+  ).bind(...Object.values(body), id, orgOf(c)).run()
   return c.json({ id, ...body })
 })
 
@@ -517,10 +894,11 @@ app.patch('/api/tables/:table/:id', async (c) => {
 //   • product_aliases  — removed so future invoices don't auto-relink to it
 app.delete('/api/tables/generic_products/:id', async (c) => {
   const { id } = c.req.param()
+  const org = orgOf(c)
   await c.env.DB.batch([
-    c.env.DB.prepare('DELETE FROM product_aliases WHERE generic_product_id = ?').bind(id),
-    c.env.DB.prepare('DELETE FROM inventory WHERE item_id = ?').bind(id),
-    c.env.DB.prepare("UPDATE generic_products SET deleted_at = datetime('now') WHERE id = ?").bind(id),
+    c.env.DB.prepare('DELETE FROM product_aliases WHERE generic_product_id = ? AND org_id IS ?').bind(id, org),
+    c.env.DB.prepare('DELETE FROM inventory WHERE item_id = ? AND org_id IS ?').bind(id, org),
+    c.env.DB.prepare("UPDATE generic_products SET deleted_at = datetime('now') WHERE id = ? AND org_id IS ?").bind(id, org),
   ])
   return c.body(null, 204)
 })
@@ -616,7 +994,9 @@ app.put('/api/generic_products/:id', async (c) => {
 app.delete('/api/tables/:table/:id', async (c) => {
   const { table, id } = c.req.param()
   if (!ALLOWED_TABLES.includes(table)) return c.json({ error: 'Unknown table' }, 400)
-  await c.env.DB.prepare(`DELETE FROM ${table} WHERE id = ?`).bind(id).run()
+  await c.env.DB.prepare(
+    `DELETE FROM ${table} WHERE id = ? AND org_id IS ?`,
+  ).bind(id, orgOf(c)).run()
   return c.body(null, 204)   // 204 No Content — must have no body
 })
 

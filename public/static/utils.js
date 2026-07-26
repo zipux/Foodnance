@@ -3,6 +3,83 @@
 // API base — all calls go through /api/tables/:table
 const API_BASE = '/api';
 
+// ══════════════════════════════════════════════════════════════
+// SESSION GUARD
+// ══════════════════════════════════════════════════════════════
+// Every /api/* route now requires a signed-in session. Rather than teach each
+// of the six api* helpers (plus the ad-hoc fetch calls scattered through the
+// page controllers) to handle a 401, wrap fetch once. Same reasoning as the
+// server-side gate: a single chokepoint can't be forgotten.
+//
+// Only app pages load utils.js — login.html and admin.html do their own thing,
+// so they are unaffected and there is no redirect loop.
+(function installSessionGuard() {
+  const original = window.fetch;
+  let redirecting = false;
+
+  window.fetch = async function (...args) {
+    const response = await original.apply(this, args);
+
+    if (response.status === 401 && !redirecting) {
+      let url = '';
+      try {
+        const input = args[0];
+        url = typeof input === 'string' ? input : (input && input.url) || '';
+      } catch (_) {}
+
+      // Only bounce on our own API. A 401 from somewhere else isn't a session
+      // problem and shouldn't throw the user out of the app.
+      const isOurApi = url.startsWith('/api/') || url.includes(location.origin + '/api/');
+      if (isOurApi && !location.pathname.startsWith('/login')) {
+        redirecting = true;
+        // Remember where they were so login can send them back.
+        const next = encodeURIComponent(location.pathname + location.search);
+        location.href = `/login?next=${next}`;
+      }
+    }
+    return response;
+  };
+})();
+
+// Small "signed in as … / Sign out" chip, injected into the nav of whichever
+// app page is loaded. Done here rather than editing 13 HTML files, and it
+// gives every page a way to sign out.
+async function renderSessionChip() {
+  const nav = document.querySelector('.navbar');
+  if (!nav || document.getElementById('sessionChip')) return;
+
+  let me = null;
+  try {
+    const r = await fetch('/api/auth/me');
+    if (r.ok) me = (await r.json()).user;
+  } catch (_) { return; }
+  if (!me) return;
+
+  const chip = document.createElement('div');
+  chip.id = 'sessionChip';
+  chip.style.cssText =
+    'margin-left:auto;display:flex;align-items:center;gap:.6rem;' +
+    'font-size:.78rem;color:rgba(255,255,255,.92);white-space:nowrap';
+  chip.innerHTML = `
+    <span title="${esc(me.email)}">
+      <i class="fas fa-user-circle"></i>
+      ${esc(me.org_name || (me.is_super_admin ? 'Admin' : me.email))}
+    </span>
+    ${me.is_super_admin ? '<a href="/admin" style="color:#fff;opacity:.85;text-decoration:none" title="Admin"><i class="fas fa-gear"></i></a>' : ''}
+    <a href="#" id="navSignOut" style="color:#fff;opacity:.85;text-decoration:none" title="Sign out">
+      <i class="fas fa-arrow-right-from-bracket"></i>
+    </a>`;
+  nav.appendChild(chip);
+
+  document.getElementById('navSignOut').addEventListener('click', async (e) => {
+    e.preventDefault();
+    await fetch('/api/auth/logout', { method: 'POST' });
+    location.href = '/login';
+  });
+}
+
+document.addEventListener('DOMContentLoaded', renderSessionChip);
+
 // API helpers
 async function apiGet(url) {
   const r = await fetch(`${API_BASE}/${url}`);

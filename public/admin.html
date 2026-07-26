@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin — DoughMeter</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <meta name="theme-color" content="#4f46e5" />
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <style>
+    /* Standalone like login.html — this is not an app page and deliberately
+       does not load app chrome. Tokens copied from static/style.css. */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --primary: #4f46e5; --primary-d: #3730a3; --border: #e2e8f0;
+      --text: #1e293b; --text-muted: #64748b; --radius-sm: 8px;
+      --success: #059669; --danger: #dc2626;
+    }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: #f1f5f9; color: var(--text); font-size: 15px; line-height: 1.6;
+      -webkit-font-smoothing: antialiased; min-height: 100vh;
+    }
+    .bar {
+      background: linear-gradient(90deg, var(--primary-d), var(--primary));
+      color: #fff; padding: .85rem 1.25rem;
+      display: flex; align-items: center; gap: .6rem;
+    }
+    .bar .brand { font-weight: 800; display: flex; align-items: center; gap: .5rem; }
+    .bar .spacer { flex: 1; }
+    .bar .who { font-size: .85rem; opacity: .9; }
+    .bar button {
+      font-family: inherit; font-size: .82rem; font-weight: 600; cursor: pointer;
+      background: rgba(255,255,255,.15); color: #fff;
+      border: 1px solid rgba(255,255,255,.25); border-radius: 6px; padding: .35rem .7rem;
+    }
+    .bar button:hover { background: rgba(255,255,255,.25); }
+
+    .wrap { max-width: 940px; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
+    .grid { display: grid; gap: 1.25rem; grid-template-columns: minmax(300px, 380px) 1fr; }
+    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+
+    .card {
+      background: #fff; border: 1px solid var(--border);
+      border-radius: 12px; padding: 1.25rem; box-shadow: 0 2px 16px rgba(0,0,0,.05);
+    }
+    .card h2 { font-size: 1.05rem; font-weight: 700; margin-bottom: .25rem; }
+    .card .lede { font-size: .85rem; color: var(--text-muted); margin-bottom: 1.1rem; }
+
+    label { display: block; font-size: .8rem; font-weight: 600; margin-bottom: .3rem; }
+    .field { margin-bottom: .9rem; }
+    input[type=text], input[type=email], input[type=password], select {
+      width: 100%; font-family: inherit; font-size: .92rem; padding: .55rem .7rem;
+      border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff; color: var(--text);
+    }
+    input:focus, select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,70,229,.12); }
+    .row { display: flex; gap: .5rem; }
+    .row input { flex: 1; }
+    .btn {
+      font-family: inherit; font-size: .9rem; font-weight: 600; cursor: pointer;
+      border: none; border-radius: var(--radius-sm); padding: .6rem 1rem;
+      display: inline-flex; align-items: center; justify-content: center; gap: .45rem;
+    }
+    .btn-primary { width: 100%; color: #fff; background: linear-gradient(180deg, var(--primary), var(--primary-d)); }
+    .btn-primary[disabled] { opacity: .6; cursor: default; }
+    .btn-ghost { background: #f1f5f9; color: var(--text); border: 1px solid var(--border); font-size: .78rem; padding: .4rem .6rem; }
+
+    .msg { margin-bottom: 1rem; padding: .7rem .85rem; border-radius: var(--radius-sm); font-size: .85rem; display: none; }
+    .msg.show { display: block; }
+    .msg.ok  { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
+    .msg.bad { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+
+    /* The credentials to hand over. Shown once after creating an account —
+       the password is never recoverable afterwards, only resettable. */
+    .handoff {
+      margin-top: 1rem; padding: .85rem; border-radius: var(--radius-sm);
+      background: #eef2ff; border: 1px solid #c7d2fe; font-size: .85rem;
+    }
+    .handoff h3 { font-size: .82rem; text-transform: uppercase; letter-spacing: .04em; color: var(--primary-d); margin-bottom: .5rem; }
+    .handoff code { display: block; background: #fff; border: 1px solid var(--border); border-radius: 6px;
+                    padding: .45rem .6rem; margin-bottom: .35rem; font-size: .85rem; word-break: break-all; }
+
+    table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+    th { text-align: left; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
+         color: var(--text-muted); padding: .4rem .5rem; border-bottom: 1px solid var(--border); }
+    td { padding: .55rem .5rem; border-bottom: 1px solid #f1f5f9; }
+    tr:last-child td { border-bottom: none; }
+    .pill { font-size: .7rem; font-weight: 600; padding: .12rem .45rem; border-radius: 4px; background: #eef2ff; color: var(--primary-d); }
+    .empty { color: var(--text-muted); font-size: .88rem; padding: 1rem .5rem; }
+
+    .gate { max-width: 420px; margin: 4rem auto; text-align: center; }
+    .gate a { color: var(--primary); }
+  </style>
+</head>
+<body>
+
+  <div id="app" style="display:none">
+    <div class="bar">
+      <span class="brand"><i class="fas fa-receipt"></i> DoughMeter</span>
+      <span class="pill" style="background:rgba(255,255,255,.2);color:#fff">Admin</span>
+      <span class="spacer"></span>
+      <span class="who" id="whoami"></span>
+      <button id="logoutBtn"><i class="fas fa-arrow-right-from-bracket"></i> Sign out</button>
+    </div>
+
+    <div class="wrap">
+      <div class="grid">
+        <!-- ── Create a customer account ── -->
+        <div class="card">
+          <h2>Add a restaurant</h2>
+          <p class="lede">Creates the business and its owner login together. Give the owner
+             these details directly — the app never emails anyone.</p>
+
+          <div class="msg" id="formMsg"></div>
+
+          <form id="orgForm">
+            <div class="field">
+              <label for="name">Restaurant name</label>
+              <input type="text" id="name" required placeholder="Bella's Pizzeria" />
+            </div>
+            <div class="field">
+              <label for="ownerName">Owner's name</label>
+              <input type="text" id="ownerName" placeholder="Maria Rossi" />
+            </div>
+            <div class="field">
+              <label for="ownerEmail">Owner's email (this is their login)</label>
+              <input type="email" id="ownerEmail" required placeholder="maria@bellas.com" />
+            </div>
+            <div class="field">
+              <label for="ownerPassword">Temporary password</label>
+              <div class="row">
+                <input type="text" id="ownerPassword" required minlength="8" placeholder="at least 8 characters" />
+                <button type="button" class="btn btn-ghost" id="genPw" title="Generate a random password">
+                  <i class="fas fa-dice"></i> Generate
+                </button>
+              </div>
+            </div>
+            <div class="field">
+              <label for="accountType">Type of business</label>
+              <select id="accountType">
+                <option value="restaurant">Restaurant</option>
+                <option value="commissary">Commissary</option>
+              </select>
+            </div>
+            <button type="submit" class="btn btn-primary" id="createBtn">
+              <i class="fas fa-plus"></i> Create account
+            </button>
+          </form>
+
+          <div class="handoff" id="handoff" style="display:none">
+            <h3>Send these to the owner</h3>
+            <code id="handoffUrl"></code>
+            <code id="handoffEmail"></code>
+            <code id="handoffPw"></code>
+            <div style="color:var(--text-muted);font-size:.8rem;margin-top:.4rem">
+              Shown once. The password can't be looked up later — only reset.
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Existing customers ── -->
+        <div class="card">
+          <h2>Restaurants</h2>
+          <p class="lede">Every business with an account.</p>
+          <div id="orgList"><div class="empty">Loading…</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Shown when whoever opened this page isn't a super-admin. -->
+  <div class="gate" id="gate" style="display:none">
+    <p style="font-size:2rem"><i class="fas fa-lock" style="color:var(--text-muted)"></i></p>
+    <h2 style="margin:.5rem 0">Admin only</h2>
+    <p style="color:var(--text-muted)">This page is for the DoughMeter account owner.</p>
+    <p style="margin-top:1rem"><a href="/login">Sign in</a></p>
+  </div>
+
+  <script>
+    const $ = id => document.getElementById(id);
+
+    function msg(text, kind) {
+      const el = $('formMsg');
+      el.textContent = text;
+      el.className = 'msg show ' + kind;
+    }
+
+    // Gate the page on a super-admin session. This is a convenience check for
+    // the UI — the real enforcement is server-side on /api/admin/*, which
+    // returns 403 regardless of what the browser does.
+    (async function init() {
+      let me = null;
+      try {
+        const r = await fetch('/api/auth/me');
+        if (r.ok) me = (await r.json()).user;
+      } catch (_) {}
+
+      if (!me || !me.is_super_admin) { $('gate').style.display = 'block'; return; }
+
+      $('app').style.display = 'block';
+      $('whoami').textContent = me.email;
+      loadOrgs();
+    })();
+
+    $('logoutBtn').addEventListener('click', async () => {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      location.href = '/login';
+    });
+
+    // Readable random password — no ambiguous characters to misread over the
+    // phone (no O/0, l/1/I).
+    $('genPw').addEventListener('click', () => {
+      const alphabet = 'abcdefghijkmnpqrstuvwxyzACDEFGHJKLMNPQRSTUVWXYZ23456789';
+      const bytes = new Uint8Array(14);
+      crypto.getRandomValues(bytes);
+      $('ownerPassword').value = [...bytes].map(b => alphabet[b % alphabet.length]).join('');
+    });
+
+    $('orgForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = $('createBtn');
+      const prev = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating…';
+      $('handoff').style.display = 'none';
+
+      const payload = {
+        name:           $('name').value.trim(),
+        owner_name:     $('ownerName').value.trim(),
+        owner_email:    $('ownerEmail').value.trim(),
+        owner_password: $('ownerPassword').value,
+        account_type:   $('accountType').value,
+      };
+
+      try {
+        const r = await fetch('/api/admin/organizations', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) { msg(data.error || 'Could not create the account.', 'bad'); return; }
+
+        msg(`${payload.name} created.`, 'ok');
+        $('handoffUrl').textContent   = location.origin + '/login';
+        $('handoffEmail').textContent = payload.owner_email;
+        $('handoffPw').textContent    = payload.owner_password;
+        $('handoff').style.display    = 'block';
+        $('orgForm').reset();
+        loadOrgs();
+      } catch (_) {
+        msg('Could not reach the server. Check your connection and try again.', 'bad');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = prev;
+      }
+    });
+
+    async function loadOrgs() {
+      const box = $('orgList');
+      try {
+        const r = await fetch('/api/admin/organizations');
+        if (!r.ok) { box.innerHTML = '<div class="empty">Could not load.</div>'; return; }
+        const rows = (await r.json()).data || [];
+        if (!rows.length) {
+          box.innerHTML = '<div class="empty">No restaurants yet. Add your first one on the left.</div>';
+          return;
+        }
+        box.innerHTML = `
+          <table>
+            <thead><tr><th>Name</th><th>Owner</th><th>Type</th><th>People</th><th>Added</th></tr></thead>
+            <tbody>${rows.map(o => `
+              <tr>
+                <td><strong>${esc(o.name)}</strong></td>
+                <td>${esc(o.owner_email || '—')}</td>
+                <td><span class="pill">${esc(o.account_type)}</span></td>
+                <td>${o.user_count}</td>
+                <td>${esc((o.created_at || '').split(' ')[0])}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>`;
+      } catch (_) {
+        box.innerHTML = '<div class="empty">Could not load.</div>';
+      }
+    }
+
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g,
+        ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    }
+  </script>
+</body>
+</html>
