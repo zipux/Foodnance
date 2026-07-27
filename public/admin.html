@@ -172,6 +172,14 @@
         <div class="card">
           <h2>Restaurants</h2>
           <p class="lede">Every business with an account.</p>
+          <div id="resetMsg" class="msg"></div>
+          <div class="handoff" id="resetResult" style="display:none">
+            <h3>New password for <span id="resetWho"></span></h3>
+            <code id="resetPw"></code>
+            <div style="color:var(--text-muted);font-size:.8rem;margin-top:.4rem">
+              Shown once. Their old password stopped working the moment you did this.
+            </div>
+          </div>
           <div id="orgList"><div class="empty">Loading…</div></div>
         </div>
       </div>
@@ -218,12 +226,16 @@
     });
 
     // Readable random password — no ambiguous characters to misread over the
-    // phone (no O/0, l/1/I).
-    $('genPw').addEventListener('click', () => {
+    // phone (no O/0, l/1/I). Shared by the create form and the reset button.
+    function randomPassword() {
       const alphabet = 'abcdefghijkmnpqrstuvwxyzACDEFGHJKLMNPQRSTUVWXYZ23456789';
       const bytes = new Uint8Array(14);
       crypto.getRandomValues(bytes);
-      $('ownerPassword').value = [...bytes].map(b => alphabet[b % alphabet.length]).join('');
+      return [...bytes].map(b => alphabet[b % alphabet.length]).join('');
+    }
+
+    $('genPw').addEventListener('click', () => {
+      $('ownerPassword').value = randomPassword();
     });
 
     $('orgForm').addEventListener('submit', async (e) => {
@@ -286,15 +298,34 @@
                 <td><span class="pill">${esc(o.account_type)}</span></td>
                 <td>${o.user_count}</td>
                 <td>${esc((o.created_at || '').split(' ')[0])}</td>
-                <td style="text-align:right">
-                  <button class="btn btn-ghost" onclick="viewAs('${esc(o.id)}','${esc(o.name)}')"
+                <td style="text-align:right;white-space:nowrap">
+                  <button class="btn btn-ghost" data-act="view"
+                          data-id="${esc(o.id)}" data-name="${esc(o.name)}"
                           title="See their data — you stay signed in as yourself">
                     <i class="fas fa-eye"></i> View
                   </button>
+                  ${o.owner_email ? `
+                  <button class="btn btn-ghost" data-act="reset"
+                          data-email="${esc(o.owner_email)}" data-name="${esc(o.name)}"
+                          title="Set a new password for the owner — use when they're locked out">
+                    <i class="fas fa-key"></i> Reset
+                  </button>` : ''}
                 </td>
               </tr>`).join('')}
             </tbody>
           </table>`;
+
+        // Listeners rather than inline onclick="…('${name}')". esc() turns an
+        // apostrophe into &#39;, which the HTML parser decodes back to ' before
+        // the JS is compiled — so a restaurant called "Joe's Pizza" produced a
+        // syntax error and a dead button. data-* + dataset never gets parsed as
+        // code, so any name is safe.
+        box.querySelectorAll('button[data-act]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            if (btn.dataset.act === 'view') viewAs(btn.dataset.id, btn.dataset.name);
+            else resetOwnerPw(btn.dataset.email, btn.dataset.name);
+          });
+        });
       } catch (_) {
         box.innerHTML = '<div class="empty">Could not load.</div>';
       }
@@ -313,6 +344,45 @@
         location.href = '/home';   // land in the app, now showing their data
       } catch (_) {
         msg('Could not reach the server.', 'bad');
+      }
+    }
+
+    // Set a new password for a locked-out owner. There is no reset email yet, so
+    // this is the recovery path: generate one, read it to them, they change it
+    // from the app afterwards. Their old password stops working immediately —
+    // hence the confirm, since doing this to the wrong row locks someone out.
+    async function resetOwnerPw(email, orgName) {
+      $('resetResult').style.display = 'none';
+      $('resetMsg').className = 'msg';
+
+      const ok = confirm(
+        `Set a NEW password for ${orgName}?\n\n` +
+        `${email} will not be able to sign in with their current password any more. ` +
+        `You'll get the new one to pass on to them.`
+      );
+      if (!ok) return;
+
+      const newPassword = randomPassword();
+      try {
+        const r = await fetch('/api/admin/users/reset-password', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ email, new_password: newPassword }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          $('resetMsg').textContent = data.error || 'Could not reset the password.';
+          $('resetMsg').className = 'msg show bad';
+          return;
+        }
+        $('resetWho').textContent  = `${orgName} — ${email}`;
+        $('resetPw').textContent   = newPassword;
+        $('resetResult').style.display = 'block';
+        $('resetMsg').textContent  = 'Password reset. Send them the new one below.';
+        $('resetMsg').className    = 'msg show ok';
+      } catch (_) {
+        $('resetMsg').textContent = 'Could not reach the server. Check your connection and try again.';
+        $('resetMsg').className   = 'msg show bad';
       }
     }
 

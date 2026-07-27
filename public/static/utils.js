@@ -70,16 +70,124 @@ async function renderSessionChip() {
       ${esc(me.org_name || (me.is_super_admin ? 'Admin' : me.email))}
     </span>
     ${me.is_super_admin ? '<a href="/admin" style="color:#fff;opacity:.85;text-decoration:none" title="Admin"><i class="fas fa-gear"></i></a>' : ''}
+    <a href="#" id="navChangePw" style="color:#fff;opacity:.85;text-decoration:none" title="Change password">
+      <i class="fas fa-key"></i>
+    </a>
     <a href="#" id="navSignOut" style="color:#fff;opacity:.85;text-decoration:none" title="Sign out">
       <i class="fas fa-arrow-right-from-bracket"></i>
     </a>`;
   nav.appendChild(chip);
+
+  document.getElementById('navChangePw').addEventListener('click', (e) => {
+    e.preventDefault();
+    openChangePasswordModal();
+  });
 
   document.getElementById('navSignOut').addEventListener('click', async (e) => {
     e.preventDefault();
     await fetch('/api/auth/logout', { method: 'POST' });
     location.href = '/login';
   });
+}
+
+// ══════════════════════════════════════════════════════════════
+// CHANGE PASSWORD
+// ══════════════════════════════════════════════════════════════
+// The markup is injected rather than copied into all 13 app pages — same
+// reasoning as the session chip above. Every page that loads utils.js gets it.
+//
+// Changing the password does NOT sign you out: the session token is
+// <userId>.<expiry>.<hmac> and doesn't depend on the password, so the current
+// session stays valid. Worth knowing — it also means changing the password does
+// not boot anyone else who is already signed in as this user. Signing them out
+// is what rotating SESSION_SECRET is for.
+const MIN_PASSWORD_LEN = 8;
+
+function ensureChangePasswordModal() {
+  if (document.getElementById('changePwModal')) return;
+  const wrap = document.createElement('div');
+  wrap.innerHTML = `
+    <div class="modal-overlay hidden" id="changePwModal">
+      <div class="modal" style="max-width:420px">
+        <div class="modal-header">
+          <h3><i class="fas fa-key"></i> Change password</h3>
+          <button class="modal-close" onclick="closeModal('changePwModal')"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+          <label style="display:block;font-size:.82rem;font-weight:600;margin-bottom:.25rem">Current password</label>
+          <input type="password" id="cpCurrent" autocomplete="current-password" style="width:100%;margin-bottom:.75rem">
+
+          <label style="display:block;font-size:.82rem;font-weight:600;margin-bottom:.25rem">New password</label>
+          <input type="password" id="cpNew" autocomplete="new-password" style="width:100%;margin-bottom:.25rem">
+          <div style="font-size:.76rem;color:var(--text-muted);margin-bottom:.75rem">
+            At least ${MIN_PASSWORD_LEN} characters.
+          </div>
+
+          <label style="display:block;font-size:.82rem;font-weight:600;margin-bottom:.25rem">Confirm new password</label>
+          <input type="password" id="cpConfirm" autocomplete="new-password" style="width:100%"
+                 onkeydown="if(event.key==='Enter') submitChangePassword()">
+
+          <div id="cpError" style="color:#dc2626;font-size:.82rem;margin-top:.6rem;display:none"></div>
+          <div id="cpOk" style="color:#15803d;font-size:.82rem;margin-top:.6rem;display:none">
+            <i class="fas fa-check"></i> Password changed. You are still signed in.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal('changePwModal')">Cancel</button>
+          <button class="btn btn-primary" id="cpSave" onclick="submitChangePassword()">Save</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap.firstElementChild);
+}
+
+function openChangePasswordModal() {
+  ensureChangePasswordModal();
+  ['cpCurrent', 'cpNew', 'cpConfirm'].forEach(id => { document.getElementById(id).value = ''; });
+  document.getElementById('cpError').style.display = 'none';
+  document.getElementById('cpOk').style.display = 'none';
+  openModal('changePwModal');
+  document.getElementById('cpCurrent').focus();
+}
+
+async function submitChangePassword() {
+  const errEl = document.getElementById('cpError');
+  const okEl  = document.getElementById('cpOk');
+  const btn   = document.getElementById('cpSave');
+  const current = document.getElementById('cpCurrent').value;
+  const next    = document.getElementById('cpNew').value;
+  const confirm = document.getElementById('cpConfirm').value;
+
+  const fail = (m) => { okEl.style.display = 'none'; errEl.textContent = m; errEl.style.display = ''; };
+  errEl.style.display = 'none';
+
+  if (!current)                     return fail('Enter your current password.');
+  if (next.length < MIN_PASSWORD_LEN) return fail(`New password must be at least ${MIN_PASSWORD_LEN} characters.`);
+  if (next !== confirm)             return fail('The two new passwords do not match.');
+  if (next === current)             return fail('The new password is the same as the current one.');
+
+  btn.disabled = true;
+  const prev = btn.innerHTML;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
+  try {
+    const r = await fetch(`${API_BASE}/auth/change-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current_password: current, new_password: next }),
+    });
+    const data = await r.json().catch(() => ({}));
+    // 403 means the current password was wrong. Deliberately not a 401 — that
+    // would trip the session guard above and throw the user out to /login.
+    if (!r.ok) return fail(data.error || 'Could not change the password.');
+
+    okEl.style.display = '';
+    ['cpCurrent', 'cpNew', 'cpConfirm'].forEach(id => { document.getElementById(id).value = ''; });
+  } catch (_) {
+    fail('Could not reach the server. Check your connection and try again.');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = prev;
+  }
 }
 
 // Amber bar pinned to the top while a super-admin is viewing a customer's data.
