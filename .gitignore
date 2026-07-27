@@ -3,3 +3,8 @@ node_modules/
 .dev.vars
 .wrangler/
 .DS_Store
+
+# D1 exports hold real customer data (invoices, suppliers, staff) — the repo
+# is pushed to GitHub, so these must never be committed.
+backup-*.sql
+*.d1-export.sql
