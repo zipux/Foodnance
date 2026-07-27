@@ -1949,9 +1949,13 @@ app.post('/api/products/group', async (c) => {
 // between the two most recent purchases (null if fewer than 2 in range).
 // Sorted by absolute % change descending, nulls last.
 app.get('/api/price-movers', async (c) => {
+  const org  = orgOf(c)
   const from = (c.req.query('from') || '').trim()
   const to   = (c.req.query('to')   || '').trim()
 
+  // Ownership filter first, so it can never be dropped by a later branch that
+  // appends to `sql`. The generic_products join carries the same org so a
+  // product id colliding across tenants can't pull in a foreign row.
   let sql = `
     SELECT pe.generic_product_id AS product_id,
            pe.generic_product_name AS product_name,
@@ -1967,12 +1971,14 @@ app.get('/api/price-movers', async (c) => {
            gp.base_unit           AS stock_unit,
            gp.avg_weight_per_unit AS avg_weight
     FROM product_entries pe
-    LEFT JOIN generic_products gp ON gp.id = pe.generic_product_id
-    WHERE pe.purchase_date IS NOT NULL AND pe.purchase_date != ''
+    LEFT JOIN generic_products gp
+      ON gp.id = pe.generic_product_id AND gp.org_id IS pe.org_id
+    WHERE pe.org_id IS ?
+      AND pe.purchase_date IS NOT NULL AND pe.purchase_date != ''
       AND pe.generic_product_id IS NOT NULL AND pe.generic_product_id != ''
       AND pe.voided_at IS NULL
   `
-  const args: string[] = []
+  const args: (string | null)[] = [org]
   if (from) { sql += ' AND pe.purchase_date >= ?'; args.push(from) }
   if (to)   { sql += ' AND pe.purchase_date <= ?'; args.push(to)   }
   sql += ' ORDER BY pe.purchase_date DESC, pe.created_at DESC'

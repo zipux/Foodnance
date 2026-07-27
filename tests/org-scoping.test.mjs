@@ -39,6 +39,22 @@ const ALLOWLIST = [
   // (populated as the audit proceeds — each entry is a deliberate decision)
 ];
 
+// Read the string literal starting at src[j] (backtick, single or double
+// quote). Returns the contents and the index just past the closing quote,
+// or null when src[j] does not open a string.
+function readStringLiteral(src, j) {
+  const quote = src[j];
+  if (quote !== '`' && quote !== '"' && quote !== "'") return null;
+  let k = j + 1;
+  let value = '';
+  while (k < src.length) {
+    if (src[k] === '\\') { value += src[k] + src[k + 1]; k += 2; continue; }
+    if (src[k] === quote) break;
+    value += src[k]; k++;
+  }
+  return { value, end: k + 1 };
+}
+
 function extractStatements(src) {
   // Pull the string argument out of every DB.prepare( ... ) call. Handles
   // backtick templates (the common case here) and quoted strings, including
@@ -49,20 +65,57 @@ function extractStatements(src) {
   while ((i = src.indexOf(needle, i)) !== -1) {
     let j = i + needle.length;
     while (j < src.length && /\s/.test(src[j])) j++;
-    const quote = src[j];
-    if (quote !== '`' && quote !== '"' && quote !== "'") { i = j; continue; }
-    let k = j + 1;
-    let sql = '';
-    while (k < src.length) {
-      if (src[k] === '\\') { sql += src[k] + src[k + 1]; k += 2; continue; }
-      if (src[k] === quote) break;
-      sql += src[k]; k++;
-    }
-    const line = src.slice(0, i).split('\n').length;
-    out.push({ sql, line });
-    i = k + 1;
+    const lit = readStringLiteral(src, j);
+    if (!lit) { i = j; continue; }             // not a literal — see below
+    out.push({ sql: lit.value, line: src.slice(0, i).split('\n').length });
+    i = lit.end;
   }
   return out;
+}
+
+// Handler bounds, used both to resolve variable-built queries and to check
+// that a handler binding `org` also declares it.
+function handlerRanges(src) {
+  const starts = [...src.matchAll(/^app\.(get|post|put|patch|delete)\(\s*'([^']+)'/gm)];
+  return starts.map((m, i) => ({
+    method: m[1].toUpperCase(),
+    path: m[2],
+    start: m.index,
+    end: i + 1 < starts.length ? starts[i + 1].index : src.length,
+  }));
+}
+
+// A query assembled in a variable — `let sql = \`...\`; sql += ' AND x = ?';
+// DB.prepare(sql)` — is invisible to extractStatements, which only reads
+// literals passed straight to prepare(). That is exactly how an unscoped
+// GET /api/price-movers shipped past this audit once. So resolve them: find
+// every literal assigned or appended to that identifier inside the enclosing
+// handler and audit the concatenation as one statement.
+//
+// `unresolved` is the safety net — a prepare(variable) whose literals this
+// cannot find is reported rather than silently skipped, because "not audited"
+// must never look like "passed".
+function extractVariableStatements(src, ranges) {
+  const out = [];
+  const unresolved = [];
+  const re = /DB\.prepare\(\s*([A-Za-z_$][\w$]*)\s*\)/g;
+  let m;
+  while ((m = re.exec(src)) !== null) {
+    const ident = m[1];
+    const line = src.slice(0, m.index).split('\n').length;
+    const range = ranges.find(r => m.index >= r.start && m.index < r.end);
+    const body = range ? src.slice(range.start, range.end) : '';
+    const assign = new RegExp(`\\b${ident}\\s*\\+?=\\s*`, 'g');
+    let sql = '';
+    let a;
+    while ((a = assign.exec(body)) !== null) {
+      const lit = readStringLiteral(body, a.index + a[0].length);
+      if (lit) sql += ' ' + lit.value;
+    }
+    if (sql.trim()) out.push({ sql, line });
+    else unresolved.push(`src/index.ts:${line}  DB.prepare(${ident})`);
+  }
+  return { out, unresolved };
 }
 
 function tablesTouched(sql) {
@@ -96,11 +149,21 @@ function allowlisted(sql) {
 }
 
 const src = readFileSync(SRC, 'utf8');
-const statements = extractStatements(src);
+const ranges = handlerRanges(src);
+const built = extractVariableStatements(src, ranges);
+const statements = [...extractStatements(src), ...built.out];
 const t = suite('org-scoping');
 
 t.check(`found SQL statements to audit (${statements.length})`, statements.length > 50,
   statements.length <= 50 ? `only ${statements.length} — the extractor is probably broken` : '');
+
+t.check(
+  'every DB.prepare(variable) query could be resolved back to its SQL',
+  built.unresolved.length === 0,
+  built.unresolved.length
+    ? `not audited — inline the SQL or teach the extractor:\n      ${built.unresolved.join('\n      ')}`
+    : '',
+);
 
 const unscoped = [];
 for (const { sql, line } of statements) {
@@ -130,20 +193,17 @@ t.check(
 // on the first run. A check that cries wolf gets ignored.
 const stripComments = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 
-const handlerStarts = [...src.matchAll(/^app\.(get|post|put|patch|delete)\(\s*'([^']+)'/gm)];
 const missingOrgDecl = [];
-for (let i = 0; i < handlerStarts.length; i++) {
-  const start = handlerStarts[i].index;
-  const end = i + 1 < handlerStarts.length ? handlerStarts[i + 1].index : src.length;
-  const body = stripComments(src.slice(start, end));
+for (const r of ranges) {
+  const body = stripComments(src.slice(r.start, r.end));
   // Uses `org` as a bind argument but never defines it in this handler.
   const usesOrg = /\borg\b(?!_id|Of|anization)/.test(body);
   const declaresOrg = /\bconst\s+org\s*=/.test(body);
-  if (usesOrg && !declaresOrg) missingOrgDecl.push(`${handlerStarts[i][1].toUpperCase()} ${handlerStarts[i][2]}`);
+  if (usesOrg && !declaresOrg) missingOrgDecl.push(`${r.method} ${r.path}`);
 }
 
 t.check(
-  `handlers that bind org also declare it (${handlerStarts.length} routes)`,
+  `handlers that bind org also declare it (${ranges.length} routes)`,
   missingOrgDecl.length === 0,
   missingOrgDecl.length ? `undeclared in: ${missingOrgDecl.join(', ')}` : '',
 );
