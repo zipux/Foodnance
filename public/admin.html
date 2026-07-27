@@ -104,11 +104,17 @@
       <span class="pill" style="background:rgba(255,255,255,.2);color:#fff">Admin</span>
       <span class="spacer"></span>
       <!-- Without this a super-admin lands here after signing in with no way to
-           reach their own data — the admin screen has none of the app's nav. -->
-      <a href="/home" style="color:#fff;text-decoration:none;font-size:.85rem;font-weight:600;opacity:.95"
+           reach their own data — the admin screen has none of the app's nav.
+           Clears any active "view as" first: the cookie lasts 8 hours, so
+           otherwise this opens whichever customer was looked at last. -->
+      <a href="/home" id="openAppLink" style="color:#fff;text-decoration:none;font-size:.85rem;font-weight:600;opacity:.95"
          title="Your own products, invoices and reports">
         <i class="fas fa-arrow-right-to-bracket"></i> Open the app
       </a>
+      <span id="viewingNote" style="display:none;font-size:.78rem;background:#fef3c7;color:#92400e;
+            font-weight:600;padding:.15rem .5rem;border-radius:4px">
+        Viewing <span id="viewingName"></span>
+      </span>
       <span class="who" id="whoami"></span>
       <button id="logoutBtn"><i class="fas fa-arrow-right-from-bracket"></i> Sign out</button>
     </div>
@@ -207,18 +213,44 @@
     // the UI — the real enforcement is server-side on /api/admin/*, which
     // returns 403 regardless of what the browser does.
     (async function init() {
-      let me = null;
+      let me = null, viewingAs = null;
       try {
         const r = await fetch('/api/auth/me');
-        if (r.ok) me = (await r.json()).user;
+        if (r.ok) { const d = await r.json(); me = d.user; viewingAs = d.viewing_as; }
       } catch (_) {}
 
       if (!me || !me.is_super_admin) { $('gate').style.display = 'block'; return; }
 
       $('app').style.display = 'block';
       $('whoami').textContent = me.email;
+
+      // Say so when a "view as" is still active. Without this the state is
+      // invisible from here — the amber bar only renders on app pages — and
+      // it silently decides whose data the app shows.
+      if (viewingAs) {
+        $('viewingName').textContent = viewingAs.name;
+        $('viewingNote').style.display = '';
+      }
       loadOrgs();
     })();
+
+    // Always land on YOUR data, never the last customer looked at.
+    $('openAppLink').addEventListener('click', async (e) => {
+      e.preventDefault();
+      try {
+        const r = await fetch('/api/admin/view-as', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ org_id: null }),
+        });
+        // Navigating on a failed clear would show a customer's data while you
+        // believed it was yours — worse than not moving at all.
+        if (!r.ok) { msg('Could not switch back to your own data. Try again.', 'bad'); return; }
+        location.href = '/home';
+      } catch (_) {
+        msg('Could not reach the server. Check your connection and try again.', 'bad');
+      }
+    });
 
     $('logoutBtn').addEventListener('click', async () => {
       await fetch('/api/auth/logout', { method: 'POST' });
