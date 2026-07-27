@@ -20,6 +20,20 @@ const API_BASE = '/api';
   window.fetch = async function (...args) {
     const response = await original.apply(this, args);
 
+    // 402 = account paused for non-payment. Surfaced here for the same reason
+    // as the 401 below: every write in the app goes through fetch, and without
+    // this each controller would fail in its own way (or silently). The banner
+    // says why; this says it again at the moment they try to save.
+    if (response.status === 402) {
+      // Throttled: a bulk action can fire many writes at once, and one clear
+      // message is more useful than twenty stacked ones.
+      const since = Date.now() - (window.__suspendToastAt || 0);
+      if (typeof showToast === 'function' && since > 4000) {
+        window.__suspendToastAt = Date.now();
+        showToast('Account paused — payment overdue. Changes cannot be saved.', 'error');
+      }
+    }
+
     if (response.status === 401 && !redirecting) {
       let url = '';
       try {
@@ -58,6 +72,11 @@ async function renderSessionChip() {
   // Viewing a customer's data: make that impossible to miss. Without this an
   // operator could edit a customer's numbers believing they were their own.
   if (viewingAs) renderViewingAsBar(viewingAs);
+
+  // Paused for non-payment: the app still reads, but every save will be
+  // refused. Say so up front rather than letting them fill in a stock take and
+  // lose it at the last step.
+  if (me.suspended) renderSuspendedBar(me.suspend_reason);
 
   const chip = document.createElement('div');
   chip.id = 'sessionChip';
@@ -188,6 +207,28 @@ async function submitChangePassword() {
     btn.disabled = false;
     btn.innerHTML = prev;
   }
+}
+
+// Red bar pinned to the top while the account is paused for non-payment.
+// Deliberately not dismissible: it is the only explanation the customer gets
+// for why saving stopped working, and the 402 responses are silent.
+function renderSuspendedBar(reason) {
+  if (document.getElementById('suspendedBar')) return;
+  const bar = document.createElement('div');
+  bar.id = 'suspendedBar';
+  bar.style.cssText =
+    'position:sticky;top:0;z-index:201;display:flex;align-items:center;gap:.6rem;' +
+    'padding:.55rem 1rem;background:#fee2e2;border-bottom:1px solid #fca5a5;' +
+    'color:#991b1b;font-size:.85rem;font-weight:600';
+  bar.innerHTML = `
+    <i class="fas fa-circle-exclamation"></i>
+    <span>
+      Your account is paused because payment is overdue — you can still view
+      everything, but changes can't be saved.
+      ${reason ? `<span style="font-weight:500">(${esc(reason)})</span>` : ''}
+      Contact us to restore access.
+    </span>`;
+  document.body.insertBefore(bar, document.body.firstChild);
 }
 
 // Amber bar pinned to the top while a super-admin is viewing a customer's data.

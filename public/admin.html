@@ -322,12 +322,13 @@
         }
         box.innerHTML = `
           <table>
-            <thead><tr><th>Name</th><th>Owner</th><th>Type</th><th>People</th><th>Added</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th>Owner</th><th>Type</th><th>Status</th><th>People</th><th>Added</th><th></th></tr></thead>
             <tbody>${rows.map(o => `
-              <tr>
+              <tr${o.archived_at ? ' style="opacity:.55"' : ''}>
                 <td><strong>${esc(o.name)}</strong></td>
                 <td>${esc(o.owner_email || '—')}</td>
                 <td><span class="pill">${esc(o.account_type)}</span></td>
+                <td>${statusPill(o)}</td>
                 <td>${o.user_count}</td>
                 <td>${esc((o.created_at || '').split(' ')[0])}</td>
                 <td style="text-align:right;white-space:nowrap">
@@ -342,6 +343,28 @@
                           title="Set a new password for the owner — use when they're locked out">
                     <i class="fas fa-key"></i> Reset
                   </button>` : ''}
+                  ${o.archived_at || o.suspended_at ? `
+                  <button class="btn btn-ghost" data-act="restore"
+                          data-id="${esc(o.id)}" data-name="${esc(o.name)}"
+                          title="Give them full access again">
+                    <i class="fas fa-play"></i> Restore
+                  </button>` : `
+                  <button class="btn btn-ghost" data-act="suspend"
+                          data-id="${esc(o.id)}" data-name="${esc(o.name)}"
+                          title="Behind on payment — they keep read access, but can't save">
+                    <i class="fas fa-pause"></i> Pause
+                  </button>`}
+                  ${!o.archived_at ? `
+                  <button class="btn btn-ghost" data-act="archive"
+                          data-id="${esc(o.id)}" data-name="${esc(o.name)}"
+                          title="End the relationship — sign-in refused, data kept">
+                    <i class="fas fa-box-archive"></i> Close
+                  </button>` : `
+                  <button class="btn btn-ghost" data-act="purge"
+                          data-id="${esc(o.id)}" data-name="${esc(o.name)}"
+                          style="color:#991b1b" title="Permanently delete everything — cannot be undone">
+                    <i class="fas fa-trash"></i> Delete
+                  </button>`}
                 </td>
               </tr>`).join('')}
             </tbody>
@@ -354,8 +377,15 @@
         // code, so any name is safe.
         box.querySelectorAll('button[data-act]').forEach(btn => {
           btn.addEventListener('click', () => {
-            if (btn.dataset.act === 'view') viewAs(btn.dataset.id, btn.dataset.name);
-            else resetOwnerPw(btn.dataset.email, btn.dataset.name);
+            const d = btn.dataset;
+            switch (d.act) {
+              case 'view':    return viewAs(d.id, d.name);
+              case 'reset':   return resetOwnerPw(d.email, d.name);
+              case 'suspend': return suspendOrg(d.id, d.name);
+              case 'restore': return restoreOrg(d.id, d.name);
+              case 'archive': return archiveOrg(d.id, d.name);
+              case 'purge':   return purgeOrg(d.id, d.name);
+            }
           });
         });
       } catch (_) {
@@ -416,6 +446,99 @@
         $('resetMsg').textContent = 'Could not reach the server. Check your connection and try again.';
         $('resetMsg').className   = 'msg show bad';
       }
+    }
+
+    // ── Account lifecycle ──────────────────────────────────────
+    function statusPill(o) {
+      if (o.archived_at) {
+        return '<span class="pill" style="background:#f1f5f9;color:#475569">Closed</span>';
+      }
+      if (o.suspended_at) {
+        const why = o.suspend_reason ? ` title="${esc(o.suspend_reason)}"` : '';
+        return `<span class="pill" style="background:#fee2e2;color:#991b1b"${why}>Paused</span>`;
+      }
+      return '<span class="pill" style="background:#ecfdf5;color:#065f46">Active</span>';
+    }
+
+    // Shared plumbing for the four lifecycle actions, so each one below is just
+    // its own confirmation wording.
+    async function orgAction(url, opts, okText) {
+      $('resetResult').style.display = 'none';
+      try {
+        const r = await fetch(url, opts);
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          $('resetMsg').textContent = data.error || 'That did not work.';
+          $('resetMsg').className   = 'msg show bad';
+          return false;
+        }
+        $('resetMsg').textContent = okText(data);
+        $('resetMsg').className   = 'msg show ok';
+        loadOrgs();
+        return true;
+      } catch (_) {
+        $('resetMsg').textContent = 'Could not reach the server. Check your connection and try again.';
+        $('resetMsg').className   = 'msg show bad';
+        return false;
+      }
+    }
+
+    const jsonPost = (body) => ({
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    });
+
+    function suspendOrg(id, name) {
+      const reason = prompt(
+        `Pause ${name}?\n\n` +
+        `They'll still be able to sign in and read everything, but nothing can ` +
+        `be saved until you restore them.\n\n` +
+        `Optional note (they see this on the banner):`, 'Payment overdue');
+      if (reason === null) return;   // cancelled — empty string is a valid note
+      orgAction(`/api/admin/organizations/${encodeURIComponent(id)}/suspend`,
+        jsonPost({ reason: reason.trim() }),
+        () => `${name} is paused. They can read their data but not change it.`);
+    }
+
+    function restoreOrg(id, name) {
+      orgAction(`/api/admin/organizations/${encodeURIComponent(id)}/restore`,
+        jsonPost({}),
+        () => `${name} is active again.`);
+    }
+
+    function archiveOrg(id, name) {
+      if (!confirm(
+        `Close ${name}?\n\n` +
+        `Nobody there will be able to sign in. Their data is kept, so you can ` +
+        `still restore or export it. This is the step before deleting.`
+      )) return;
+      orgAction(`/api/admin/organizations/${encodeURIComponent(id)}/archive`,
+        jsonPost({}),
+        () => `${name} is closed. Sign-in is refused; the data is still here.`);
+    }
+
+    // The only irreversible action on this page. The server also refuses unless
+    // the account is closed and the typed name matches — this is the friendly
+    // half of that guard, not the whole of it.
+    function purgeOrg(id, name) {
+      const typed = prompt(
+        `PERMANENTLY DELETE ${name}?\n\n` +
+        `This erases their invoices, products, recipes, stock history and ` +
+        `uploaded photos. It cannot be undone, and there is no backup other ` +
+        `than one you have taken yourself.\n\n` +
+        `Type the restaurant name exactly to confirm:`);
+      if (typed === null) return;
+      if (typed.trim() !== name) {
+        $('resetMsg').textContent = 'Name did not match — nothing was deleted.';
+        $('resetMsg').className   = 'msg show bad';
+        return;
+      }
+      orgAction(`/api/admin/organizations/${encodeURIComponent(id)}`,
+        { method: 'DELETE', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ confirm_name: typed.trim() }) },
+        (d) => `${d.deleted} deleted permanently` +
+               (d.files_deleted ? ` (${d.files_deleted} file${d.files_deleted === 1 ? '' : 's'} removed).` : '.') +
+               (d.warning ? ` ${d.warning}` : ''));
     }
 
     function esc(s) {

@@ -33,11 +33,41 @@ const PUBLIC_API = new Set([
   '/api/auth/bootstrap',  // first-run only; refuses once any user exists
 ])
 
+// Still allowed while an account is suspended: everything about the session
+// itself. Locking someone out of Sign out or Change password would be spite,
+// not leverage, and none of them touch business data.
+const SUSPEND_EXEMPT = new Set([
+  '/api/auth/logout',
+  '/api/auth/me',
+  '/api/auth/change-password',
+])
+
 app.use('/api/*', async (c, next) => {
-  if (PUBLIC_API.has(new URL(c.req.url).pathname)) return next()
+  const path = new URL(c.req.url).pathname
+  if (PUBLIC_API.has(path)) return next()
 
   const me = await currentUser(c)
   if (!me) return c.json({ error: 'Not signed in.' }, 401)
+
+  // Account lifecycle. Checked here for the same reason auth is: one chokepoint
+  // covers all 27 tables and every custom endpoint, and can't be forgotten when
+  // a new route is added. Super-admins are exempt — they have no organization,
+  // and while "viewing as" a customer they are staff looking in, not the
+  // customer, so a suspension must not stop them investigating or exporting.
+  if (me.role !== 'super_admin') {
+    if (me.org_archived_at) {
+      return c.json({ error: 'This account has been closed. Contact us if this is unexpected.' }, 403)
+    }
+    // Suspension is read-only, not a lockout: they must be able to see the
+    // banner explaining why, and get their own data out. GET stays open; every
+    // write is refused. 402 is the honest status code for "you owe us money".
+    if (me.org_suspended_at && c.req.method !== 'GET' && !SUSPEND_EXEMPT.has(path)) {
+      return c.json({
+        error: 'Your account is paused because payment is overdue. Contact us to restore access.',
+        suspended: true,
+      }, 402)
+    }
+  }
 
   // Downstream handlers read the caller from here rather than re-querying.
   c.set('user', me)
@@ -146,6 +176,10 @@ function sessionCookieHeader(token: string, url: string, maxAge: number): string
 type SessionUser = {
   id: string; email: string; role: string; org_id: string | null;
   name: string; org_name: string | null; account_type: string | null;
+  // Account lifecycle (migration 0037). Read on every request so suspending or
+  // archiving takes effect immediately, exactly like users.archived_at.
+  org_suspended_at: string | null; org_archived_at: string | null;
+  org_suspend_reason: string | null;
 }
 
 // Resolves the caller from their cookie, or null when signed out. Reads the
@@ -158,7 +192,10 @@ async function currentUser(c: any): Promise<SessionUser | null> {
   if (!session) return null
   const row = await c.env.DB.prepare(
     `SELECT u.id, u.email, u.role, u.org_id, u.name,
-            o.name AS org_name, o.account_type
+            o.name AS org_name, o.account_type,
+            o.suspended_at   AS org_suspended_at,
+            o.archived_at    AS org_archived_at,
+            o.suspend_reason AS org_suspend_reason
        FROM users u
        LEFT JOIN organizations o ON o.id = u.org_id
       WHERE u.id = ? AND u.archived_at IS NULL`,
@@ -579,6 +616,10 @@ function publicUser(u: SessionUser) {
     id: u.id, email: u.email, name: u.name, role: u.role,
     org_id: u.org_id, org_name: u.org_name, account_type: u.account_type,
     is_super_admin: u.role === 'super_admin',
+    // Drives the read-only banner. Never true for a super-admin, who is exempt
+    // from their customers' billing state.
+    suspended: u.role !== 'super_admin' && !!u.org_suspended_at,
+    suspend_reason: u.role !== 'super_admin' ? (u.org_suspend_reason || '') : '',
   }
 }
 
@@ -621,8 +662,11 @@ app.post('/api/auth/login', async (c) => {
   const password = String(body.password || '')
 
   const row = await c.env.DB.prepare(
-    `SELECT id, email, password_hash, password_salt, password_iter, role
-       FROM users WHERE email = ? AND archived_at IS NULL`,
+    `SELECT u.id, u.email, u.password_hash, u.password_salt, u.password_iter, u.role,
+            o.archived_at AS org_archived_at
+       FROM users u
+       LEFT JOIN organizations o ON o.id = u.org_id
+      WHERE u.email = ? AND u.archived_at IS NULL`,
   ).bind(email).first<any>()
 
   // Same message and roughly the same work whether the address is unknown or
@@ -634,6 +678,16 @@ app.post('/api/auth/login', async (c) => {
   }
   const ok = await verifyPassword(password, row.password_salt, row.password_hash, row.password_iter)
   if (!ok) return c.json({ error: 'Email or password is incorrect.' }, 401)
+
+  // Closed account: say so. Checked only AFTER the password is verified, so
+  // this can't be used to probe which addresses belong to closed accounts.
+  // Telling the truth here matters — "Email or password is incorrect" would
+  // send them hunting for a password problem that doesn't exist, and then to
+  // us. A suspended account is deliberately NOT blocked: they need to get in
+  // to read the banner explaining why they can't save anything.
+  if (row.org_archived_at) {
+    return c.json({ error: 'This account has been closed. Contact us if this is unexpected.' }, 403)
+  }
 
   const expiresAt = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS
   const token = await signSession(c.env.SESSION_SECRET, row.id, expiresAt)
@@ -648,7 +702,10 @@ app.post('/api/auth/login', async (c) => {
   // send the person after signing in (admin screen vs the app).
   const me = await c.env.DB.prepare(
     `SELECT u.id, u.email, u.role, u.org_id, u.name,
-            o.name AS org_name, o.account_type
+            o.name AS org_name, o.account_type,
+            o.suspended_at   AS org_suspended_at,
+            o.archived_at    AS org_archived_at,
+            o.suspend_reason AS org_suspend_reason
        FROM users u
        LEFT JOIN organizations o ON o.id = u.org_id
       WHERE u.id = ?`,
@@ -786,6 +843,7 @@ app.get('/api/admin/organizations', async (c) => {
   if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)
   const { results } = await c.env.DB.prepare(
     `SELECT o.id, o.name, o.account_type, o.created_at, o.archived_at,
+            o.suspended_at, o.suspend_reason,
             (SELECT COUNT(*) FROM users u WHERE u.org_id = o.id AND u.archived_at IS NULL) AS user_count,
             (SELECT email FROM users u WHERE u.org_id = o.id AND u.role = 'owner'
               ORDER BY u.created_at LIMIT 1) AS owner_email
@@ -834,6 +892,127 @@ app.post('/api/admin/organizations', async (c) => {
 
   return c.json({ ok: true, organization: { id: orgId, name, account_type: accountType },
                   owner: { id: userId, email } })
+})
+
+// ── Account lifecycle: suspend / restore / archive / purge ────
+// Three severities, deliberately separate buttons rather than one destructive
+// "delete". See migration 0037 for the state definitions.
+
+// Behind on payment. Read-only from their side; instantly reversible.
+app.post('/api/admin/organizations/:id/suspend', async (c) => {
+  if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)
+  const id = c.req.param('id')
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const reason = String(body.reason || '').trim()
+
+  const org = await c.env.DB.prepare('SELECT id, name, archived_at FROM organizations WHERE id = ?')
+    .bind(id).first<{ id: string; name: string; archived_at: string | null }>()
+  if (!org) return c.json({ error: 'Restaurant not found.' }, 404)
+  if (org.archived_at) return c.json({ error: 'That account is closed — restore it before suspending.' }, 409)
+
+  await c.env.DB.prepare(
+    `UPDATE organizations SET suspended_at = datetime('now'), suspend_reason = ? WHERE id = ?`,
+  ).bind(reason, id).run()
+  return c.json({ ok: true, organization: { id: org.id, name: org.name }, suspended: true })
+})
+
+// Paid up, or closed in error. Clears both flags — the operator's intent when
+// they click Restore is "make this work again", and leaving the other flag set
+// would silently keep them locked out.
+app.post('/api/admin/organizations/:id/restore', async (c) => {
+  if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)
+  const id = c.req.param('id')
+
+  const org = await c.env.DB.prepare('SELECT id, name FROM organizations WHERE id = ?')
+    .bind(id).first<{ id: string; name: string }>()
+  if (!org) return c.json({ error: 'Restaurant not found.' }, 404)
+
+  await c.env.DB.prepare(
+    `UPDATE organizations SET suspended_at = NULL, suspend_reason = '', archived_at = NULL WHERE id = ?`,
+  ).bind(id).run()
+  return c.json({ ok: true, organization: { id: org.id, name: org.name }, suspended: false })
+})
+
+// Relationship over. Sign-in refused, data kept — so it can still be exported
+// or restored. This is the step before a purge, never a substitute for it.
+app.post('/api/admin/organizations/:id/archive', async (c) => {
+  if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)
+  const id = c.req.param('id')
+
+  const org = await c.env.DB.prepare('SELECT id, name FROM organizations WHERE id = ?')
+    .bind(id).first<{ id: string; name: string }>()
+  if (!org) return c.json({ error: 'Restaurant not found.' }, 404)
+
+  await c.env.DB.prepare(`UPDATE organizations SET archived_at = datetime('now') WHERE id = ?`)
+    .bind(id).run()
+  return c.json({ ok: true, organization: { id: org.id, name: org.name }, archived: true })
+})
+
+// Every tenant table, for the purge below. Mirrors TENANT_TABLES in
+// tests/org-scoping.test.mjs — if a table is added there it belongs here too,
+// or a purge silently leaves that table's rows behind, still carrying the
+// deleted customer's data.
+const PURGE_TABLES = [
+  'categories', 'certification_types', 'finished_product_items', 'finished_products',
+  'generic_products', 'inventory', 'invoice_lines', 'invoices', 'item_placements',
+  'operating_expenses', 'product_aliases', 'product_entries', 'product_mappings',
+  'recipe_items', 'recipes', 'recurring_expenses', 'sales_monthly', 'spread_expenses',
+  'staff', 'staff_certifications', 'stock_log', 'stock_take_items', 'stock_takes',
+  'storage_sections', 'suppliers', 'units', 'vendor_fee_templates',
+]
+
+// Irreversible. Guarded three ways, because the cost of doing this to the wrong
+// row is a customer's entire business history:
+//   1. the account must already be archived — you cannot purge a live customer
+//   2. the caller must echo back the exact restaurant name
+//   3. their uploaded files go too, or we keep paying to store documents
+//      belonging to someone who is no longer a customer
+app.delete('/api/admin/organizations/:id', async (c) => {
+  if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)
+  const id = c.req.param('id')
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const typed = String(body.confirm_name || '').trim()
+
+  const org = await c.env.DB.prepare('SELECT id, name, archived_at FROM organizations WHERE id = ?')
+    .bind(id).first<{ id: string; name: string; archived_at: string | null }>()
+  if (!org) return c.json({ error: 'Restaurant not found.' }, 404)
+  if (!org.archived_at) {
+    return c.json({ error: 'Close the account first. Only a closed account can be deleted.' }, 409)
+  }
+  if (typed !== org.name) {
+    return c.json({ error: `Type the restaurant name exactly ("${org.name}") to confirm.` }, 400)
+  }
+
+  // Data first, org row last: if this fails part-way the account still exists
+  // and is still archived, so it can be retried. Deleting the organization
+  // first would strand every remaining row with no owner and no way to find it.
+  for (const table of PURGE_TABLES) {
+    await c.env.DB.prepare(`DELETE FROM ${table} WHERE org_id IS ?`).bind(id).run()
+  }
+  await c.env.DB.prepare('DELETE FROM invites WHERE org_id = ?').bind(id).run()
+  await c.env.DB.prepare('DELETE FROM users WHERE org_id = ?').bind(id).run()
+
+  // Their invoice photos and certificates. R2 lists 1000 keys at a time.
+  let filesDeleted = 0
+  try {
+    let cursor: string | undefined
+    do {
+      const listed = await c.env.FILES.list({ prefix: `uploads/${id}/`, cursor })
+      if (listed.objects.length) {
+        await c.env.FILES.delete(listed.objects.map(o => o.key))
+        filesDeleted += listed.objects.length
+      }
+      cursor = listed.truncated ? listed.cursor : undefined
+    } while (cursor)
+  } catch (_) {
+    // Rows are already gone; report the shortfall rather than failing the whole
+    // purge, otherwise a retry would find nothing left to delete and 404.
+    return c.json({ ok: true, deleted: org.name, files_deleted: filesDeleted,
+                    warning: 'Data deleted, but some uploaded files could not be removed.' })
+  }
+
+  await c.env.DB.prepare('DELETE FROM organizations WHERE id = ?').bind(id).run()
+  return c.json({ ok: true, deleted: org.name, files_deleted: filesDeleted })
 })
 
 // ══════════════════════════════════════════════════════════════
