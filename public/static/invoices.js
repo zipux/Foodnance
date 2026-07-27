@@ -411,6 +411,20 @@ async function openInvDetail(id) {
   currentInvTotal = total;
   document.getElementById('detailTotal').textContent   = total ? '$' + total.toFixed(2) : '—';
   document.getElementById('detailPayment').textContent = inv.payment_account || 'A/P';
+
+  // AI parse cost — recorded from the Anthropic API's `usage` field at parse
+  // time; invoices parsed before this tracking existed show '—', not '$0.00'.
+  const aiCostEl = document.getElementById('detailAiCost');
+  const aiCost = parseFloat(inv.ai_cost) || 0;
+  if (aiCost > 0) {
+    aiCostEl.textContent = '$' + aiCost.toFixed(4);
+    const inTok = parseInt(inv.ai_input_tokens, 10) || 0;
+    const outTok = parseInt(inv.ai_output_tokens, 10) || 0;
+    aiCostEl.title = `${inTok.toLocaleString()} input + ${outTok.toLocaleString()} output tokens`;
+  } else {
+    aiCostEl.textContent = '—';
+    aiCostEl.title = '';
+  }
   document.getElementById('detailStatus').value        = inv.status          || 'In Processing';
   document.getElementById('detailNotes').value         = inv.notes           || '';
 
@@ -876,6 +890,13 @@ async function handleAddPageFile(e) {
       credit:      currentParsedData.credit,
       other_cost:  currentParsedData.other_cost,
     };
+    // This page's parse call added its own AI cost on top of whatever the
+    // invoice already had recorded (initial upload + any earlier added pages).
+    if (data.usage) {
+      patch.ai_input_tokens  = (parseInt(inv.ai_input_tokens, 10)   || 0) + (data.usage.input_tokens  || 0);
+      patch.ai_output_tokens = (parseInt(inv.ai_output_tokens, 10)  || 0) + (data.usage.output_tokens || 0);
+      patch.ai_cost          = (parseFloat(inv.ai_cost)             || 0) + (data.usage.cost          || 0);
+    }
     await apiPatch(`tables/${INV_LIST_TABLE}/${id}`, patch);
     // Keep local cache in sync so reopening reflects the added page
     Object.assign(inv, patch);

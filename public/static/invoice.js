@@ -41,6 +41,11 @@ let currentInvoiceNumber = '';
 let currentInvoiceDate   = '';
 let currentInvoiceTotal  = 0;
 
+// AI parsing cost, from the Anthropic API's `usage` field on this batch's parse call
+let currentAiInputTokens  = 0;
+let currentAiOutputTokens = 0;
+let currentAiCost         = 0;
+
 // Multi-file staging
 let stagedFiles   = [];   // { file, id, thumbUrl, type: 'pdf'|'img' }
 let batchType     = null; // 'pdf' | 'img'
@@ -176,6 +181,7 @@ function clearBatch() {
   currentVendor = ''; currentInvoiceNumber = ''; currentInvoiceDate = '';
   currentInvoiceTotal = 0;
   currentFileName = ''; currentFileKey = ''; currentFileUrl = ''; currentPageKeys = []; currentUploadFailed = false;
+  currentAiInputTokens = 0; currentAiOutputTokens = 0; currentAiCost = 0;
   removeBlocker('parseBlocker');
   removeBlocker('qualityBlocker');
 }
@@ -389,6 +395,7 @@ async function submitBatch() {
   currentFuelSurcharge = 0; currentDeposit = 0;
   currentCredit = 0; currentOtherCost = 0; currentOtherDesc = '';
   currentFileName = ''; currentFileKey = ''; currentFileUrl = ''; currentPageKeys = []; currentUploadFailed = false;
+  currentAiInputTokens = 0; currentAiOutputTokens = 0; currentAiCost = 0;
   removeBlocker('parseBlocker');
   removeBlocker('qualityBlocker');
   removeBlocker('uploadBlocker');
@@ -488,8 +495,13 @@ async function processPDFBatch() {
 
   let aiResult = null;
   try {
-    const { result, rawText } = await callClaudeParse(files);
+    const { result, rawText, usage } = await callClaudeParse(files);
     gptRawPages.push({ pageNumber: 1, fileName: files[0].name, rawText: rawText || '' });
+    if (usage) {
+      currentAiInputTokens  += usage.input_tokens  || 0;
+      currentAiOutputTokens += usage.output_tokens || 0;
+      currentAiCost         += usage.cost          || 0;
+    }
     aiResult = result;
     extractedRows = mapAiResult(result, files[0].name);
   } catch (aiErr) {
@@ -529,9 +541,14 @@ async function processImageBatch() {
 
   let aiResult = null;
   try {
-    const { result, rawText } = await callClaudeParse(files);
+    const { result, rawText, usage } = await callClaudeParse(files);
     gptRawPages.push({ pageNumber: 1, fileName: files[0].name, rawText: rawText || '' });
     pageInvoiceNumbers.push(result.invoice_number || '');
+    if (usage) {
+      currentAiInputTokens  += usage.input_tokens  || 0;
+      currentAiOutputTokens += usage.output_tokens || 0;
+      currentAiCost         += usage.cost          || 0;
+    }
     aiResult = result;
     extractedRows = mapAiResult(result, files[0].name);
   } catch (aiErr) {
@@ -687,6 +704,9 @@ async function saveQuickInvoice() {
       other_cost:      currentOtherCost     || 0,
       other_desc:      currentOtherDesc     || '',
       parsed_data:     JSON.stringify(parsedData),
+      ai_input_tokens:  currentAiInputTokens  || 0,
+      ai_output_tokens: currentAiOutputTokens || 0,
+      ai_cost:          currentAiCost         || 0,
     };
     const saved = await apiPost('tables/invoices', payload);
     savedInvoiceId = saved.id || null;
@@ -836,7 +856,7 @@ async function callClaudeParse(files) {
   const response = await fetch('/api/ai/parse-invoice', { method: 'POST', body: formData });
   const data = await response.json();
   if (!response.ok || data.error) throw new Error(data.error || `Server error ${response.status}`);
-  return { result: data.result, rawText: data.rawText || JSON.stringify(data.result, null, 2) };
+  return { result: data.result, rawText: data.rawText || JSON.stringify(data.result, null, 2), usage: data.usage || null };
 }
 
 // ══════════════════════════════════════════════════════════════

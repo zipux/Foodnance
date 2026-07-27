@@ -2551,7 +2551,10 @@ ${rules}`
       return c.json({ error: err?.error?.message || `Claude API error ${response.status}` }, 502)
     }
 
-    const data = await response.json() as { content: Array<{ type: string; text?: string }> }
+    const data = await response.json() as {
+      content: Array<{ type: string; text?: string }>
+      usage?: { input_tokens?: number; output_tokens?: number }
+    }
     const text = (data.content || []).find(b => b.type === 'text')?.text || ''
 
     // Strip markdown code fences if present
@@ -2562,7 +2565,19 @@ ${rules}`
       .trim()
 
     const parsed = JSON.parse(cleaned)
-    return c.json({ success: true, result: parsed, rawText: cleaned })
+
+    // Claude Opus 4.8 pricing: $5/MTok input, $25/MTok output (output includes
+    // adaptive-thinking tokens — there is no separate thinking rate).
+    const inputTokens  = data.usage?.input_tokens  || 0
+    const outputTokens = data.usage?.output_tokens || 0
+    const cost = Math.round(((inputTokens / 1_000_000) * 5 + (outputTokens / 1_000_000) * 25) * 1_000_000) / 1_000_000
+
+    return c.json({
+      success: true,
+      result: parsed,
+      rawText: cleaned,
+      usage: { input_tokens: inputTokens, output_tokens: outputTokens, cost },
+    })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
     return c.json({ error: 'AI parsing failed: ' + message }, 500)
