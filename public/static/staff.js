@@ -137,7 +137,7 @@ function renderTable() {
         <td>${fmtDate(s.hire_date)}</td>
         <td>${statusBadge}</td>
         <td>
-          <button class="btn btn-icon btn-secondary btn-sm" onclick="viewStaffCerts('${esc(s.id)}','${esc(s.full_name)}')" title="View Certifications">
+          <button class="btn btn-icon btn-secondary btn-sm" onclick="viewStaffCerts('${esc(s.id)}', this.dataset.name)" data-name="${esc(s.full_name)}" title="View Certifications">
             ${certBadge}
           </button>
         </td>

@@ -309,7 +309,7 @@ function renderStats() {
     ${catCounts.map(c => {
       if (c.count === 0) return '';
       const isActive = categoryFilter === c.label;
-      return `<div class="stat-chip cat-chip cat-${slugify(c.label)}${isActive ? ' cat-chip-active' : ''}" style="cursor:pointer" onclick="setCategoryFilter('${c.label.replace(/'/g, "\\'")}')" title="Filter by ${esc(c.label)}">
+      return `<div class="stat-chip cat-chip cat-${slugify(c.label)}${isActive ? ' cat-chip-active' : ''}" style="cursor:pointer" onclick="setCategoryFilter(this.dataset.cat)" data-cat="${esc(c.label)}" title="Filter by ${esc(c.label)}">
         <i class="fas fa-tag"></i> ${c.count} ${esc(c.label)}
       </div>`;
     }).join('')}
@@ -1652,7 +1652,7 @@ function onMergeSearchInput() {
   if (!matches.length) { dd.innerHTML = '<div style="padding:.6rem 1rem;color:var(--text-muted);font-size:.85rem">No products found</div>'; dd.style.display = 'block'; return; }
 
   dd.innerHTML = matches.map(g => `
-    <div class="merge-dd-item" onclick="selectMergeSurviving('${esc(g.id)}', '${esc(g.name)}')"
+    <div class="merge-dd-item" onclick="selectMergeSurviving('${esc(g.id)}', this.dataset.name)" data-name="${esc(g.name)}"
          style="padding:.55rem 1rem;cursor:pointer;font-size:.9rem;border-bottom:1px solid #f1f5f9"
          onmouseover="this.style.background='#f0f9ff'" onmouseout="this.style.background=''">
       <strong>${esc(g.name)}</strong>

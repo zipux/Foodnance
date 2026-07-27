@@ -310,7 +310,7 @@ function renderInventory() {
           <button class="btn btn-primary btn-icon" onclick="openAdjustModal('${esc(r.id)}')" title="Adjust stock">
             <i class="fas fa-sliders-h"></i>
           </button>
-          <button class="btn btn-danger btn-icon" onclick="deleteInventoryItem('${esc(r.id)}','${esc(r.item_name)}')" title="Delete item">
+          <button class="btn btn-danger btn-icon" onclick="deleteInventoryItem('${esc(r.id)}', this.dataset.name)" data-name="${esc(r.item_name)}" title="Delete item">
             <i class="fas fa-trash"></i>
           </button>
         </td>
@@ -393,7 +393,7 @@ function renderInvStats() {
         const isUncat = c === 'Uncategorised';
         const cls   = isUncat ? 'stat-chip inv-subchip' : `stat-chip inv-subchip cat-chip cat-${slugify(c)}`;
         const style = isUncat ? 'cursor:pointer;background:#f1f5f9;color:#64748b' : 'cursor:pointer';
-        return `<div class="${cls}${active}" style="${style}" onclick="setInvCategory('${c.replace(/'/g, "\\'")}')" title="Filter by ${esc(c)}">${esc(c)} ${byCat.get(c)}</div>`;
+        return `<div class="${cls}${active}" style="${style}" onclick="setInvCategory(this.dataset.cat)" data-cat="${esc(c)}" title="Filter by ${esc(c)}">${esc(c)} ${byCat.get(c)}</div>`;
       }).join('');
       subRow = `<div class="inv-subchip-row">${chips}</div>`;
     }

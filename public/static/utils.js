@@ -320,7 +320,22 @@ function fmt(n) {
   return isNaN(num) ? '$0.00' : '$' + num.toFixed(2);
 }
 
-// Escape HTML to prevent XSS
+// Escape HTML to prevent XSS.
+//
+// NOTE: this does not escape the apostrophe, so esc() output is safe inside a
+// DOUBLE-quoted attribute and as text, but NOT inside a single-quoted JS string
+// in an inline handler:
+//
+//   BAD:  onclick="del('${esc(name)}')"                    <- "Baker's" ends the
+//                                                             string early:
+//                                                             SyntaxError, dead button
+//   GOOD: onclick="del(this.dataset.name)" data-name="${esc(name)}"
+//
+// The data-attribute form is never parsed as code, so any name is safe. Escaping
+// the quote instead does NOT work: a previous attempt chained
+// .replace(/'/g,"\\'") onto esc(), which is a no-op here (nothing escapes the
+// apostrophe for it to find) and is a no-op the other way too, since a &#39; is
+// decoded back into ' by the HTML parser before the JS is compiled.
 function esc(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -542,7 +557,7 @@ async function renderManageUnitsList() {
     container.innerHTML = hint + _manageUnitsCache.map(u => `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:.45rem .65rem;border:1px solid var(--border);border-radius:6px;margin-bottom:.35rem;background:#fafbff">
         <span style="font-weight:500;font-size:.92rem">${esc(u.name)}</span>
-        <button class="btn btn-danger btn-icon" onclick="deleteUnit(${u.id},'${esc(u.name)}')" title="Delete unit" style="padding:.3rem .55rem;font-size:.78rem">
+        <button class="btn btn-danger btn-icon" onclick="deleteUnit(${u.id}, this.dataset.name)" data-name="${esc(u.name)}" title="Delete unit" style="padding:.3rem .55rem;font-size:.78rem">
           <i class="fas fa-trash"></i>
         </button>
       </div>
@@ -671,7 +686,7 @@ async function renderManageCategoriesList() {
         <select onchange="editCategoryType(${c.id}, this.value)" title="Category type" style="font-size:.8rem;padding:.2rem .4rem">
           ${typeOpts(c.type)}
         </select>
-        <button class="btn btn-danger btn-icon" onclick="deleteCategory(${c.id},'${esc(c.name).replace(/'/g, "\\'")}')" title="Delete category" style="padding:.3rem .55rem;font-size:.78rem">
+        <button class="btn btn-danger btn-icon" onclick="deleteCategory(${c.id}, this.dataset.name)" data-name="${esc(c.name)}" title="Delete category" style="padding:.3rem .55rem;font-size:.78rem">
           <i class="fas fa-trash"></i>
         </button>
       </div>

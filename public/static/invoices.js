@@ -605,14 +605,14 @@ async function checkVendorMatch(name) {
     box.innerHTML = `<span style="color:var(--text-muted)">
       <i class="fas fa-wand-magic-sparkles"></i> Matched existing supplier
       <strong>“${esc(res.match.name)}”</strong>.
-      <a href="#" onclick="dismissVendorMatch('${esc(name)}');return false" style="margin-left:.3rem">Undo</a>
+      <a href="#" onclick="dismissVendorMatch(this.dataset.name);return false" data-name="${esc(name)}" style="margin-left:.3rem">Undo</a>
     </span>`;
   } else if (res.decision === 'suggest') {
     box.className = '';
     box.innerHTML = `<span style="color:#b45309">
       <i class="fas fa-circle-question"></i> Did you mean existing supplier
       <strong>“${esc(res.match.name)}”</strong>?
-      <a href="#" onclick="acceptVendorMatch('${esc(res.match.name)}');return false" style="margin-left:.3rem;font-weight:600">Use it</a>
+      <a href="#" onclick="acceptVendorMatch(this.dataset.name);return false" data-name="${esc(res.match.name)}" style="margin-left:.3rem;font-weight:600">Use it</a>
       <a href="#" onclick="dismissVendorMatch();return false" style="margin-left:.5rem">Keep “${esc(name)}”</a>
     </span>`;
   }
