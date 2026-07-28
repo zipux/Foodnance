@@ -2824,7 +2824,13 @@ Return ONLY a JSON object of this exact shape (no markdown, no commentary, no co
       },
       body: JSON.stringify({
         model: 'claude-opus-4-8',
-        max_tokens: 4000,
+        // Ceiling covers adaptive-thinking tokens AND the JSON, so it has to
+        // clear both. At 4000 a long recipe could exhaust it mid-JSON, and the
+        // truncated output failed JSON.parse below — surfacing to the user as a
+        // bare "AI parsing failed" with no hint the recipe was simply too long.
+        // Billing is on tokens actually used, so a higher ceiling costs nothing.
+        // 16000 matches parse-invoice and stays clear of non-streaming timeouts.
+        max_tokens: 16000,
         thinking: { type: 'adaptive' },
         messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
       }),
