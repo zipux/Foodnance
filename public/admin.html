@@ -40,9 +40,15 @@
     }
     .bar button:hover { background: rgba(255,255,255,.25); }
 
-    .wrap { max-width: 940px; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
-    .grid { display: grid; gap: 1.25rem; grid-template-columns: minmax(300px, 380px) 1fr; }
-    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+    /* Wide enough for the restaurant table to show every column without a
+       sideways scroll. The create form is a fixed 340px, so the table gets
+       everything else — at 940px it only had ~520px for 9 columns. */
+    .wrap { max-width: 1500px; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
+    .grid { display: grid; gap: 1.25rem; grid-template-columns: 340px minmax(0, 1fr); }
+    /* minmax(0, 1fr) above matters: a default `1fr` is min-content-sized, so a
+       wide table would push the column open and re-introduce the page scroll
+       instead of staying inside its own container. */
+    @media (max-width: 1000px) { .grid { grid-template-columns: 1fr; } }
 
     .card {
       background: #fff; border: 1px solid var(--border);
@@ -84,13 +90,47 @@
     .handoff code { display: block; background: #fff; border: 1px solid var(--border); border-radius: 6px;
                     padding: .45rem .6rem; margin-bottom: .35rem; font-size: .85rem; word-break: break-all; }
 
+    /* Last-resort horizontal scroll lives on THIS box, not the page body, so a
+       narrow window scrolls the table alone and never the whole layout. */
+    .tablewrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; font-size: .88rem; }
     th { text-align: left; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
-         color: var(--text-muted); padding: .4rem .5rem; border-bottom: 1px solid var(--border); }
-    td { padding: .55rem .5rem; border-bottom: 1px solid #f1f5f9; }
+         color: var(--text-muted); padding: .4rem .5rem; border-bottom: 1px solid var(--border);
+         white-space: nowrap; }
+    td { padding: .55rem .5rem; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
     tr:last-child td { border-bottom: none; }
     .pill { font-size: .7rem; font-weight: 600; padding: .12rem .45rem; border-radius: 4px; background: #eef2ff; color: var(--primary-d); }
     .empty { color: var(--text-muted); font-size: .88rem; padding: 1rem .5rem; }
+    .tablenote { margin-top: .9rem; font-size: .76rem; line-height: 1.55; color: var(--text-muted); }
+
+    /* Owner emails are the one unbounded string here — let them break rather
+       than widen the whole table. */
+    .owner { word-break: break-all; min-width: 11rem; }
+
+    /* Actions were the main cause of the sideways scroll: four nowrap text
+       buttons. They now wrap onto a second line when space is tight. */
+    .actions { white-space: normal; text-align: right; }
+    .actions .btn { font-size: .74rem; padding: .3rem .5rem; margin: .1rem 0 .1rem .25rem; }
+
+    /* Anthropic spend per customer. Tabular figures so the decimal points line
+       up down the column and an outlier is obvious at a glance. */
+    .cost { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .cost .amt { font-weight: 600; }
+    .cost .sub { display: block; font-size: .7rem; color: var(--text-muted); }
+    .cost.zero .amt { color: var(--text-muted); font-weight: 400; }
+
+    /* Plan picker. Looks like a badge until hovered, so the column reads as data
+       rather than as a row of form controls. */
+    .planpick {
+      font-family: inherit; font-size: .72rem; font-weight: 600; cursor: pointer;
+      padding: .15rem 1.25rem .15rem .45rem; border-radius: 4px;
+      border: 1px solid transparent; background: #f1f5f9; color: var(--text); width: auto;
+      appearance: none;
+      background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%2364748b'%3E%3Cpath d='M4.5 6.5 8 10l3.5-3.5z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right .15rem center; background-size: 1rem;
+    }
+    .planpick:hover { border-color: var(--border); }
+    .planpick.pro { background-color: #eef2ff; color: var(--primary-d); }
 
     .gate { max-width: 420px; margin: 4rem auto; text-align: center; }
     .gate a { color: var(--primary); }
@@ -321,17 +361,22 @@
           return;
         }
         box.innerHTML = `
-          <table>
-            <thead><tr><th>Name</th><th>Owner</th><th>Type</th><th>Status</th><th>People</th><th>Added</th><th></th></tr></thead>
+          <div class="tablewrap"><table>
+            <thead><tr>
+              <th>Name</th><th>Owner</th><th>Type</th><th>Plan</th><th>Status</th>
+              <th>People</th><th style="text-align:right">AI cost</th><th>Added</th><th></th>
+            </tr></thead>
             <tbody>${rows.map(o => `
               <tr${o.archived_at ? ' style="opacity:.55"' : ''}>
                 <td><strong>${esc(o.name)}</strong></td>
-                <td>${esc(o.owner_email || '—')}</td>
+                <td class="owner">${esc(o.owner_email || '—')}</td>
                 <td><span class="pill">${esc(o.account_type)}</span></td>
+                <td>${planPicker(o)}</td>
                 <td>${statusPill(o)}</td>
                 <td>${o.user_count}</td>
+                ${aiCostCell(o)}
                 <td>${esc((o.created_at || '').split(' ')[0])}</td>
-                <td style="text-align:right;white-space:nowrap">
+                <td class="actions">
                   <button class="btn btn-ghost" data-act="view"
                           data-id="${esc(o.id)}" data-name="${esc(o.name)}"
                           title="See their data — you stay signed in as yourself">
@@ -368,7 +413,13 @@
                 </td>
               </tr>`).join('')}
             </tbody>
-          </table>`;
+          </table></div>
+          <div class="tablenote">
+            <strong>AI cost</strong> is Anthropic spend on parsing that customer's
+            invoices, billed at the model's rate when each parse ran. Voided
+            invoices still count — the parse was paid for either way. Recipe
+            parsing is not included: that endpoint doesn't record its usage yet.
+          </div>`;
 
         // Listeners rather than inline onclick="…('${name}')". esc() turns an
         // apostrophe into &#39;, which the HTML parser decodes back to ' before
@@ -387,6 +438,10 @@
               case 'purge':   return purgeOrg(d.id, d.name);
             }
           });
+        });
+
+        box.querySelectorAll('select[data-plan-for]').forEach(sel => {
+          sel.addEventListener('change', () => setPlan(sel, sel.dataset.planFor, sel.dataset.name));
         });
       } catch (_) {
         box.innerHTML = '<div class="empty">Could not load.</div>';
@@ -458,6 +513,60 @@
         return `<span class="pill" style="background:#fee2e2;color:#991b1b"${why}>Paused</span>`;
       }
       return '<span class="pill" style="background:#ecfdf5;color:#065f46">Active</span>';
+    }
+
+    // Anthropic spend on this customer's invoice parsing. Sub-cent totals would
+    // all render as "$0.00" and read as "free", so anything below a cent shows as
+    // "<$0.01" instead — the point of the column is to see cost accruing.
+    function aiCostCell(o) {
+      const cost  = Number(o.ai_cost_total) || 0;
+      const count = Number(o.ai_parse_count) || 0;
+      if (!count) return '<td class="cost zero"><span class="amt">—</span></td>';
+      const amt = cost > 0 && cost < 0.01 ? '&lt;$0.01' : '$' + cost.toFixed(2);
+      return `<td class="cost"><span class="amt">${amt}</span>
+        <span class="sub">${count} invoice${count === 1 ? '' : 's'}</span></td>`;
+    }
+
+    // Plan tier. Nothing is gated on this yet — it records what the customer was
+    // sold so the tier is already on file when Essential/Pro gating ships.
+    function planPicker(o) {
+      const plan = (o.plan || 'essential').toLowerCase();
+      return `<select class="planpick ${plan === 'pro' ? 'pro' : ''}"
+                      data-plan-for="${esc(o.id)}" data-name="${esc(o.name)}"
+                      data-current="${plan}"
+                      title="Which plan they're on. Nothing is gated on this yet.">
+        <option value="essential"${plan === 'essential' ? ' selected' : ''}>Essential</option>
+        <option value="pro"${plan === 'pro' ? ' selected' : ''}>Pro</option>
+      </select>`;
+    }
+
+    // Saves immediately on change. On failure the select is put back to what the
+    // server still holds, so the UI never shows a tier that wasn't stored.
+    async function setPlan(sel, orgId, name) {
+      const chosen = sel.value;
+      const before = sel.dataset.current || 'essential';
+      sel.disabled = true;
+      try {
+        const r = await fetch(`/api/admin/organizations/${orgId}/plan`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ plan: chosen }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          sel.value = before;
+          msg(d.error || 'Could not change the plan.', 'bad');
+          return;
+        }
+        sel.dataset.current = chosen;
+        sel.classList.toggle('pro', chosen === 'pro');
+        msg(`${name} is now on ${chosen === 'pro' ? 'Pro' : 'Essential'}.`, 'ok');
+      } catch (_) {
+        sel.value = before;
+        msg('Could not reach the server. Check your connection and try again.', 'bad');
+      } finally {
+        sel.disabled = false;
+      }
     }
 
     // Shared plumbing for the four lifecycle actions, so each one below is just

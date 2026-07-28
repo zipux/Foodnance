@@ -885,10 +885,17 @@ app.get('/api/admin/organizations', async (c) => {
   if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)
   const { results } = await c.env.DB.prepare(
     `SELECT o.id, o.name, o.account_type, o.created_at, o.archived_at,
-            o.suspended_at, o.suspend_reason,
+            o.suspended_at, o.suspend_reason, o.plan,
             (SELECT COUNT(*) FROM users u WHERE u.org_id = o.id AND u.archived_at IS NULL) AS user_count,
             (SELECT email FROM users u WHERE u.org_id = o.id AND u.role = 'owner'
-              ORDER BY u.created_at LIMIT 1) AS owner_email
+              ORDER BY u.created_at LIMIT 1) AS owner_email,
+            -- What this customer has cost in Anthropic spend. Voided invoices are
+            -- deliberately INCLUDED: the parse was billed whether or not the
+            -- invoice was later voided, so excluding them would understate cost.
+            -- Only invoice parsing is counted — /api/ai/parse-recipe discards its
+            -- usage response, so recipe spend is invisible here.
+            (SELECT COALESCE(SUM(i.ai_cost), 0) FROM invoices i WHERE i.org_id = o.id) AS ai_cost_total,
+            (SELECT COUNT(*) FROM invoices i WHERE i.org_id = o.id AND i.ai_cost > 0) AS ai_parse_count
        FROM organizations o
       ORDER BY o.created_at DESC`,
   ).all()
@@ -954,6 +961,33 @@ app.post('/api/admin/organizations', async (c) => {
 // "delete". See migration 0037 for the state definitions.
 
 // Behind on payment. Read-only from their side; instantly reversible.
+// ── Set an organization's plan tier ──
+// POST /api/admin/organizations/:id/plan   Body: { plan: 'essential' | 'pro' }
+//
+// Records what the customer was sold. Nothing is gated on this yet — the
+// Essential/Pro boundaries are agreed but unbuilt — so this only writes the
+// label. Keeping it current from day one means gating can read the tier when it
+// ships instead of needing a backfill from memory about who bought what.
+const PLANS = ['essential', 'pro']
+
+app.post('/api/admin/organizations/:id/plan', async (c) => {
+  if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)
+  const id = c.req.param('id')
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const plan = String(body.plan || '').trim().toLowerCase()
+
+  if (!PLANS.includes(plan)) {
+    return c.json({ error: `Plan must be one of: ${PLANS.join(', ')}.` }, 400)
+  }
+
+  const org = await c.env.DB.prepare('SELECT id, name FROM organizations WHERE id = ?')
+    .bind(id).first<{ id: string; name: string }>()
+  if (!org) return c.json({ error: 'Restaurant not found.' }, 404)
+
+  await c.env.DB.prepare(`UPDATE organizations SET plan = ? WHERE id = ?`).bind(plan, id).run()
+  return c.json({ ok: true, organization: { id: org.id, name: org.name }, plan })
+})
+
 app.post('/api/admin/organizations/:id/suspend', async (c) => {
   if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)
   const id = c.req.param('id')
