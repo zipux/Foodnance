@@ -310,6 +310,48 @@ function normalizeUnit(u: string): string {
   return t.toLowerCase()
 }
 
+// ─── The unit master list every new organization starts with ───
+// Seeded into `units` when an account is created (POST /api/admin/organizations).
+// Order here is the picker's sort_order. Already normalizeUnit()-cased.
+// 'oz' is weight; fluid ounces are the separate 'fl oz' unit — the two never
+// convert into each other, which is why both are present.
+const DEFAULT_UNITS = ['kg', 'g', 'lb', 'ml', 'L', 'each', 'case', 'oz', 'fl oz']
+
+// ─── The category master list every new organization starts with ───
+// Seeded into `categories` at account creation, alongside DEFAULT_UNITS.
+// Array order is the picker's sort_order.
+//
+// This is a taxonomy SYNC POINT — keep aligned with DEFAULT_CATEGORIES +
+// DEFAULT_CATEGORY_TYPES in public/static/utils.js, the .cat-<slug> CSS in
+// public/static/style.css, and the inferCategory() keyword rules below. The
+// last one matters most here: inferCategory assigns these names to products
+// during invoice import, so any name it can emit must exist in this list or a
+// customer ends up with a category the picker cannot show.
+const DEFAULT_CATEGORIES: Array<{ name: string; type: string }> = [
+  // Food (COGS)
+  { name: 'Produce',                   type: 'food' },
+  { name: 'Meat & Poultry',            type: 'food' },
+  { name: 'Seafood',                   type: 'food' },
+  { name: 'Dairy & Eggs',              type: 'food' },
+  { name: 'Dry Goods & Pantry',        type: 'food' },
+  { name: 'Bakery',                    type: 'food' },
+  { name: 'Frozen',                    type: 'food' },
+  { name: 'Oils, Sauces & Condiments', type: 'food' },
+  { name: 'Spices & Seasonings',       type: 'food' },
+  // Beverage
+  { name: 'Alcohol',                   type: 'beverage' },
+  { name: 'Non-Alcoholic Beverages',   type: 'beverage' },
+  // Operating supplies
+  { name: 'Packaging',                 type: 'supplies' },
+  { name: 'Disposables',               type: 'supplies' },
+  { name: 'Cleaning & Sanitation',     type: 'supplies' },
+  { name: 'Linen & Uniforms',          type: 'supplies' },
+  { name: 'Smallwares & Equipment',    type: 'supplies' },
+  { name: 'Office & Admin',            type: 'supplies' },
+  // Fallback used by inferCategory when nothing matches
+  { name: 'Other',                     type: 'food' },
+]
+
 function parsePackSize(raw: string): { packQty: number; packUnit: string } {
   const s = (raw || '').trim()
   if (!s) return { packQty: 1, packUnit: normalizeUnit('each') }
@@ -879,7 +921,7 @@ app.post('/api/admin/organizations', async (c) => {
   const salt = randomHex(16)
   const hash = await hashPassword(password, salt)
 
-  // Both inserts in one batch so a failure can't leave an organization with
+  // All inserts in one batch so a failure can't leave an organization with
   // no owner (D1 runs a batch as a transaction).
   await c.env.DB.batch([
     c.env.DB.prepare(`INSERT INTO organizations (id, name, account_type) VALUES (?, ?, ?)`)
@@ -888,6 +930,19 @@ app.post('/api/admin/organizations', async (c) => {
       `INSERT INTO users (id, org_id, email, password_hash, password_salt, password_iter, role, name)
        VALUES (?, ?, ?, ?, ?, ?, 'owner', ?)`,
     ).bind(userId, orgId, email, hash, salt, PBKDF2_ITERATIONS, String(body.owner_name || '')),
+    // Seed the unit master list. /api/tables/units is strictly org-scoped with
+    // no fallback to the NULL-org rows, so without this a brand-new account has
+    // an empty unit picker — which first bites during invoice import, exactly
+    // when the customer least wants to stop and define "kg".
+    ...DEFAULT_UNITS.map((u, i) =>
+      c.env.DB.prepare(`INSERT INTO units (name, sort_order, org_id) VALUES (?, ?, ?)`)
+        .bind(u, i + 1, orgId)),
+    // Same reasoning for categories. Requires migration 0038 — before it,
+    // categories.name carried a GLOBAL unique constraint and these inserts
+    // would collide with the first organization's copy of the taxonomy.
+    ...DEFAULT_CATEGORIES.map((cat, i) =>
+      c.env.DB.prepare(`INSERT INTO categories (name, sort_order, type, org_id) VALUES (?, ?, ?, ?)`)
+        .bind(cat.name, i + 1, cat.type, orgId)),
   ])
 
   return c.json({ ok: true, organization: { id: orgId, name, account_type: accountType },
