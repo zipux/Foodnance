@@ -405,6 +405,42 @@ function packSizeHasUnit(raw: string): boolean {
   return /[a-zA-Z]/.test(rest)
 }
 
+// ─── The org's unit master list, as a lower-cased lookup set ───
+// Mirrors isKnownUnit() in public/static/invoices.js: the review screen treats a
+// unit as missing unless it appears in this list, and the API has to agree — see
+// packSizeUnitIsKnown() below. Returns an empty set when the account has no
+// `units` rows at all, which callers must treat as "cannot validate".
+async function loadKnownUnits(db: D1Database, org: string | null): Promise<Set<string>> {
+  const rows = await db
+    .prepare(`SELECT name FROM units WHERE org_id IS ?`)
+    .bind(org)
+    .all<{ name: string }>()
+  return new Set(
+    (rows.results || [])
+      .map(u => (u.name || '').trim().toLowerCase())
+      .filter(Boolean)
+  )
+}
+
+// True when the unit this pack size would actually be STORED as exists in the
+// org's master list. packSizeHasUnit() only proves *some* letters are present,
+// so "1 ct" or "12 lbs" sail past it and land in product_entries as a unit
+// nothing else in the app recognises — no conversion, no cost comparison, and a
+// cost_per_unit that looks legitimate. The review screen already rejects those
+// (isKnownUnit); this closes the same hole for callers that skip it.
+//
+// Validates parsePackSize()'s output rather than re-deriving the token, so the
+// guard can never disagree with what the write path stores.
+//
+// An org with an empty unit list falls through to the shape check: seeding gives
+// every new account a list, so an empty one means something is wrong with the
+// account, and failing every import is a worse answer than the old behaviour.
+function packSizeUnitIsKnown(raw: string, known: Set<string>): boolean {
+  if (!packSizeHasUnit(raw)) return false
+  if (!known.size) return true
+  return known.has(parsePackSize(raw).packUnit.trim().toLowerCase())
+}
+
 // ─── Helper: infer product category from name via keyword matching ─
 // Best-effort classification for invoice auto-import. Keep the returned labels
 // in sync with DEFAULT_CATEGORIES in public/static/utils.js (the frontend list).
@@ -881,25 +917,60 @@ async function requireSuperAdmin(c: any): Promise<SessionUser | null> {
   return me
 }
 
+// GET /api/admin/organizations?from=YYYY-MM-DD&to=YYYY-MM-DD
+//
+// `from`/`to` scope the AI usage columns only — the account list itself is
+// always complete, so filtering to a date range never makes a restaurant vanish
+// from the screen. `to` is inclusive of the whole day.
 app.get('/api/admin/organizations', async (c) => {
   if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)
+
+  // Blank/absent = all time. Anything not shaped like a date is ignored rather
+  // than rejected: a half-typed date in the picker shouldn't error the page.
+  const dateOnly = (v: string | undefined) => (/^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v! : '')
+  const from = dateOnly(c.req.query('from'))
+  const to   = dateOnly(c.req.query('to'))
+  const fromTs = from ? `${from} 00:00:00` : '0000-01-01 00:00:00'
+  const toTs   = to   ? `${to} 23:59:59`   : '9999-12-31 23:59:59'
+
   const { results } = await c.env.DB.prepare(
     `SELECT o.id, o.name, o.account_type, o.created_at, o.archived_at,
-            o.suspended_at, o.suspend_reason, o.plan,
+            o.suspended_at, o.suspend_reason, o.plan, o.invoice_cap,
             (SELECT COUNT(*) FROM users u WHERE u.org_id = o.id AND u.archived_at IS NULL) AS user_count,
             (SELECT email FROM users u WHERE u.org_id = o.id AND u.role = 'owner'
               ORDER BY u.created_at LIMIT 1) AS owner_email,
-            -- What this customer has cost in Anthropic spend. Voided invoices are
-            -- deliberately INCLUDED: the parse was billed whether or not the
-            -- invoice was later voided, so excluding them would understate cost.
-            -- Only invoice parsing is counted — /api/ai/parse-recipe discards its
-            -- usage response, so recipe spend is invisible here.
-            (SELECT COALESCE(SUM(i.ai_cost), 0) FROM invoices i WHERE i.org_id = o.id) AS ai_cost_total,
-            (SELECT COUNT(*) FROM invoices i WHERE i.org_id = o.id AND i.ai_cost > 0) AS ai_parse_count
+            -- Anthropic spend, from the per-call log rather than from invoices:
+            -- a parse the customer abandoned still cost money, and a multi-page
+            -- invoice is several calls. Voided invoices are likewise still
+            -- counted — the parse was billed whichever way the invoice went.
+            -- Only invoice parsing appears here; parse-recipe discards its usage.
+            (SELECT COALESCE(SUM(l.cost), 0) FROM ai_parse_log l
+              WHERE l.org_id = o.id AND l.kind = 'invoice'
+                AND l.created_at >= ?1 AND l.created_at <= ?2) AS ai_cost_total,
+            (SELECT COUNT(*) FROM ai_parse_log l
+              WHERE l.org_id = o.id AND l.kind = 'invoice'
+                AND l.created_at >= ?1 AND l.created_at <= ?2) AS ai_parse_count,
+            -- Always the CURRENT month regardless of the filter: the cap is a
+            -- monthly allowance, so "used this month" is the only reading of it
+            -- that means anything. Shown alongside, never in place of, the
+            -- filtered figures.
+            (SELECT COUNT(*) FROM ai_parse_log l
+              WHERE l.org_id = o.id AND l.kind = 'invoice'
+                AND l.created_at >= ?3) AS parses_this_month,
+            -- Times this account was refused a parse for being over its cap,
+            -- within the filtered range. The demand a hard block hides.
+            (SELECT COUNT(*) FROM ai_cap_blocks b
+              WHERE b.org_id = o.id
+                AND b.created_at >= ?1 AND b.created_at <= ?2) AS cap_blocks
        FROM organizations o
       ORDER BY o.created_at DESC`,
-  ).all()
-  return c.json({ data: results || [] })
+  ).bind(fromTs, toTs, monthStart()).all()
+
+  return c.json({
+    data: results || [],
+    range: { from, to },
+    plan_caps: PLAN_INVOICE_CAPS,
+  })
 })
 
 app.post('/api/admin/organizations', async (c) => {
@@ -970,6 +1041,49 @@ app.post('/api/admin/organizations', async (c) => {
 // ships instead of needing a backfill from memory about who bought what.
 const PLANS = ['essential', 'pro']
 
+// ─── Monthly AI invoice-parsing cap ───────────────────────────
+// The one recurring per-customer cost. A recipe book is parsed once at
+// onboarding (~$3 all-in) and never again; invoices arrive every week forever,
+// so this is the only AI spend worth metering.
+//
+// 0 means uncapped. Pro is uncapped by design — the tier is sold on inventory
+// and variance, not on parse volume.
+const PLAN_INVOICE_CAPS: Record<string, number> = {
+  essential: 150,
+  pro: 0,
+}
+
+// The cap actually in force for an organization.
+//   invoice_cap NULL -> the plan's default
+//   invoice_cap 0    -> explicitly uncapped (an override that lifts the cap)
+//   invoice_cap N    -> explicitly capped at N
+// Returns 0 for "no limit", which is what the caller checks.
+// Takes the organization ROW (not an id — `org` means an id everywhere else in
+// this file, via orgOf()).
+function effectiveInvoiceCap(orgRow: { plan?: string | null; invoice_cap?: number | null }): number {
+  if (orgRow.invoice_cap !== null && orgRow.invoice_cap !== undefined) {
+    return Number(orgRow.invoice_cap) || 0
+  }
+  return PLAN_INVOICE_CAPS[(orgRow.plan || 'essential').toLowerCase()] ?? 0
+}
+
+// First instant of the current calendar month, as SQLite's datetime() format.
+// Calendar month rather than a rolling 30 days: it matches how the plan is sold
+// and how a customer thinks about "this month's invoices", and it makes the
+// reset date predictable instead of per-account.
+function monthStart(): string {
+  return new Date().toISOString().slice(0, 7) + '-01 00:00:00'
+}
+
+// Invoice parses this organization has made in the current calendar month.
+async function monthlyInvoiceParses(db: D1Database, orgId: string | null): Promise<number> {
+  const row = await db.prepare(
+    `SELECT COUNT(*) AS n FROM ai_parse_log
+      WHERE org_id IS ? AND kind = 'invoice' AND created_at >= ?`,
+  ).bind(orgId, monthStart()).first<{ n: number }>()
+  return Number(row?.n) || 0
+}
+
 app.post('/api/admin/organizations/:id/plan', async (c) => {
   if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)
   const id = c.req.param('id')
@@ -986,6 +1100,42 @@ app.post('/api/admin/organizations/:id/plan', async (c) => {
 
   await c.env.DB.prepare(`UPDATE organizations SET plan = ? WHERE id = ?`).bind(plan, id).run()
   return c.json({ ok: true, organization: { id: org.id, name: org.name }, plan })
+})
+
+// ── Override an organization's monthly invoice-parse cap ──────
+// POST /api/admin/organizations/:id/invoice-cap   Body: { invoice_cap: number|null }
+//
+// This is the "lift the cap for one account" lever: a customer stuck at 150
+// mid-month gets unblocked from this screen rather than from a deploy. It is
+// also the seam a future pay-per-invoice overage plugs into — a cleared payment
+// raises this number, and enforcement needs no change at all.
+//   null -> follow the plan default again
+//   0    -> uncapped
+//   N    -> capped at N
+app.post('/api/admin/organizations/:id/invoice-cap', async (c) => {
+  if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)
+  const id = c.req.param('id')
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+
+  let cap: number | null = null
+  if (body.invoice_cap !== null && body.invoice_cap !== undefined && String(body.invoice_cap).trim() !== '') {
+    cap = Math.floor(Number(body.invoice_cap))
+    if (!Number.isFinite(cap) || cap < 0) {
+      return c.json({ error: 'Cap must be a whole number of invoices, or 0 for unlimited.' }, 400)
+    }
+  }
+
+  const org = await c.env.DB.prepare('SELECT id, name, plan FROM organizations WHERE id = ?')
+    .bind(id).first<{ id: string; name: string; plan: string }>()
+  if (!org) return c.json({ error: 'Restaurant not found.' }, 404)
+
+  await c.env.DB.prepare(`UPDATE organizations SET invoice_cap = ? WHERE id = ?`).bind(cap, id).run()
+  return c.json({
+    ok: true,
+    organization: { id: org.id, name: org.name },
+    invoice_cap: cap,
+    effective_cap: effectiveInvoiceCap({ plan: org.plan, invoice_cap: cap }),
+  })
 })
 
 app.post('/api/admin/organizations/:id/suspend', async (c) => {
@@ -1780,20 +1930,44 @@ app.post('/api/bulk/upsert-products', async (c) => {
   }
   if (!Array.isArray(body.products)) return c.json({ error: 'products array required' }, 400)
 
-  // ── Guard: reject unit-less pack sizes before writing anything ──
+  // ── Guard: reject unit-less / unrecognised pack sizes before writing ──
   // A pack size with no unit of measure ("2" instead of "2 kg") would be
   // silently stored as "each" with a meaningless cost_per_unit, breaking Price
-  // Movers, recipe costing and FIFO. Fail fast, name the offenders, and write
-  // nothing — the invoice review UI blocks this too, so this is defense-in-depth.
-  const unitless = body.products
-    .filter(p => String(p.name || '').trim())
-    .filter(p => !packSizeHasUnit(String(p.pack_size || '')))
-    .map(p => String(p.name).trim())
-  if (unitless.length) {
+  // Movers, recipe costing and FIFO. A unit that isn't in the org's master list
+  // ("1 ct") is the same failure wearing a disguise — it stores a token nothing
+  // downstream can convert or compare. Fail fast, name the offenders, and write
+  // nothing — the invoice review UI blocks both, so this is defense-in-depth.
+  const knownUnits = await loadKnownUnits(c.env.DB, orgOf(c))
+  const unitless: string[] = []
+  const unknownUnits: Array<{ name: string; unit: string }> = []
+  for (const p of body.products) {
+    const name = String(p.name || '').trim()
+    if (!name) continue
+    const packSize = String(p.pack_size || '')
+    if (!packSizeHasUnit(packSize)) unitless.push(name)
+    else if (!packSizeUnitIsKnown(packSize, knownUnits)) {
+      unknownUnits.push({ name, unit: parsePackSize(packSize).packUnit })
+    }
+  }
+  if (unitless.length || unknownUnits.length) {
+    const parts: string[] = []
+    if (unitless.length) {
+      parts.push(
+        `Missing a unit of measure: ${unitless.join(', ')}. `
+        + `Set a unit (e.g. kg, L, each) before saving.`
+      )
+    }
+    if (unknownUnits.length) {
+      parts.push(
+        `Unrecognised unit of measure: `
+        + `${unknownUnits.map(u => `${u.name} ("${u.unit}")`).join(', ')}. `
+        + `Pick a unit from the list, or add it via Manage Units first.`
+      )
+    }
     return c.json({
-      error: `Missing a unit of measure: ${unitless.join(', ')}. `
-           + `Set a unit (e.g. kg, L, each) before saving.`,
+      error: parts.join(' '),
       unitless,
+      unknown_units: unknownUnits,
     }, 400)
   }
 
@@ -2699,6 +2873,33 @@ app.post('/api/ai/parse-invoice', async (c) => {
     return c.json({ error: 'Claude API key is not configured on the server. Add ANTHROPIC_API_KEY and try again.' }, 400)
   }
 
+  // ── Monthly parse cap ────────────────────────────────────────
+  // Checked BEFORE the Anthropic call, so a blocked parse costs nothing. The
+  // refusal is logged: a hard block hides the demand it blocks, and that demand
+  // is the evidence for whether paid overage is worth offering.
+  const parseOrg = orgOf(c)
+  const capRow = await c.env.DB.prepare(
+    'SELECT plan, invoice_cap FROM organizations WHERE id = ?',
+  ).bind(parseOrg).first<{ plan: string; invoice_cap: number | null }>()
+  // No row means the NULL-org demo/super-admin account, which is uncapped.
+  const cap = capRow ? effectiveInvoiceCap(capRow) : 0
+  if (cap > 0) {
+    const used = await monthlyInvoiceParses(c.env.DB, parseOrg)
+    if (used >= cap) {
+      await c.env.DB.prepare(
+        `INSERT INTO ai_cap_blocks (id, org_id, cap, used) VALUES (?, ?, ?, ?)`,
+      ).bind(uid(), parseOrg, cap, used).run()
+      return c.json({
+        error: `You've used all ${cap} AI invoice reads included this month. `
+             + `They reset on the 1st. You can still add invoices by hand in the meantime — `
+             + `or contact us to raise your limit.`,
+        upgrade_required: true,
+        cap,
+        used,
+      }, 403)
+    }
+  }
+
   // Shared JSON schema + extraction rules
   const jsonSchema = `{
   "vendor": "supplier/company name from the invoice header",
@@ -2825,6 +3026,21 @@ ${rules}`
     }
     const text = (data.content || []).find(b => b.type === 'text')?.text || ''
 
+    // Claude Opus 4.8 pricing: $5/MTok input, $25/MTok output (output includes
+    // adaptive-thinking tokens — there is no separate thinking rate).
+    const inputTokens  = data.usage?.input_tokens  || 0
+    const outputTokens = data.usage?.output_tokens || 0
+    const cost = Math.round(((inputTokens / 1_000_000) * 5 + (outputTokens / 1_000_000) * 25) * 1_000_000) / 1_000_000
+
+    // Record the call BEFORE parsing its output. Anthropic has already billed
+    // for it at this point, so a malformed-JSON response must still count
+    // against spend and quota — otherwise a customer whose invoices trip the
+    // parser gets unlimited free retries and the cap protects nothing.
+    await c.env.DB.prepare(
+      `INSERT INTO ai_parse_log (id, org_id, kind, input_tokens, output_tokens, cost)
+       VALUES (?, ?, 'invoice', ?, ?, ?)`,
+    ).bind(uid(), parseOrg, inputTokens, outputTokens, cost).run()
+
     // Strip markdown code fences if present
     const cleaned = text
       .replace(/^```json\s*/i, '')
@@ -2833,12 +3049,6 @@ ${rules}`
       .trim()
 
     const parsed = JSON.parse(cleaned)
-
-    // Claude Opus 4.8 pricing: $5/MTok input, $25/MTok output (output includes
-    // adaptive-thinking tokens — there is no separate thinking rate).
-    const inputTokens  = data.usage?.input_tokens  || 0
-    const outputTokens = data.usage?.output_tokens || 0
-    const cost = Math.round(((inputTokens / 1_000_000) * 5 + (outputTokens / 1_000_000) * 25) * 1_000_000) / 1_000_000
 
     return c.json({
       success: true,

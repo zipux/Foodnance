@@ -506,7 +506,8 @@ async function processPDFBatch() {
     extractedRows = mapAiResult(result, files[0].name);
   } catch (aiErr) {
     hideProgress();
-    showToast('Claude parsing failed: ' + aiErr.message, 'error');
+    if (aiErr.capBlocked) showCapBlocker(aiErr.message);
+    else showToast('Claude parsing failed: ' + aiErr.message, 'error');
     resetSubmitButton();
     return;
   }
@@ -553,7 +554,8 @@ async function processImageBatch() {
     extractedRows = mapAiResult(result, files[0].name);
   } catch (aiErr) {
     hideProgress();
-    showToast('Claude parsing failed: ' + aiErr.message, 'error');
+    if (aiErr.capBlocked) showCapBlocker(aiErr.message);
+    else showToast('Claude parsing failed: ' + aiErr.message, 'error');
     resetSubmitButton();
     return;
   }
@@ -777,33 +779,53 @@ async function checkAiStatus() {
   }
 }
 
-function showParseBlocker(message) {
+// `opts.tone: 'limit'` restyles this as a quota notice rather than a failure —
+// amber, not red. Hitting the monthly AI allowance is a normal, expected state
+// with a clear next step (key the invoice in by hand), and dressing it up as an
+// error makes customers think the app is broken and call about it.
+function showParseBlocker(message, opts = {}) {
   removeBlocker('parseBlocker');
+  const limit = opts.tone === 'limit';
+  const skin = limit
+    ? { bg: '#fffbeb', border: '#f59e0b', text: '#92400e', icon: 'fa-gauge-high' }
+    : { bg: '#fef2f2', border: '#ef4444', text: '#991b1b', icon: 'fa-exclamation-circle' };
   const blocker = document.createElement('div');
   blocker.id = 'parseBlocker';
   blocker.style.cssText = `
     margin-top: 1.25rem;
     padding: 1.1rem 1.25rem;
-    background: #fef2f2;
-    border: 2px solid #ef4444;
+    background: ${skin.bg};
+    border: 2px solid ${skin.border};
     border-radius: 10px;
-    color: #991b1b;
+    color: ${skin.text};
     font-size: .92rem;
     line-height: 1.6;
   `;
+  const title = opts.title || 'Invoice Reading Failed — Processing Stopped';
   blocker.innerHTML = `
     <div style="display:flex;align-items:flex-start;gap:.75rem">
-      <i class="fas fa-exclamation-circle" style="font-size:1.3rem;margin-top:.1rem;flex-shrink:0"></i>
+      <i class="fas ${skin.icon}" style="font-size:1.3rem;margin-top:.1rem;flex-shrink:0"></i>
       <div>
-        <strong style="display:block;font-size:1rem;margin-bottom:.4rem">Invoice Reading Failed — Processing Stopped</strong>
+        <strong style="display:block;font-size:1rem;margin-bottom:.4rem">${esc(title)}</strong>
         <pre style="white-space:pre-wrap;font-family:inherit;margin:0">${esc(message)}</pre>
       </div>
     </div>
   `;
   const uploadCard = document.querySelector('.upload-card');
   if (uploadCard?.parentNode) uploadCard.parentNode.insertBefore(blocker, uploadCard.nextSibling);
-  showToast('Invoice reading failed — see details on screen.', 'error');
+  showToast(opts.toast || 'Invoice reading failed — see details on screen.', 'error');
   resetSubmitButton();
+}
+
+// The monthly AI allowance is spent. Persistent panel, not a toast: the customer
+// has to decide what to do next, and an auto-dismissing message would vanish
+// before they'd read it.
+function showCapBlocker(message) {
+  showParseBlocker(message, {
+    tone:  'limit',
+    title: "You've used this month's AI invoice reads",
+    toast: 'Monthly AI invoice limit reached — see details on screen.',
+  });
 }
 
 // Shown when a page image fails to upload to storage. The pipeline stops before
@@ -855,7 +877,16 @@ async function callClaudeParse(files) {
   for (const file of files) formData.append('file', file);
   const response = await fetch('/api/ai/parse-invoice', { method: 'POST', body: formData });
   const data = await response.json();
-  if (!response.ok || data.error) throw new Error(data.error || `Server error ${response.status}`);
+  if (!response.ok || data.error) {
+    const err = new Error(data.error || `Server error ${response.status}`);
+    // Over the monthly allowance — not a parsing failure, and shown differently.
+    if (data.upgrade_required) {
+      err.capBlocked = true;
+      err.cap  = data.cap;
+      err.used = data.used;
+    }
+    throw err;
+  }
   return { result: data.result, rawText: data.rawText || JSON.stringify(data.result, null, 2), usage: data.usage || null };
 }
 

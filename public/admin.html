@@ -132,6 +132,43 @@
     .planpick:hover { border-color: var(--border); }
     .planpick.pro { background-color: #eef2ff; color: var(--primary-d); }
 
+    /* Monthly parse cap. Same badge treatment as the plan picker so the two read
+       as one setting; the input is sized for 3-4 digits, not a full field. */
+    .cappick {
+      font-family: inherit; font-size: .72rem; font-weight: 600;
+      width: 3.4rem; text-align: right; padding: .15rem .3rem; border-radius: 4px;
+      border: 1px solid transparent; background: #f1f5f9; color: var(--text);
+    }
+    .cappick:hover, .cappick:focus { border-color: var(--border); background: #fff; }
+    .cappick.unlimited { color: var(--text-muted); }
+    .capcell .sub { display: block; font-size: .7rem; color: var(--text-muted); margin-top: .1rem; }
+    /* At or over the allowance — the account is being refused parses right now. */
+    .capcell .sub.over { color: #991b1b; font-weight: 600; }
+    /* Within one-tenth of the cap: worth seeing before the customer calls. */
+    .capcell .sub.near { color: #92400e; font-weight: 600; }
+    .capcell .blocks { color: #991b1b; }
+
+    /* Date-range filter above the table. */
+    .rangebar {
+      display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+      margin: .75rem 0 .5rem; font-size: .78rem; color: var(--text-muted);
+    }
+    .rangelabel { font-weight: 600; color: var(--text); }
+    .presets { display: flex; gap: .25rem; }
+    .rangebtn {
+      font-family: inherit; font-size: .72rem; cursor: pointer;
+      padding: .2rem .5rem; border-radius: 4px;
+      border: 1px solid var(--border); background: #fff; color: var(--text);
+    }
+    .rangebtn:hover { background: #f8fafc; }
+    .rangebtn.is-on { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .rangesep { color: var(--text-muted); }
+    .rangedate { display: inline-flex; align-items: center; gap: .25rem; }
+    .rangedate input {
+      font-family: inherit; font-size: .72rem; padding: .15rem .3rem;
+      border: 1px solid var(--border); border-radius: 4px; width: auto;
+    }
+
     .gate { max-width: 420px; margin: 4rem auto; text-align: center; }
     .gate a { color: var(--primary); }
   </style>
@@ -225,6 +262,21 @@
             <div style="color:var(--text-muted);font-size:.8rem;margin-top:.4rem">
               Shown once. Their old password stopped working the moment you did this.
             </div>
+          </div>
+          <!-- Scopes the AI usage columns only. The account list itself stays
+               complete, so narrowing the dates never hides a restaurant. -->
+          <div class="rangebar">
+            <span class="rangelabel">AI usage for</span>
+            <div class="presets">
+              <button type="button" class="rangebtn" data-range="month">This month</button>
+              <button type="button" class="rangebtn" data-range="lastmonth">Last month</button>
+              <button type="button" class="rangebtn is-on" data-range="all">All time</button>
+            </div>
+            <span class="rangesep">or</span>
+            <label class="rangedate">from <input type="date" id="rangeFrom"></label>
+            <label class="rangedate">to <input type="date" id="rangeTo"></label>
+            <button type="button" class="btn btn-ghost" id="rangeClear"
+                    title="Back to all time">Clear</button>
           </div>
           <div id="orgList"><div class="empty">Loading…</div></div>
         </div>
@@ -350,12 +402,89 @@
       }
     });
 
+    // ── AI-usage date range ───────────────────────────────────
+    // Only the cost/parse columns respond to this. Empty strings mean all time.
+    let range = { from: '', to: '' };
+
+    // Formatted from the LOCAL date parts. toISOString() converts to UTC first,
+    // which east of Greenwich turns "1 July 00:00 local" into "2026-06-30" and
+    // silently pulls the previous month's last day into "This month".
+    const isoDay = (d) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    // Presets are computed in LOCAL time then formatted as plain dates, because
+    // the server compares them against naive datetime() strings. Building them
+    // from a UTC-shifted date puts "this month" a day out for anyone west of
+    // Greenwich on the 1st.
+    function presetRange(which) {
+      const now = new Date();
+      if (which === 'month') {
+        return { from: isoDay(new Date(now.getFullYear(), now.getMonth(), 1)), to: '' };
+      }
+      if (which === 'lastmonth') {
+        return {
+          from: isoDay(new Date(now.getFullYear(), now.getMonth() - 1, 1)),
+          to:   isoDay(new Date(now.getFullYear(), now.getMonth(), 0)),
+        };
+      }
+      return { from: '', to: '' };
+    }
+
+    function setPresetHighlight(which) {
+      document.querySelectorAll('.rangebtn').forEach(b =>
+        b.classList.toggle('is-on', b.dataset.range === which));
+    }
+
+    // Which preset, if any, the current range corresponds to — so typing dates
+    // that happen to equal "this month" still lights the button, and clearing
+    // the inputs falls back to All time.
+    function matchingPreset() {
+      for (const w of ['month', 'lastmonth', 'all']) {
+        const p = presetRange(w);
+        if (p.from === range.from && p.to === range.to) return w;
+      }
+      return null;
+    }
+
+    document.querySelectorAll('.rangebtn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        range = presetRange(btn.dataset.range);
+        $('rangeFrom').value = range.from;
+        $('rangeTo').value   = range.to;
+        setPresetHighlight(btn.dataset.range);
+        loadOrgs();
+      });
+    });
+
+    ['rangeFrom', 'rangeTo'].forEach(id => {
+      $(id).addEventListener('change', () => {
+        range = { from: $('rangeFrom').value || '', to: $('rangeTo').value || '' };
+        setPresetHighlight(matchingPreset());
+        loadOrgs();
+      });
+    });
+
+    $('rangeClear').addEventListener('click', () => {
+      range = { from: '', to: '' };
+      $('rangeFrom').value = '';
+      $('rangeTo').value   = '';
+      setPresetHighlight('all');
+      loadOrgs();
+    });
+
     async function loadOrgs() {
       const box = $('orgList');
       try {
-        const r = await fetch('/api/admin/organizations');
+        const qs = new URLSearchParams();
+        if (range.from) qs.set('from', range.from);
+        if (range.to)   qs.set('to',   range.to);
+        const url = '/api/admin/organizations' + (qs.toString() ? `?${qs}` : '');
+        const r = await fetch(url);
         if (!r.ok) { box.innerHTML = '<div class="empty">Could not load.</div>'; return; }
-        const rows = (await r.json()).data || [];
+        const payload = await r.json();
+        const rows = payload.data || [];
+        // Plan defaults come from the server so the two can't drift apart.
+        const planCaps = payload.plan_caps || {};
         if (!rows.length) {
           box.innerHTML = '<div class="empty">No restaurants yet. Add your first one on the left.</div>';
           return;
@@ -364,7 +493,8 @@
           <div class="tablewrap"><table>
             <thead><tr>
               <th>Name</th><th>Owner</th><th>Type</th><th>Plan</th><th>Status</th>
-              <th>People</th><th style="text-align:right">AI cost</th><th>Added</th><th></th>
+              <th>People</th><th style="text-align:right">AI cost</th>
+              <th style="text-align:right">Cap</th><th>Added</th><th></th>
             </tr></thead>
             <tbody>${rows.map(o => `
               <tr${o.archived_at ? ' style="opacity:.55"' : ''}>
@@ -375,6 +505,7 @@
                 <td>${statusPill(o)}</td>
                 <td>${o.user_count}</td>
                 ${aiCostCell(o)}
+                ${capCell(o, planCaps)}
                 <td>${esc((o.created_at || '').split(' ')[0])}</td>
                 <td class="actions">
                   <button class="btn btn-ghost" data-act="view"
@@ -415,10 +546,20 @@
             </tbody>
           </table></div>
           <div class="tablenote">
-            <strong>AI cost</strong> is Anthropic spend on parsing that customer's
-            invoices, billed at the model's rate when each parse ran. Voided
-            invoices still count — the parse was paid for either way. Recipe
+            <strong>AI cost</strong> is Anthropic spend on reading that customer's
+            invoices, billed at the model's rate when each parse ran, for the date
+            range selected above. Every call counts — including parses the customer
+            abandoned and invoices later voided, because both were paid for. Recipe
             parsing is not included: that endpoint doesn't record its usage yet.
+            <br>
+            <strong>Cap</strong> is how many AI invoice reads they get per calendar
+            month. Leave it blank to follow their plan
+            (Essential ${planCaps.essential || 0}, Pro unlimited), type a number to
+            override it for this account, or 0 for unlimited. Usage under it is
+            always the <em>current</em> month, whatever date range is selected —
+            a monthly allowance can't be read over any other window. Over the cap,
+            AI reading stops and they can still enter invoices by hand;
+            <strong>blocked</strong> counts the refusals in the selected range.
           </div>`;
 
         // Listeners rather than inline onclick="…('${name}')". esc() turns an
@@ -442,6 +583,11 @@
 
         box.querySelectorAll('select[data-plan-for]').forEach(sel => {
           sel.addEventListener('change', () => setPlan(sel, sel.dataset.planFor, sel.dataset.name));
+        });
+
+        box.querySelectorAll('input[data-cap-for]').forEach(input => {
+          input.addEventListener('blur', () => setCap(input, input.dataset.capFor, input.dataset.name));
+          input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); });
         });
       } catch (_) {
         box.innerHTML = '<div class="empty">Could not load.</div>';
@@ -525,6 +671,81 @@
       const amt = cost > 0 && cost < 0.01 ? '&lt;$0.01' : '$' + cost.toFixed(2);
       return `<td class="cost"><span class="amt">${amt}</span>
         <span class="sub">${count} invoice${count === 1 ? '' : 's'}</span></td>`;
+    }
+
+    // Monthly AI invoice-parse allowance, and how much of it is gone.
+    //
+    // The number is editable because lifting the cap for one stuck account is the
+    // whole override mechanism — blank means "follow the plan", 0 means unlimited.
+    // "Used" is always the CURRENT month even when the table is filtered to some
+    // other range: a monthly allowance has no meaning over an arbitrary window,
+    // and showing April's usage against May's cap would be actively misleading.
+    function capCell(o, planCaps) {
+      const plan = (o.plan || 'essential').toLowerCase();
+      const override = o.invoice_cap;
+      const planDefault = Number(planCaps[plan] ?? 0);
+      const effective = (override === null || override === undefined)
+        ? planDefault : Number(override) || 0;
+      const used = Number(o.parses_this_month) || 0;
+      const blocks = Number(o.cap_blocks) || 0;
+
+      const value = (override === null || override === undefined) ? '' : String(override);
+      const title = effective === 0
+        ? 'Unlimited. Blank follows the plan; 0 means unlimited.'
+        : `${effective} AI invoice reads per calendar month. Blank follows the plan (${plan} = ${planDefault || 'unlimited'}); 0 means unlimited.`;
+
+      // Kept deliberately terse — "this month" on every row pushed the column
+      // wide enough to wrap the action buttons and doubled every row's height.
+      // The table note carries the explanation; the cell carries the numbers.
+      let sub;
+      if (effective === 0) {
+        sub = `<span class="sub" title="Used this month. No limit.">${used} · ∞</span>`;
+      } else {
+        const cls = used >= effective ? 'over' : (used >= effective * 0.9 ? 'near' : '');
+        sub = `<span class="sub ${cls}" title="Used this month, against the cap">${used}/${effective}</span>`;
+      }
+      const blocked = blocks
+        ? `<span class="sub blocks" title="Parses refused for being over the cap, in the selected range">${blocks} blocked</span>`
+        : '';
+
+      return `<td class="cost capcell">
+        <input type="number" min="0" step="1" class="cappick ${effective === 0 ? 'unlimited' : ''}"
+               value="${esc(value)}" placeholder="${planDefault || '∞'}"
+               data-cap-for="${esc(o.id)}" data-name="${esc(o.name)}"
+               data-current="${esc(value)}" title="${esc(title)}">
+        ${sub}${blocked}</td>`;
+    }
+
+    // Saves on blur/Enter rather than on every keystroke — typing "150" would
+    // otherwise fire three saves, the first of which sets the cap to 1.
+    async function setCap(input, orgId, name) {
+      const raw = input.value.trim();
+      const before = input.dataset.current || '';
+      if (raw === before) return;
+      input.disabled = true;
+      try {
+        const r = await fetch(`/api/admin/organizations/${orgId}/invoice-cap`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ invoice_cap: raw === '' ? null : Number(raw) }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          input.value = before;
+          msg(data.error || `Could not change the cap for ${name}.`, 'bad');
+          return;
+        }
+        input.dataset.current = raw;
+        const what = raw === '' ? 'back to the plan default'
+                   : Number(raw) === 0 ? 'unlimited' : `${raw} invoices/month`;
+        msg(`${name}: AI cap set ${what}.`, 'ok');
+        loadOrgs();
+      } catch (_) {
+        input.value = before;
+        msg('Could not reach the server.', 'bad');
+      } finally {
+        input.disabled = false;
+      }
     }
 
     // Plan tier. Nothing is gated on this yet — it records what the customer was
