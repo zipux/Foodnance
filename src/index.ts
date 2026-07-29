@@ -67,6 +67,25 @@ app.use('/api/*', async (c, next) => {
         suspended: true,
       }, 402)
     }
+
+    // Plan gating, in the same chokepoint and for the same reason: one place
+    // covers every route, including ones added later. Unlike suspension this
+    // blocks GETs too — a Pro feature is not readable on Essential.
+    //
+    // NOTE this is a commercial boundary, not a security one. The data behind a
+    // gated feature is the customer's own, and the static pages are served by
+    // Pages without touching this worker (see public/_routes.json), so the
+    // screens are hidden client-side rather than server-side. What the server
+    // guarantees is that Pro *actions* cannot be performed on an Essential plan.
+    const feature = featureForPath(path)
+    if (feature && !planFeatures(me.org_plan).has(feature)) {
+      return c.json({
+        error: "That's part of the Pro plan. Get in touch and we'll switch you over.",
+        upgrade_required: true,
+        feature,
+        plan: (me.org_plan || 'essential').toLowerCase(),
+      }, 403)
+    }
   }
 
   // Downstream handlers read the caller from here rather than re-querying.
@@ -180,6 +199,9 @@ type SessionUser = {
   // archiving takes effect immediately, exactly like users.archived_at.
   org_suspended_at: string | null; org_archived_at: string | null;
   org_suspend_reason: string | null;
+  // Plan tier (migration 0039). Read per request for the same reason: an upgrade
+  // takes effect on the customer's next click, with no re-login.
+  org_plan: string | null;
 }
 
 // Resolves the caller from their cookie, or null when signed out. Reads the
@@ -195,7 +217,8 @@ async function currentUser(c: any): Promise<SessionUser | null> {
             o.name AS org_name, o.account_type,
             o.suspended_at   AS org_suspended_at,
             o.archived_at    AS org_archived_at,
-            o.suspend_reason AS org_suspend_reason
+            o.suspend_reason AS org_suspend_reason,
+            o.plan           AS org_plan
        FROM users u
        LEFT JOIN organizations o ON o.id = u.org_id
       WHERE u.id = ? AND u.archived_at IS NULL`,
@@ -698,6 +721,12 @@ function publicUser(u: SessionUser) {
     // from their customers' billing state.
     suspended: u.role !== 'super_admin' && !!u.org_suspended_at,
     suspend_reason: u.role !== 'super_admin' ? (u.org_suspend_reason || '') : '',
+    // Drives nav hiding and the upgrade panels. A super-admin sees everything,
+    // matching their exemption from gating in the /api/* middleware.
+    plan: (u.org_plan || 'essential').toLowerCase(),
+    features: u.role === 'super_admin'
+      ? [...PRO_FEATURES]
+      : [...planFeatures(u.org_plan)],
   }
 }
 
@@ -1040,6 +1069,48 @@ app.post('/api/admin/organizations', async (c) => {
 // label. Keeping it current from day one means gating can read the tier when it
 // ships instead of needing a backfill from memory about who bought what.
 const PLANS = ['essential', 'pro']
+
+// ─── Plan feature gating ──────────────────────────────────────
+// Essential = know your costs (everything that runs off invoices). Pro = control
+// them (everything that needs someone to physically count stock).
+//
+// The map lists ONLY what Pro adds. Anything unlisted is available on every
+// plan, so a newly added endpoint is open until it is deliberately gated. That
+// is the safer direction to fail: a missing gate costs a little revenue, a wrong
+// gate breaks a customer's shift.
+const PRO_FEATURES = ['inventory_tools', 'stock_takes', 'storage_layout', 'staff', 'true_cogs'] as const
+
+function planFeatures(plan: string | null | undefined): Set<string> {
+  return (plan || 'essential').toLowerCase() === 'pro'
+    ? new Set<string>(PRO_FEATURES)
+    : new Set<string>()
+}
+
+// Tables only a Pro feature touches.
+//
+// `inventory` and `stock_log` are deliberately ABSENT. Essential tracks stock
+// silently — packing a Finished Product writes both — and recipes.js,
+// finished-products.js and products.js all READ inventory to cost and convert.
+// Gating those tables would break Essential features, and would also mean an
+// upgrade needed a data backfill instead of a column flip.
+const PRO_ONLY_TABLES: Record<string, string> = {
+  staff:               'staff',
+  staff_certifications:'staff',
+  certification_types: 'staff',
+  stock_takes:         'stock_takes',
+  stock_take_items:    'stock_takes',
+}
+
+// The Pro feature a request belongs to, or null when it is available to all.
+function featureForPath(path: string): string | null {
+  if (path.startsWith('/api/stock-take'))    return 'stock_takes'
+  if (path.startsWith('/api/storage-layout')) return 'storage_layout'
+  // Adjust Stock only. Reading inventory stays open — see PRO_ONLY_TABLES.
+  if (/^\/api\/inventory\/[^/]+\/adjust$/.test(path)) return 'inventory_tools'
+  const table = path.match(/^\/api\/tables\/([^/?]+)/)
+  if (table) return PRO_ONLY_TABLES[table[1]] || null
+  return null
+}
 
 // ─── Monthly AI invoice-parsing cap ───────────────────────────
 // The one recurring per-customer cost. A recipe book is parsed once at
@@ -3614,12 +3685,25 @@ app.get('/api/pnl', async (c) => {
     return { food: f, beverage: b }
   }
 
+  // True COGS is a Pro feature. An Essential account normally has no stock takes
+  // to bracket the period anyway, but one that was downgraded from Pro still has
+  // its history — so gate explicitly rather than relying on the data being
+  // absent. Reported as its own reason so the UI can offer an upgrade instead of
+  // "go and do a stock take", which they cannot do on this plan.
+  const pnlUser = c.get('user') as SessionUser | undefined
+  const trueCogsAllowed = !pnlUser
+    || pnlUser.role === 'super_admin'
+    || planFeatures(pnlUser.org_plan).has('true_cogs')
+
   // Available only when we have a beginning count (before the period) AND an
   // ending count that actually falls inside the period (not one from before it).
-  const cogsAvailable = !!openingTake && !!closingTake && closingTake.d >= periodStart
+  const cogsAvailable = trueCogsAllowed
+    && !!openingTake && !!closingTake && closingTake.d >= periodStart
   let cogs: Record<string, unknown> = {
     available: false,
-    reason: !closingTake || (closingTake && closingTake.d < periodStart)
+    reason: !trueCogsAllowed
+      ? 'upgrade_required'                      // Pro feature, not a missing count
+      : !closingTake || (closingTake && closingTake.d < periodStart)
       ? 'no_closing_take'                       // no stock take within the period
       : !openingTake ? 'no_opening_take'        // none before the period start
       : 'ok',

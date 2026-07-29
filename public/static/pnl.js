@@ -367,6 +367,12 @@ function render() {
   } else if (cogsAvail) {
     basisNote = `<div class="pnl-basis-note"><i class="fas fa-circle-info"></i>
       <span>Showing what you <strong>bought</strong> this period. Switch to True COGS to adjust for stock you had on hand.</span></div>`;
+  } else if (cogsData.reason === 'upgrade_required') {
+    // Not a missing count — their plan has no stock takes at all, so telling
+    // them to go and do one would send them at a screen they cannot open.
+    basisNote = `<div class="pnl-basis-note warn"><i class="fas fa-lock"></i>
+      <span>True COGS is part of <strong>Pro</strong>, which adds stock counting.
+      Showing what you <strong>bought</strong> this period.</span></div>`;
   } else {
     const need = cogsData.reason === 'no_opening_take'
       ? `a submitted stock take dated before <strong>${esc(niceDate(pnlFrom + '-01'))}</strong>`

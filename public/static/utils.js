@@ -55,6 +55,66 @@ const API_BASE = '/api';
   };
 })();
 
+// ─── Plan gating (client side) ────────────────────────────────
+// Which Pro feature each page belongs to. Keep in step with featureForPath()
+// and PRO_ONLY_TABLES in src/index.ts.
+//
+// This is presentation only. The pages themselves are static files served by
+// Cloudflare Pages without touching the worker, so this cannot be a security
+// boundary — the server refuses the Pro *actions* behind them. What this does is
+// stop an Essential customer being shown a screen that would only fill with
+// permission errors.
+const PLAN_GATED_PAGES = {
+  '/inventory':      { feature: 'inventory_tools', name: 'Inventory' },
+  '/stock-take':     { feature: 'stock_takes',     name: 'Stock Takes' },
+  '/storage-layout': { feature: 'storage_layout',  name: 'Storage Layout' },
+  '/staff':          { feature: 'staff',           name: 'Staff' },
+  '/certifications': { feature: 'staff',           name: 'Staff Certifications' },
+};
+
+// Cloudflare Pages strips ".html" and 308-redirects, but local dev keeps it, so
+// links and locations have to be compared with the suffix removed.
+function _planPagePath(href) {
+  try {
+    const p = new URL(href, location.origin).pathname;
+    return p.replace(/\.html$/, '').replace(/\/$/, '') || '/';
+  } catch (_) { return ''; }
+}
+
+// Hide nav links the plan doesn't include, and — if this IS a gated page,
+// reached by URL or bookmark — replace its content with an upgrade note.
+function applyPlanGating(me) {
+  const features = new Set(me.features || []);
+
+  document.querySelectorAll('.nav-links a[href]').forEach(a => {
+    const gate = PLAN_GATED_PAGES[_planPagePath(a.getAttribute('href'))];
+    if (gate && !features.has(gate.feature)) a.style.display = 'none';
+  });
+
+  const here = PLAN_GATED_PAGES[_planPagePath(location.pathname)];
+  if (!here || features.has(here.feature)) return;
+
+  const container = document.querySelector('.container');
+  if (!container) return;
+  container.innerHTML = `
+    <div style="max-width:520px;margin:4rem auto;text-align:center;
+                background:#fff;border:1px solid var(--border,#e2e8f0);
+                border-radius:12px;padding:2.5rem 2rem">
+      <i class="fas fa-lock" style="font-size:1.75rem;color:var(--primary,#4f46e5)"></i>
+      <h2 style="margin:.9rem 0 .5rem;font-size:1.25rem">${esc(here.name)} is part of Pro</h2>
+      <p style="color:var(--text-muted,#64748b);font-size:.92rem;line-height:1.6;margin:0 0 1.5rem">
+        Your plan covers everything that runs off your invoices — costs, price
+        movements and recipes. ${esc(here.name)} is part of Pro, which adds stock
+        counting and variance.
+      </p>
+      <a href="/home.html" class="btn btn-primary"
+         style="display:inline-block;text-decoration:none">Back to Price Movers</a>
+      <p style="color:var(--text-muted,#64748b);font-size:.8rem;margin:1.25rem 0 0">
+        Want it switched on? Just get in touch.
+      </p>
+    </div>`;
+}
+
 // Small "signed in as … / Sign out" chip, injected into the nav of whichever
 // app page is loaded. Done here rather than editing 13 HTML files, and it
 // gives every page a way to sign out.
@@ -77,6 +137,10 @@ async function renderSessionChip() {
   // refused. Say so up front rather than letting them fill in a stock take and
   // lose it at the last step.
   if (me.suspended) renderSuspendedBar(me.suspend_reason);
+
+  // Before the chip, so a gated page swaps its content in the same frame rather
+  // than flashing the real screen first.
+  applyPlanGating(me);
 
   const chip = document.createElement('div');
   chip.id = 'sessionChip';
