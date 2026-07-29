@@ -123,6 +123,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('stCancelBtn').addEventListener('click', cancelStockTake);
   document.getElementById('stSubmitBtn').addEventListener('click', submitStockTake);
 
+  // The explicit "begin" path, for someone who opened this page directly.
+  // Re-enters loadOrStart via ?start=1 so there is one code path, not two.
+  document.getElementById('stBeginBtn').addEventListener('click', () => {
+    const btn = document.getElementById('stBeginBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Starting…';
+    location.search = '?start=1';
+  });
+
   // Coming back online is the moment to drain the queue.
   window.addEventListener('online',  () => { updateSyncStatus(); flushPending(); });
   window.addEventListener('offline', updateSyncStatus);
@@ -303,12 +312,45 @@ function todayYMD() {
   return `${d.getFullYear()}/${mm}/${dd}`;
 }
 
+// The only place that creates a stock take. POST /start stays idempotent on the
+// server, so a double-click or a stale tab resumes rather than duplicating.
+async function beginStockTake() {
+  const res = await fetch('/api/stock-take/start', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+  });
+  if (!res.ok) throw new Error(`Start failed: ${res.status}`);
+  return res.json();
+}
+
+// Opening this page used to POST /start unconditionally, so merely LOOKING at
+// /stock-take created an in_progress stock take — timestamped when you looked,
+// not when you counted. That matters because P&L True COGS brackets a period by
+// submitted stock takes, and because a dangling open count nags on Inventory.
+//
+// Now: resume an existing count if there is one; otherwise only start when the
+// user actually asks. Arriving from Inventory's "Start Stock Take" carries
+// ?start=1 so that button still goes straight into counting with no extra click.
 async function loadOrStart() {
   try {
-    // POST /start is idempotent — returns existing in-progress take or creates one
-    const res = await fetch('/api/stock-take/start', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
-    if (!res.ok) throw new Error(`Start failed: ${res.status}`);
-    const data = await res.json();
+    const active = await fetch('/api/stock-take/active').then(r => {
+      if (!r.ok) throw new Error(`Load failed: ${r.status}`);
+      return r.json();
+    });
+
+    let data;
+    if (active.active) {
+      data = { stock_take: active.active, items: active.items || [], resumed: true };
+    } else if (new URLSearchParams(location.search).get('start') === '1') {
+      data = await beginStockTake();
+    } else {
+      // Nothing in progress and nobody asked to begin — show the panel and stop.
+      document.getElementById('stLoading').style.display = 'none';
+      document.getElementById('stStartPanel').style.display = '';
+      // Nothing to cancel yet, and its confirm text talks about discarding
+      // counts that don't exist. The panel's own "Back to Inventory" is the way out.
+      document.getElementById('stCancelBtn').style.display = 'none';
+      return;
+    }
 
     stockTake = data.stock_take;
     snapshotItems = data.items || [];

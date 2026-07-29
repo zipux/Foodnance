@@ -9,7 +9,7 @@
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <title>Inventory — DoughMeter</title>
   <link rel="stylesheet" href="/static/style.css?v=20260717-6" />
-  <link rel="stylesheet" href="/static/stock-take.css?v=20260721-5" />
+  <link rel="stylesheet" href="/static/stock-take.css?v=20260730-1" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 </head>
@@ -44,7 +44,10 @@
     <div class="inv-toolbar">
       <div class="header-actions">
         <input type="text" id="invSearch" class="search-input" placeholder="Search…" />
-        <a href="/stock-take.html" class="btn btn-success" id="startStockTakeBtn">
+        <!-- ?start=1 is the explicit "yes, create one" signal. Opening
+             /stock-take without it resumes an existing count or offers a start
+             button, so merely browsing there no longer creates a stock take. -->
+        <a href="/stock-take.html?start=1" class="btn btn-success" id="startStockTakeBtn">
           <i class="fas fa-clipboard-check"></i> Start Stock Take
         </a>
         <a href="/storage-layout.html" class="btn btn-secondary">
@@ -220,7 +223,7 @@
   <!-- TOAST -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/static/utils.js?v=20260727-3"></script>
+  <script src="/static/utils.js?v=20260730-1"></script>
   <script src="/static/inventory.js?v=20260727-2"></script>
 </body>
 </html>

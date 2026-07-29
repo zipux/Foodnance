@@ -96,7 +96,17 @@ function applyPlanGating(me) {
 
   const container = document.querySelector('.container');
   if (!container) return;
-  container.innerHTML = `
+
+  // HIDE the real content rather than replacing it. The page's own controller is
+  // still loaded and still running — inventory.js writes into #invBody, and its
+  // error path threw "Cannot set properties of null" once that node had been
+  // removed. Keeping the markup in the DOM but hidden means those writes land
+  // harmlessly, and nothing has to know it is being gated.
+  container.style.display = 'none';
+  const panel = document.createElement('div');
+  panel.className = 'container';
+  panel.id = 'planUpgradePanel';
+  panel.innerHTML = `
     <div style="max-width:520px;margin:4rem auto;text-align:center;
                 background:#fff;border:1px solid var(--border,#e2e8f0);
                 border-radius:12px;padding:2.5rem 2rem">
@@ -113,6 +123,13 @@ function applyPlanGating(me) {
         Want it switched on? Just get in touch.
       </p>
     </div>`;
+  container.parentNode.insertBefore(panel, container);
+
+  // Some pages keep chrome outside .container — the stock-take sticky footer and
+  // its filter bar. Hide those too, or an upgrade panel arrives with a working
+  // "Submit Stock Take" button bolted to the bottom of the screen.
+  ['stFooter', 'stFilters', 'stFilterNote', 'stLoading', 'stStartPanel']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
 }
 
 // Small "signed in as … / Sign out" chip, injected into the nav of whichever

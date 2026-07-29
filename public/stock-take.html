@@ -9,7 +9,7 @@
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <title>Stock Take — DoughMeter</title>
   <link rel="stylesheet" href="/static/style.css?v=20260717-6" />
-  <link rel="stylesheet" href="/static/stock-take.css?v=20260721-5" />
+  <link rel="stylesheet" href="/static/stock-take.css?v=20260730-1" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 </head>
@@ -70,6 +70,23 @@
     <!-- LOADING / EMPTY -->
     <div id="stLoading" class="st-loading">
       <i class="fas fa-spinner fa-spin"></i> Loading stock take…
+    </div>
+
+    <!-- Shown when nothing is in progress and the page was opened directly
+         rather than via "Start Stock Take". Looking at this screen must not
+         create a stock take — only the button below does. -->
+    <div id="stStartPanel" class="st-start-panel" style="display:none">
+      <i class="fas fa-clipboard-check"></i>
+      <h2>Ready to count?</h2>
+      <p>
+        Starting a stock take takes a snapshot of what the system thinks you have,
+        then you count what's actually on the shelf. You can leave and come back —
+        your counts are saved as you go.
+      </p>
+      <button class="btn btn-success" id="stBeginBtn">
+        <i class="fas fa-play"></i> Start Stock Take
+      </button>
+      <a href="/inventory.html" class="st-start-back">Back to Inventory</a>
     </div>
 
     <!-- BODY: rendered groups go here -->
@@ -140,7 +157,7 @@
   <!-- TOAST -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/static/utils.js?v=20260727-3"></script>
-  <script src="/static/stock-take.js?v=20260721-6"></script>
+  <script src="/static/utils.js?v=20260730-1"></script>
+  <script src="/static/stock-take.js?v=20260730-1"></script>
 </body>
 </html>

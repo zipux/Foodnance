@@ -204,6 +204,22 @@ type SessionUser = {
   org_plan: string | null;
 }
 
+// The columns that make up a SessionUser.
+//
+// Shared because TWO places load one: currentUser() below, and the login handler,
+// which has to re-query after setting the cookie (the cookie is on the response,
+// so the incoming request still has none). They drifted the first time a column
+// was added — `o.plan` went into currentUser only, so logging in reported every
+// Pro account as Essential — hence one list instead of two copies.
+const SESSION_USER_COLUMNS = `
+       u.id, u.email, u.role, u.org_id, u.name,
+       o.name           AS org_name,
+       o.account_type   AS account_type,
+       o.suspended_at   AS org_suspended_at,
+       o.archived_at    AS org_archived_at,
+       o.suspend_reason AS org_suspend_reason,
+       o.plan           AS org_plan`
+
 // Resolves the caller from their cookie, or null when signed out. Reads the
 // user fresh each time so archiving a user takes effect immediately.
 async function currentUser(c: any): Promise<SessionUser | null> {
@@ -213,12 +229,7 @@ async function currentUser(c: any): Promise<SessionUser | null> {
   const session = await readSession(secret, token)
   if (!session) return null
   const row = await c.env.DB.prepare(
-    `SELECT u.id, u.email, u.role, u.org_id, u.name,
-            o.name AS org_name, o.account_type,
-            o.suspended_at   AS org_suspended_at,
-            o.archived_at    AS org_archived_at,
-            o.suspend_reason AS org_suspend_reason,
-            o.plan           AS org_plan
+    `SELECT ${SESSION_USER_COLUMNS}
        FROM users u
        LEFT JOIN organizations o ON o.id = u.org_id
       WHERE u.id = ? AND u.archived_at IS NULL`,
@@ -808,11 +819,7 @@ app.post('/api/auth/login', async (c) => {
   // currentUser() would read null. The frontend needs this to know where to
   // send the person after signing in (admin screen vs the app).
   const me = await c.env.DB.prepare(
-    `SELECT u.id, u.email, u.role, u.org_id, u.name,
-            o.name AS org_name, o.account_type,
-            o.suspended_at   AS org_suspended_at,
-            o.archived_at    AS org_archived_at,
-            o.suspend_reason AS org_suspend_reason
+    `SELECT ${SESSION_USER_COLUMNS}
        FROM users u
        LEFT JOIN organizations o ON o.id = u.org_id
       WHERE u.id = ?`,
