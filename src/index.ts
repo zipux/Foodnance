@@ -98,6 +98,12 @@ function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
 }
 
+// Money rounding. Two handlers further down declare their own local round2 with
+// the same behaviour and shadow this one; they predate it and are left alone.
+function round2(n: number) {
+  return Math.round((Number(n) || 0) * 100) / 100
+}
+
 // ══════════════════════════════════════════════════════════════
 // AUTH — password hashing + signed session cookies
 // ══════════════════════════════════════════════════════════════
@@ -296,13 +302,20 @@ type SupplierMatch = {
   score: number
 }
 
-// Classify a candidate vendor name against existing suppliers:
+// Classify a candidate name against a list of existing ones:
 //   auto    → near-identical, safe to snap silently (≥ 0.88 or normalized-equal)
 //   suggest → plausible but confirm first (≥ 0.70, or token-contained)
-//   none    → treat as a new supplier
-function classifySupplierMatch(
+//   none    → treat as new
+//
+// Written for supplier names, and also used to match POS menu items against
+// recipes and finished products. The thresholds were tuned on supplier names,
+// which are long and distinctive; menu names are short and clustered ("Coke" vs
+// "Coke Zero", "Small Pizza" vs "Sml Pizza"), so a short name is never snapped
+// silently — see AUTO_MIN_LEN below.
+function classifyNameMatch(
   name: string,
-  suppliers: { id: string; name: string }[]
+  suppliers: { id: string; name: string }[],
+  autoMinLen = 0
 ): SupplierMatch {
   let best: { id: string; name: string } | null = null
   let bestScore = 0
@@ -317,7 +330,13 @@ function classifySupplierMatch(
     }
   }
   if (!best) return { decision: 'none', match: null, score: 0 }
-  if (bestScore >= 0.88) return { decision: 'auto', match: best, score: bestScore }
+  // autoMinLen defaults to 0, so supplier matching behaves exactly as it always
+  // has. POS item matching passes 8: a four-letter menu name can clear 0.88
+  // against a different four-letter name on a single character, and snapping
+  // silently there would deduct the wrong recipe's ingredients without ever
+  // saying so — worse than one extra click.
+  const shortest = Math.min(normalizeSupplierName(name).length, normalizeSupplierName(best.name).length)
+  if (bestScore >= 0.88 && shortest >= autoMinLen) return { decision: 'auto', match: best, score: bestScore }
   if (bestScore >= 0.70 || bestContained) return { decision: 'suggest', match: best, score: bestScore }
   return { decision: 'none', match: null, score: bestScore }
 }
@@ -1085,7 +1104,7 @@ const PLANS = ['essential', 'pro']
 // plan, so a newly added endpoint is open until it is deliberately gated. That
 // is the safer direction to fail: a missing gate costs a little revenue, a wrong
 // gate breaks a customer's shift.
-const PRO_FEATURES = ['inventory_tools', 'stock_takes', 'storage_layout', 'staff', 'true_cogs'] as const
+const PRO_FEATURES = ['inventory_tools', 'stock_takes', 'storage_layout', 'staff', 'true_cogs', 'pos_sales'] as const
 
 function planFeatures(plan: string | null | undefined): Set<string> {
   return (plan || 'essential').toLowerCase() === 'pro'
@@ -1106,12 +1125,17 @@ const PRO_ONLY_TABLES: Record<string, string> = {
   certification_types: 'staff',
   stock_takes:         'stock_takes',
   stock_take_items:    'stock_takes',
+  // The pos_* tables are absent because they are not in ALLOWED_TABLES at all —
+  // they never reach the generic table routes. Their gate is the /api/pos-
+  // prefix in featureForPath below.
 }
 
 // The Pro feature a request belongs to, or null when it is available to all.
 function featureForPath(path: string): string | null {
   if (path.startsWith('/api/stock-take'))    return 'stock_takes'
   if (path.startsWith('/api/storage-layout')) return 'storage_layout'
+  // Covers /api/pos-imports and /api/pos-mappings alike.
+  if (path.startsWith('/api/pos-'))           return 'pos_sales'
   // Adjust Stock only. Reading inventory stays open — see PRO_ONLY_TABLES.
   if (/^\/api\/inventory\/[^/]+\/adjust$/.test(path)) return 'inventory_tools'
   const table = path.match(/^\/api\/tables\/([^/?]+)/)
@@ -1272,7 +1296,13 @@ app.post('/api/admin/organizations/:id/archive', async (c) => {
 const PURGE_TABLES = [
   'categories', 'certification_types', 'finished_product_items', 'finished_products',
   'generic_products', 'inventory', 'invoice_lines', 'invoices', 'item_placements',
-  'operating_expenses', 'product_aliases', 'product_entries', 'product_mappings',
+  'operating_expenses',
+  // Child before parent: pos_sale_lines.import_id references pos_imports(id).
+  // The rest of this list is alphabetical and happens to satisfy that already
+  // (recipe_items before recipes, stock_take_items before stock_takes); this
+  // pair does not, so it is ordered by hand.
+  'pos_sale_lines', 'pos_imports', 'pos_item_map',
+  'product_aliases', 'product_entries', 'product_mappings',
   'recipe_items', 'recipes', 'recurring_expenses', 'sales_monthly', 'spread_expenses',
   'staff', 'staff_certifications', 'stock_log', 'stock_take_items', 'stock_takes',
   'storage_sections', 'suppliers', 'units', 'vendor_fee_templates',
@@ -1380,6 +1410,11 @@ const ALLOWED_TABLES = [
   'product_mappings', 'units', 'categories', 'product_aliases',
   'stock_takes', 'stock_take_items',
   'sales_monthly', 'operating_expenses', 'recurring_expenses', 'spread_expenses'
+  // No pos_* table is here, deliberately. Their rows carry money that feeds the
+  // P&L and quantities that move stock, and every one of them is derived from an
+  // uploaded file rather than typed. Generic POST/PATCH would let a client
+  // fabricate an import's totals or rewrite a committed line, so they are served
+  // only by the /api/pos-imports routes, which recompute from parsed_data.
 ]
 
 // ── List / query
@@ -1603,6 +1638,768 @@ app.delete('/api/tables/:table/:id', async (c) => {
     `DELETE FROM ${table} WHERE id = ? AND org_id IS ?`,
   ).bind(id, orgOf(c)).run()
   return c.body(null, 204)   // 204 No Content — must have no body
+})
+
+// ─── POS sales imports ────────────────────────────────────────
+// A sales CSV is parsed in the browser (public/static/pos-parse.js) and lands
+// here as JSON. This route saves it as a DRAFT — status 'Action Required', the
+// whole payload in parsed_data — and pre-matches each POS menu item against the
+// customer's recipes and finished products. Nothing derived is written until
+// /commit, exactly as an invoice writes nothing until Confirm & Save.
+//
+// The pre-match runs here, on the server, because levenshtein/classifyNameMatch
+// live in this file and there is no client copy. Duplicating them into
+// public/static/ would create a fourth hand-synced table (after UNIT_FACTORS,
+// DEFAULT_CATEGORIES and convertUnitCost), and those are already a maintenance
+// tax we should not be raising.
+
+type PosParsedItem = {
+  pos_item_key: string
+  pos_item_name: string
+  price_point: string
+  pos_category: string
+  qty: number
+  net_sales: number
+  line_count: number
+  // Filled in below.
+  target_type?: string
+  target_id?: string
+  target_name?: string
+  qty_per_sale?: number
+  target_unit?: string
+  match_source?: string
+  suggested_type?: string
+  suggested_id?: string
+  suggested_name?: string
+  suggested_score?: number
+}
+
+// Menu names are short and clustered, so a silent auto-match needs a longer
+// name behind it than a supplier does. See classifyNameMatch.
+const POS_AUTO_MIN_LEN = 8
+
+// Ceiling on stock movements in one import before they are collapsed from
+// per-ingredient-per-day to per-ingredient-per-import. Chosen to stay inside a
+// single D1 batch alongside the sale lines, so the whole commit stays atomic.
+const POS_MAX_MOVEMENTS = 1500
+
+app.post('/api/pos-imports', async (c) => {
+  const org = orgOf(c)
+  const body = await c.req.json().catch(() => ({})) as {
+    parsed?: any; file_name?: string; file_key?: string; content_hash?: string; force?: boolean
+  }
+  const parsed = body.parsed
+  if (!parsed || !Array.isArray(parsed.lines) || !parsed.lines.length) {
+    return c.json({ error: 'No parsed sales data in that request.' }, 400)
+  }
+
+  const contentHash = String(body.content_hash || '').trim()
+
+  // First duplicate guard: the identical file, uploaded twice. Never
+  // intentional, but overridable — the same reasoning as the duplicate
+  // invoice-number check, which warns rather than refuses outright.
+  if (contentHash && !body.force) {
+    const dup = await c.env.DB.prepare(
+      `SELECT id, file_name, created_at, status FROM pos_imports
+        WHERE org_id IS ? AND content_hash = ? AND voided_at IS NULL
+        ORDER BY created_at DESC LIMIT 1`
+    ).bind(org, contentHash).first<{ id: string; file_name: string; created_at: string; status: string }>()
+    if (dup) {
+      return c.json({
+        duplicate: true, import_id: dup.id, file_name: dup.file_name,
+        imported_at: dup.created_at, status: dup.status,
+        error: 'You have already uploaded this exact file.',
+      }, 409)
+    }
+  }
+
+  // Candidates for mapping: everything the customer actually sells.
+  const [fpRows, recipeRows, mapRows] = await Promise.all([
+    c.env.DB.prepare(`SELECT id, name FROM finished_products WHERE org_id IS ?`).bind(org).all(),
+    c.env.DB.prepare(`SELECT id, name, yield_unit FROM recipes WHERE org_id IS ?`).bind(org).all(),
+    c.env.DB.prepare(
+      `SELECT pos_item_key, target_type, target_id, qty_per_sale, target_unit
+         FROM pos_item_map WHERE org_id IS ? AND source = ?`
+    ).bind(org, String(parsed.source || 'square')).all(),
+  ])
+
+  const fps     = (fpRows.results || []) as { id: string; name: string }[]
+  const recipes = (recipeRows.results || []) as { id: string; name: string; yield_unit: string }[]
+  const nameOf  = new Map<string, string>()
+  for (const f of fps) nameOf.set('finished_product:' + f.id, f.name)
+  for (const r of recipes) nameOf.set('recipe:' + r.id, r.name)
+
+  const learned = new Map<string, any>()
+  for (const m of (mapRows.results || []) as any[]) learned.set(m.pos_item_key, m)
+
+  // Candidates for fuzzy matching, tagged so the winner's kind is known.
+  const candidates = [
+    ...fps.map(f => ({ id: 'finished_product:' + f.id, name: f.name })),
+    ...recipes.map(r => ({ id: 'recipe:' + r.id, name: r.name })),
+  ]
+
+  const items = (parsed.items || []) as PosParsedItem[]
+  let mappedNet = 0, unmappedNet = 0
+
+  for (const it of items) {
+    // Precedence, most specific first — the same shape as resolving a supplier
+    // alias: an exact size rule, then the any-size rule, then a guess.
+    const rule = learned.get(it.pos_item_key)
+              || learned.get(String(it.pos_item_key).split('|')[0] + '|')
+
+    if (rule) {
+      it.target_type  = rule.target_type
+      it.target_id    = rule.target_id
+      it.target_name  = nameOf.get(rule.target_type + ':' + rule.target_id) || ''
+      it.qty_per_sale = Number(rule.qty_per_sale) || 1
+      it.target_unit  = rule.target_unit || ''
+      it.match_source = 'remembered'
+      // A remembered rule pointing at a deleted recipe is worse than no rule —
+      // it would look mapped and deduct nothing. Demote it to unmapped.
+      if (rule.target_type !== 'ignore' && !it.target_name) {
+        it.target_type = ''; it.target_id = ''; it.match_source = 'stale'
+      }
+    } else if (candidates.length) {
+      const m = classifyNameMatch(it.pos_item_name, candidates, POS_AUTO_MIN_LEN)
+      if (m.decision === 'auto' && m.match) {
+        const [kind, id] = m.match.id.split(':')
+        it.target_type  = kind
+        it.target_id    = id
+        it.target_name  = m.match.name
+        it.qty_per_sale = 1
+        it.target_unit  = kind === 'recipe' ? (recipes.find(r => r.id === id)?.yield_unit || '') : ''
+        it.match_source = 'auto'
+      } else if (m.decision === 'suggest' && m.match) {
+        const [kind, id] = m.match.id.split(':')
+        it.suggested_type  = kind
+        it.suggested_id    = id
+        it.suggested_name  = m.match.name
+        it.suggested_score = Math.round(m.score * 100)
+      }
+    }
+
+    const net = Number(it.net_sales) || 0
+    if (it.target_type && it.target_type !== 'ignore') mappedNet += net
+    else if (it.target_type !== 'ignore') unmappedNet += net
+  }
+
+  const totals = parsed.totals || {}
+  const id = uid()
+  const warnings = Array.isArray(parsed.warnings) ? parsed.warnings : []
+
+  await c.env.DB.prepare(
+    `INSERT INTO pos_imports
+       (id, org_id, source, file_name, file_key, status, period_start, period_end,
+        line_count, gross_total, discount_total, net_total, tax_total,
+        mapped_net, unmapped_net, warning_count, parsed_data, content_hash)
+     VALUES (?, ?, ?, ?, ?, 'Action Required', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(
+    id, org, String(parsed.source || 'square'),
+    String(body.file_name || parsed.file_name || ''), String(body.file_key || ''),
+    String(parsed.period_start || ''), String(parsed.period_end || ''),
+    parsed.lines.length,
+    round2(Number(totals.gross) || 0), round2(Number(totals.discounts) || 0),
+    round2(Number(totals.net) || 0), round2(Number(totals.tax) || 0),
+    round2(mappedNet), round2(unmappedNet), warnings.length,
+    JSON.stringify({ ...parsed, items }), contentHash,
+  ).run()
+
+  return c.json({
+    ok: true, import_id: id,
+    items, mapped_net: round2(mappedNet), unmapped_net: round2(unmappedNet),
+    coverage: totals.net ? Math.round((mappedNet / Number(totals.net)) * 100) : 0,
+  })
+})
+
+// The imports list. Its own route rather than generic CRUD so parsed_data — a
+// blob the size of the CSV — never rides along with a list of twelve months.
+app.get('/api/pos-imports', async (c) => {
+  const org = orgOf(c)
+  const rows = await c.env.DB.prepare(
+    `SELECT id, source, file_name, status, period_start, period_end, line_count,
+            gross_total, discount_total, net_total, tax_total, mapped_net,
+            unmapped_net, warning_count, committed_at, voided_at, void_reason, created_at
+       FROM pos_imports WHERE org_id IS ?
+      ORDER BY period_start DESC, created_at DESC LIMIT 200`
+  ).bind(org).all()
+  return c.json({ data: rows.results || [] })
+})
+
+app.get('/api/pos-imports/:id', async (c) => {
+  const org = orgOf(c)
+  const row = await c.env.DB.prepare(
+    `SELECT * FROM pos_imports WHERE id = ? AND org_id IS ?`
+  ).bind(c.req.param('id'), org).first<any>()
+  // Another org's import reports 404, not 403 — see the accounts invariants.
+  if (!row) return c.json({ error: 'Import not found' }, 404)
+
+  let parsed = null
+  if (row.parsed_data) { try { parsed = JSON.parse(row.parsed_data) } catch (_) { parsed = null } }
+  return c.json({ ...row, parsed_data: undefined, parsed })
+})
+
+// Committed lines. Read-only, and only through here — pos_sale_lines is not in
+// ALLOWED_TABLES precisely so nothing else can reach it.
+app.get('/api/pos-imports/:id/lines', async (c) => {
+  const org = orgOf(c)
+  const own = await c.env.DB.prepare(
+    `SELECT id FROM pos_imports WHERE id = ? AND org_id IS ?`
+  ).bind(c.req.param('id'), org).first<{ id: string }>()
+  if (!own) return c.json({ error: 'Import not found' }, 404)
+
+  const rows = await c.env.DB.prepare(
+    `SELECT * FROM pos_sale_lines WHERE import_id = ? AND org_id IS ? ORDER BY sold_date, sold_time`
+  ).bind(c.req.param('id'), org).all()
+  return c.json({ data: rows.results || [] })
+})
+
+// Work out every stock movement an import would make, WITHOUT writing anything.
+//
+// /preview and /commit both call this, so the panel a user approves is produced
+// by the code that then writes. Pack Run's preview recomputes independently of
+// its confirm step and the two can disagree; that is a bug worth not repeating.
+//
+// Movements are aggregated per ingredient PER BUSINESS DAY, not per sale: five
+// pizzas across eight ingredients is 40 rows a week, and a real restaurant doing
+// 400 covers a day would bury its own stock history.
+async function planPosDepletion(
+  db: D1Database, org: string | null,
+  lines: any[], itemsByKey: Map<string, any>
+) {
+  const ctx = await buildExplodeCtx(db, org)
+
+  // day|item_type|item_id → accumulated deduction
+  const agg = new Map<string, {
+    sold_date: string; item_id: string; item_type: string; item_name: string
+    qty: number; unit: string
+  }>()
+  const warnings: { kind: string; item_name: string; message: string }[] = []
+  const notes = new Set<string>()
+  const lineErrors = new Map<string, string>()   // pos_item_key → first error
+  // Which POS items actually moved stock. Distinguishes "mapped and depleted"
+  // from "mapped but the recipe is empty" — different problems, different fixes.
+  const depletedKeys = new Set<string>()
+  let mappedLines = 0, unmappedLines = 0
+
+  for (const l of lines) {
+    const it = itemsByKey.get(l.pos_item_key)
+    if (!it || !it.target_type || it.target_type === 'ignore' || !it.target_id) {
+      unmappedLines++
+      continue
+    }
+    mappedLines++
+
+    const res = explodeSale(
+      { type: it.target_type, id: it.target_id },
+      Number(l.qty) || 0, Number(it.qty_per_sale) || 1, it.target_unit || '', ctx
+    )
+    for (const n of res.notes) notes.add(n)
+    if (res.errors.length && !lineErrors.has(l.pos_item_key)) {
+      lineErrors.set(l.pos_item_key, res.errors[0])
+    }
+
+    if (res.deductions.length) depletedKeys.add(l.pos_item_key)
+
+    for (const d of res.deductions) {
+      const key = `${l.sold_date}|${d.item_type}|${d.item_id}`
+      const cur = agg.get(key)
+      if (cur) {
+        // Two lines can name the same ingredient in different units (a recipe in
+        // g, a finished-product line in kg). Normalise onto whatever the first
+        // one used; the bin conversion below handles the rest.
+        if (sameUnitName(cur.unit, d.unit)) { cur.qty += d.qty }
+        else {
+          const conv = convertQty(d.qty, d.unit, cur.unit, null)
+          if (conv.error) { agg.set(key + '|' + d.unit, { ...d, sold_date: l.sold_date }) }
+          else cur.qty += conv.qty as number
+        }
+      } else {
+        agg.set(key, { sold_date: l.sold_date, item_id: d.item_id, item_type: d.item_type,
+                       item_name: d.item_name, qty: d.qty, unit: d.unit })
+      }
+    }
+  }
+
+  // Bind every deduction to the bin it will actually come out of — one read for
+  // all of them rather than one per movement.
+  const wanted = [...new Set([...agg.values()].map(a => a.item_type + '|' + a.item_id))]
+  const bins = new Map<string, any>()
+  if (wanted.length) {
+    const rows = await db.prepare(
+      `SELECT id, item_id, item_type, item_name, quantity, unit, category
+         FROM inventory WHERE org_id IS ?`
+    ).bind(org).all()
+    for (const r of (rows.results || []) as any[]) {
+      const k = r.item_type + '|' + r.item_id
+      if (!bins.has(k)) bins.set(k, r)   // first match wins, as findInvRow does
+    }
+  }
+
+  // Raw-material defaults for bins that do not exist yet, plus the average
+  // weight that any each↔weight conversion depends on.
+  const prodRows = await db.prepare(
+    `SELECT id, name, base_unit, avg_weight_per_unit, category FROM generic_products WHERE org_id IS ?`
+  ).bind(org).all()
+  const products = new Map<string, any>()
+  for (const p of (prodRows.results || []) as any[]) products.set(p.id, p)
+
+  const movements: any[] = []
+  for (const a of agg.values()) {
+    const binKey = a.item_type + '|' + a.item_id
+    const bin    = bins.get(binKey)
+    const prod   = a.item_type === 'raw_material' ? products.get(a.item_id) : null
+    const recipe = a.item_type === 'batch' ? ctx.recipes.get(a.item_id) : null
+
+    // The bin's own unit is the unit of record. A bin that does not exist yet
+    // takes the product's stocking unit, then the recipe's yield unit, then the
+    // unit the BOM line was written in.
+    const binUnit = (bin && bin.unit)
+      || (prod && prod.base_unit)
+      || (recipe && recipe.yield_unit)
+      || (a.item_type === 'finished_product' ? 'Each' : a.unit)
+      || 'kg'
+
+    const avgW = prod && prod.avg_weight_per_unit ? Number(prod.avg_weight_per_unit) : null
+    const conv = convertQty(a.qty, a.unit || binUnit, binUnit, avgW)
+    if (conv.error) {
+      // Drop THIS deduction only. The revenue side is unambiguous and useful on
+      // its own, and refusing a whole shift because one product is missing an
+      // average weight is the wrong trade. The import closes with a warning.
+      warnings.push({ kind: 'unit', item_name: a.item_name, message: `${a.item_name}: ${conv.error}.` })
+      continue
+    }
+
+    const qty = Math.round((conv.qty as number) * 1e6) / 1e6
+    if (!(qty > 0)) continue
+
+    movements.push({
+      sold_date: a.sold_date,
+      inventory_id: bin ? bin.id : '',
+      item_id: a.item_id, item_type: a.item_type,
+      item_name: bin ? bin.item_name : a.item_name,
+      qty, unit: binUnit,
+      bin_exists: !!bin,
+      bin_start: bin ? Number(bin.quantity) || 0 : 0,
+      category: (bin && bin.category)
+        || (prod && prod.category)
+        || (a.item_type === 'batch' ? 'Batch' : a.item_type === 'finished_product' ? 'Finished Product' : ''),
+    })
+  }
+
+  for (const [key, msg] of lineErrors) {
+    const it = itemsByKey.get(key)
+    warnings.push({ kind: 'explode', item_name: (it && it.pos_item_name) || key, message: msg })
+  }
+
+  movements.sort((x, y) => (x.sold_date || '').localeCompare(y.sold_date || '')
+                        || x.item_name.localeCompare(y.item_name))
+
+  // A month of 60 ingredients over 30 days is 1,800 stock movements plus
+  // everything else, which is more than one D1 batch should carry — and
+  // chunking would give up the atomicity that makes this safe to void. So past
+  // the threshold, collapse to one movement per ingredient for the whole
+  // import. Degrade, don't fail.
+  let collapsed = false
+  if (movements.length > POS_MAX_MOVEMENTS) {
+    const byBin = new Map<string, any>()
+    for (const m of movements) {
+      const k = m.item_type + '|' + m.item_id
+      const cur = byBin.get(k)
+      if (cur) { cur.qty = Math.round((cur.qty + m.qty) * 1e6) / 1e6; cur.sold_date = m.sold_date }
+      else byBin.set(k, { ...m })
+    }
+    movements.length = 0
+    movements.push(...byBin.values())
+    collapsed = true
+  }
+
+  // Running balance per bin. Each movement has to see the ones before it, or a
+  // bin that only goes negative on the fourth day would look fine on every row
+  // and never reach bins_negative.
+  const running = new Map<string, number>()
+  for (const m of movements) {
+    const k = m.item_type + '|' + m.item_id
+    const before = running.has(k) ? running.get(k)! : m.bin_start
+    const after  = Math.round((before - m.qty) * 1e6) / 1e6
+    m.before = before
+    m.after  = after
+    running.set(k, after)
+  }
+
+  // Going negative is CORRECT for backflush — it reveals stock that was used but
+  // never recorded as bought. It still needs saying out loud, because to anyone
+  // seeing it for the first time it reads as a bug.
+  const negative = [...running.entries()].filter(([, v]) => v < 0)
+    .map(([k]) => (movements.find(m => m.item_type + '|' + m.item_id === k) || {}).item_name)
+    .filter(Boolean)
+
+  return {
+    movements, warnings, notes: [...notes], collapsed, depletedKeys,
+    mapped_lines: mappedLines, unmapped_lines: unmappedLines,
+    bins_negative: [...new Set(negative)],
+    bins_created: [...new Set(movements.filter(m => !m.bin_exists)
+      .map(m => m.item_type + '|' + m.item_id))].length,
+  }
+}
+
+// What this import would do to stock. Writes nothing.
+app.post('/api/pos-imports/:id/preview', async (c) => {
+  const org = orgOf(c)
+  const row = await c.env.DB.prepare(
+    `SELECT id, status, parsed_data FROM pos_imports WHERE id = ? AND org_id IS ?`
+  ).bind(c.req.param('id'), org).first<{ id: string; status: string; parsed_data: string }>()
+  if (!row) return c.json({ error: 'Import not found' }, 404)
+  if (!row.parsed_data) return c.json({ error: 'This import has already been committed.' }, 409)
+
+  const body = await c.req.json().catch(() => ({})) as { items?: any[] }
+  let parsed: any
+  try { parsed = JSON.parse(row.parsed_data) } catch (_) { return c.json({ error: 'Could not read that import.' }, 500) }
+
+  // Mapping decisions from the review screen win; the stored ones are the
+  // fallback so a preview works before anything is touched.
+  const items = Array.isArray(body.items) && body.items.length ? body.items : (parsed.items || [])
+  const byKey = new Map<string, any>()
+  for (const it of items) byKey.set(it.pos_item_key, it)
+
+  const plan = await planPosDepletion(c.env.DB, org, parsed.lines || [], byKey)
+  return c.json({ ok: true, ...plan })
+})
+
+// Commit an import: write the sale lines, move the stock, remember the mappings.
+//
+// One DB.batch() for the lot. Stock and revenue arrive together or not at all —
+// a half-applied import is the one state nobody could reason about afterwards.
+app.post('/api/pos-imports/:id/commit', async (c) => {
+  const org = orgOf(c)
+  const importId = c.req.param('id')
+  const body = await c.req.json().catch(() => ({})) as {
+    items?: any[]; deplete?: boolean
+  }
+
+  const row = await c.env.DB.prepare(
+    `SELECT id, source, status, parsed_data FROM pos_imports WHERE id = ? AND org_id IS ?`
+  ).bind(importId, org).first<{ id: string; source: string; status: string; parsed_data: string }>()
+  if (!row) return c.json({ error: 'Import not found' }, 404)
+  // The same guard stock-take submit uses: a draft commits once.
+  if (row.status !== 'Action Required') {
+    return c.json({ error: 'This import has already been committed.' }, 409)
+  }
+
+  let parsed: any
+  try { parsed = JSON.parse(row.parsed_data) } catch (_) {
+    return c.json({ error: 'Could not read that import.' }, 500)
+  }
+
+  const items = Array.isArray(body.items) && body.items.length ? body.items : (parsed.items || [])
+  const byKey = new Map<string, any>()
+  for (const it of items) byKey.set(it.pos_item_key, it)
+
+  const allLines: any[] = parsed.lines || []
+
+  // ── Duplicate lines ──────────────────────────────────────────
+  // Exporting Jul 1–15 and then Jul 1–31 is the ordinary way this goes wrong,
+  // and a file hash cannot catch it. The unique index on external_ref is the
+  // backstop; this pre-query is what makes the overlap a SKIP rather than a
+  // rollback, because D1's batch() is one transaction and a constraint error
+  // would take the whole import down with it.
+  const refs = allLines.map(l => String(l.external_ref || '')).filter(Boolean)
+  const seen = new Set<string>()
+  if (refs.length) {
+    // Chunked: SQLite caps bound parameters, and a month of sales can be
+    // thousands of refs.
+    for (let i = 0; i < refs.length; i += 200) {
+      const chunk = refs.slice(i, i + 200)
+      const marks = chunk.map(() => '?').join(',')
+      const found = await c.env.DB.prepare(
+        `SELECT external_ref FROM pos_sale_lines
+          WHERE org_id IS ? AND voided_at IS NULL AND external_ref IN (${marks})`
+      ).bind(org, ...chunk).all()
+      for (const r of (found.results || []) as any[]) seen.add(r.external_ref)
+    }
+  }
+
+  const lines = allLines.filter(l => !(l.external_ref && seen.has(l.external_ref)))
+  const skipped = allLines.length - lines.length
+  if (!lines.length) {
+    return c.json({
+      ok: true, import_id: importId, lines_written: 0, skipped_duplicates: skipped,
+      message: 'Every line in this file has already been imported. Nothing was changed.',
+    })
+  }
+
+  const deplete = body.deplete !== false
+  const plan = deplete
+    ? await planPosDepletion(c.env.DB, org, lines, byKey)
+    : { movements: [], warnings: [], notes: [], collapsed: false,
+        depletedKeys: new Set<string>(),
+        mapped_lines: 0, unmapped_lines: lines.length, bins_negative: [], bins_created: 0 }
+
+  const now = new Date().toISOString()
+  const stmts: D1PreparedStatement[] = []
+
+  // ── Sale lines ───────────────────────────────────────────────
+  let mappedNet = 0, unmappedNet = 0
+  const byMonth: Record<string, number> = {}
+
+  for (const l of lines) {
+    const it = byKey.get(l.pos_item_key) || {}
+    const tType = it.target_type || ''
+    const tId   = tType && tType !== 'ignore' ? (it.target_id || '') : ''
+    const net   = Number(l.net_sales) || 0
+
+    if (tType && tType !== 'ignore' && tId) mappedNet += net
+    else if (tType !== 'ignore') unmappedNet += net
+
+    const month = String(l.sold_date || '').slice(0, 7)
+    if (month) byMonth[month] = round2((byMonth[month] || 0) + net)
+
+    // Whether this line actually moved stock. Three states the UI has to tell
+    // apart: not mapped, mapped but nothing came off (empty recipe, or a unit
+    // that wouldn't convert), and mapped and depleted.
+    const moved = deplete && plan.depletedKeys.has(l.pos_item_key) ? 1 : 0
+
+    stmts.push(c.env.DB.prepare(
+      `INSERT INTO pos_sale_lines
+         (id, org_id, import_id, sold_date, sold_time, pos_item_name, pos_item_key,
+          pos_category, pos_sku, price_point, modifiers, qty, gross_sales, discounts,
+          net_sales, tax, target_type, target_id, target_name, qty_per_sale, target_unit,
+          depleted, deplete_error, external_ref, external_txn)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      uid(), org, importId,
+      String(l.sold_date || ''), String(l.sold_time || ''),
+      String(l.pos_item_name || ''), String(l.pos_item_key || ''),
+      String(l.pos_category || ''), String(l.pos_sku || ''), String(l.price_point || ''),
+      String(l.modifiers || ''),
+      Number(l.qty) || 0, Number(l.gross_sales) || 0, Number(l.discounts) || 0,
+      net, Number(l.tax) || 0,
+      tType, tId, String(it.target_name || ''),
+      Number(it.qty_per_sale) || 1, String(it.target_unit || ''),
+      tId ? moved : 0, '',
+      String(l.external_ref || ''), String(l.external_txn || ''),
+    ))
+  }
+
+  // ── Stock ────────────────────────────────────────────────────
+  // Bins that don't exist yet are created here, with the id generated up front
+  // so the stock_log row can point at it in the same batch.
+  const newBinId = new Map<string, string>()
+  for (const m of plan.movements) {
+    const k = m.item_type + '|' + m.item_id
+    if (!m.bin_exists && !newBinId.has(k)) {
+      const id = uid()
+      newBinId.set(k, id)
+      stmts.push(c.env.DB.prepare(
+        `INSERT INTO inventory (id, item_id, item_type, item_name, category, quantity, unit, lot_number, org_id)
+         VALUES (?, ?, ?, ?, ?, 0, ?, '', ?)`
+      ).bind(id, m.item_id, m.item_type, m.item_name, m.category || '', m.unit, org))
+    }
+  }
+
+  // One UPDATE per bin, relative. Absolute (SET quantity = ?) would race a
+  // Produce Batch running on another device mid-import.
+  const perBin = new Map<string, { id: string; qty: number }>()
+  for (const m of plan.movements) {
+    const k = m.item_type + '|' + m.item_id
+    const id = m.inventory_id || newBinId.get(k) || ''
+    if (!id) continue
+    const cur = perBin.get(k)
+    if (cur) cur.qty = Math.round((cur.qty + m.qty) * 1e6) / 1e6
+    else perBin.set(k, { id, qty: m.qty })
+  }
+  for (const b of perBin.values()) {
+    // ROUND to 6dp: relative updates accumulate binary-float drift, and a bin
+    // that reads 4.8999999999999995 instead of 4.9 looks broken in a stock take
+    // even though it is off by 5e-16. Matches the 1e-6 rounding upsertInventory
+    // already applies on the client.
+    stmts.push(c.env.DB.prepare(
+      `UPDATE inventory SET quantity = ROUND(quantity - ?, 6) WHERE id = ? AND org_id IS ?`
+    ).bind(b.qty, b.id, org))
+  }
+
+  // One stock_log row per movement — per ingredient per business day, unless the
+  // import was large enough to collapse. reason_code 'usage' is what makes this
+  // show up in waste and variance reporting.
+  for (const m of plan.movements) {
+    const k = m.item_type + '|' + m.item_id
+    const invId = m.inventory_id || newBinId.get(k) || ''
+    stmts.push(c.env.DB.prepare(
+      `INSERT INTO stock_log
+         (id, inventory_id, item_id, item_type, item_name, change, reason, reason_code,
+          note, lot_number, moved_at, org_id, pos_import_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'usage', ?, '', ?, ?, ?)`
+    ).bind(
+      uid(), invId, m.item_id, m.item_type, m.item_name, -m.qty,
+      'Sales import',
+      plan.collapsed
+        ? `POS import ${parsed.period_start}..${parsed.period_end}`
+        : `Sold on ${m.sold_date}`,
+      m.sold_date ? `${m.sold_date}T12:00:00.000Z` : now,
+      org, importId,
+    ))
+  }
+
+  // ── Remember the mappings ────────────────────────────────────
+  // So the next upload routes itself and the reviewer only sees what's new.
+  const source = String(row.source || 'square')
+  for (const it of items) {
+    if (!it.target_type) continue
+    if (it.match_source === 'remembered') continue      // already stored
+    const key = it.all_sizes
+      ? String(it.pos_item_key).split('|')[0] + '|'
+      : String(it.pos_item_key)
+    stmts.push(c.env.DB.prepare(
+      `INSERT INTO pos_item_map
+         (id, org_id, source, pos_item_key, pos_item_name, price_point,
+          target_type, target_id, qty_per_sale, target_unit)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(COALESCE(org_id, ''), source, pos_item_key) DO UPDATE SET
+         target_type = excluded.target_type,
+         target_id   = excluded.target_id,
+         qty_per_sale= excluded.qty_per_sale,
+         target_unit = excluded.target_unit,
+         updated_at  = datetime('now')`
+    ).bind(
+      uid(), org, source, key,
+      String(it.pos_item_name || ''), it.all_sizes ? '' : String(it.price_point || ''),
+      String(it.target_type), String(it.target_id || ''),
+      Number(it.qty_per_sale) || 1, String(it.target_unit || ''),
+    ))
+  }
+
+  // ── Close the import ─────────────────────────────────────────
+  // parsed_data is cleared, which is what stops the review screen re-hydrating
+  // a draft that has already been posted (invoices do the same).
+  stmts.push(c.env.DB.prepare(
+    `UPDATE pos_imports
+        SET status = 'Closed', parsed_data = '', committed_at = ?,
+            mapped_net = ?, unmapped_net = ?, warning_count = ?, line_count = ?
+      WHERE id = ? AND org_id IS ?`
+  ).bind(now, round2(mappedNet), round2(unmappedNet), plan.warnings.length,
+         lines.length, importId, org))
+
+  await c.env.DB.batch(stmts)
+
+  return c.json({
+    ok: true, import_id: importId,
+    lines_written: lines.length, skipped_duplicates: skipped,
+    revenue: { net: round2(mappedNet + unmappedNet), by_month: byMonth },
+    movements: plan.movements.length, bins_created: plan.bins_created,
+    bins_negative: plan.bins_negative, collapsed: plan.collapsed,
+    warnings: plan.warnings, notes: plan.notes,
+    unmapped_net: round2(unmappedNet),
+  })
+})
+
+// Void a committed import: reverse its stock and drop its revenue.
+//
+// Invoices only have a money side to reverse; this has a stock side too, which
+// is what stock_log.pos_import_id is for — it says exactly which movements this
+// import made, so they can be undone without guessing.
+app.post('/api/pos-imports/:id/void', async (c) => {
+  const org = orgOf(c)
+  const importId = c.req.param('id')
+  const body = await c.req.json().catch(() => ({})) as { reason?: string }
+
+  const row = await c.env.DB.prepare(
+    `SELECT id, status, voided_at FROM pos_imports WHERE id = ? AND org_id IS ?`
+  ).bind(importId, org).first<{ id: string; status: string; voided_at: string | null }>()
+  if (!row) return c.json({ error: 'Import not found' }, 404)
+  if (row.voided_at) return c.json({ error: 'That import is already voided.' }, 409)
+  if (row.status !== 'Closed') return c.json({ error: 'Only a committed import can be voided.' }, 409)
+
+  // Its own movements only. Reversal rows are written with an empty
+  // pos_import_id precisely so a second void cannot reverse the reversal.
+  const moves = await c.env.DB.prepare(
+    `SELECT id, inventory_id, item_id, item_type, item_name, change
+       FROM stock_log WHERE pos_import_id = ? AND org_id IS ? AND change != 0`
+  ).bind(importId, org).all()
+
+  const now = new Date().toISOString()
+  const stmts: D1PreparedStatement[] = [
+    c.env.DB.prepare(
+      `UPDATE pos_imports SET voided_at = ?, void_reason = ? WHERE id = ? AND org_id IS ?`
+    ).bind(now, String(body.reason || '').trim(), importId, org),
+    c.env.DB.prepare(
+      `UPDATE pos_sale_lines SET voided_at = ? WHERE import_id = ? AND org_id IS ?`
+    ).bind(now, importId, org),
+  ]
+
+  for (const m of (moves.results || []) as any[]) {
+    // change is negative for a deduction, so subtracting it puts the stock back.
+    stmts.push(c.env.DB.prepare(
+      `UPDATE inventory SET quantity = ROUND(quantity - ?, 6) WHERE id = ? AND org_id IS ?`
+    ).bind(m.change, m.inventory_id, org))
+    stmts.push(c.env.DB.prepare(
+      `INSERT INTO stock_log
+         (id, inventory_id, item_id, item_type, item_name, change, reason, reason_code,
+          note, lot_number, moved_at, org_id, pos_import_id)
+       VALUES (?, ?, ?, ?, ?, ?, 'Sales import voided', 'correction', ?, '', ?, ?, '')`
+    ).bind(uid(), m.inventory_id, m.item_id, m.item_type, m.item_name, -m.change,
+           `Reversal of sales import ${importId}`, now, org))
+  }
+
+  await c.env.DB.batch(stmts)
+  return c.json({ ok: true, voided: true, movements_reversed: (moves.results || []).length })
+})
+
+// Restore a voided import: re-apply exactly what it originally did.
+app.post('/api/pos-imports/:id/restore', async (c) => {
+  const org = orgOf(c)
+  const importId = c.req.param('id')
+
+  const row = await c.env.DB.prepare(
+    `SELECT id, voided_at FROM pos_imports WHERE id = ? AND org_id IS ?`
+  ).bind(importId, org).first<{ id: string; voided_at: string | null }>()
+  if (!row) return c.json({ error: 'Import not found' }, 404)
+  if (!row.voided_at) return c.json({ error: 'That import is not voided.' }, 409)
+
+  const moves = await c.env.DB.prepare(
+    `SELECT inventory_id, item_id, item_type, item_name, change
+       FROM stock_log WHERE pos_import_id = ? AND org_id IS ? AND change != 0`
+  ).bind(importId, org).all()
+
+  const now = new Date().toISOString()
+  const stmts: D1PreparedStatement[] = [
+    c.env.DB.prepare(
+      `UPDATE pos_imports SET voided_at = NULL, void_reason = '' WHERE id = ? AND org_id IS ?`
+    ).bind(importId, org),
+    c.env.DB.prepare(
+      `UPDATE pos_sale_lines SET voided_at = NULL WHERE import_id = ? AND org_id IS ?`
+    ).bind(importId, org),
+  ]
+
+  for (const m of (moves.results || []) as any[]) {
+    stmts.push(c.env.DB.prepare(
+      `UPDATE inventory SET quantity = ROUND(quantity + ?, 6) WHERE id = ? AND org_id IS ?`
+    ).bind(m.change, m.inventory_id, org))
+    stmts.push(c.env.DB.prepare(
+      `INSERT INTO stock_log
+         (id, inventory_id, item_id, item_type, item_name, change, reason, reason_code,
+          note, lot_number, moved_at, org_id, pos_import_id)
+       VALUES (?, ?, ?, ?, ?, ?, 'Sales import restored', 'correction', ?, '', ?, ?, '')`
+    ).bind(uid(), m.inventory_id, m.item_id, m.item_type, m.item_name, m.change,
+           `Restore of sales import ${importId}`, now, org))
+  }
+
+  await c.env.DB.batch(stmts)
+  return c.json({ ok: true, restored: true, movements_reapplied: (moves.results || []).length })
+})
+
+// A draft has produced nothing — no lines, no stock, no revenue — so it is the
+// one thing here that is genuinely deletable. Committed imports void instead.
+app.delete('/api/pos-imports/:id', async (c) => {
+  const org = orgOf(c)
+  const row = await c.env.DB.prepare(
+    `SELECT id, status FROM pos_imports WHERE id = ? AND org_id IS ?`
+  ).bind(c.req.param('id'), org).first<{ id: string; status: string }>()
+  if (!row) return c.json({ error: 'Import not found' }, 404)
+  if (row.status !== 'Action Required') {
+    return c.json({ error: 'This import has already been committed. Void it instead.' }, 409)
+  }
+  await c.env.DB.prepare(`DELETE FROM pos_imports WHERE id = ? AND org_id IS ?`)
+    .bind(row.id, org).run()
+  return c.body(null, 204)
 })
 
 // POST /api/invoices/:id/void
@@ -1933,7 +2730,7 @@ app.post('/api/suppliers/match', async (c) => {
   // could be auto-corrected to a vendor name belonging to another restaurant.
   const all = await c.env.DB.prepare(`SELECT id, name FROM suppliers WHERE org_id IS ?`)
     .bind(org).all<{ id: string; name: string }>()
-  return c.json(classifySupplierMatch(name, all.results || []))
+  return c.json(classifyNameMatch(name, all.results || []))
 })
 
 // PUT /api/suppliers/:id
@@ -2067,7 +2864,7 @@ app.post('/api/bulk/upsert-products', async (c) => {
     if (!existingSupplier) {
       const all = await c.env.DB.prepare(`SELECT id, name FROM suppliers WHERE org_id IS ?`)
         .bind(org).all<{ id: string; name: string }>()
-      const m = classifySupplierMatch(vendorName, all.results || [])
+      const m = classifyNameMatch(vendorName, all.results || [])
       if (m.decision === 'auto' && m.match) existingSupplier = m.match
     }
 
@@ -2297,6 +3094,196 @@ function convertUnitCost(
     return cost * (to.factor / from.factor)
   }
   return null
+}
+
+// Convert a QUANTITY between units — the reciprocal of convertUnitCost above,
+// and the server-side twin of invConvertQty in public/static/utils.js. KEEP THE
+// TWO IN SYNC: same table, same each↔weight rules, same refusals. The worker
+// bundle cannot import from public/, which is why this pair exists at all (the
+// same reason UNIT_FACTORS is duplicated).
+//
+// Returns { qty } or { error }. It never guesses: a pair it cannot bridge is an
+// error, because silently treating 250 g as 250 kg would wreck a stock figure
+// in a way nobody would spot until a stock take months later.
+function convertQty(
+  qty: number, fromUnit: string, toUnit: string, avgWeightKg: number | null
+): { qty: number; error?: undefined } | { qty?: undefined; error: string } {
+  if (sameUnitName(fromUnit, toUnit)) return { qty }
+
+  const from = unitInfo(fromUnit)
+  const to   = unitInfo(toUnit)
+
+  // each → weight, via the product's average weight per each (stored in kg).
+  if (isEachUnit(fromUnit) && to && to.dim === 'weight') {
+    if (!avgWeightKg || avgWeightKg <= 0) {
+      return { error: `stocked in ${toUnit} but the recipe calls for ${fromUnit} — set an Average Weight per Unit on the product` }
+    }
+    return { qty: (qty * avgWeightKg) / to.factor }
+  }
+  // weight → each.
+  if (from && from.dim === 'weight' && isEachUnit(toUnit)) {
+    if (!avgWeightKg || avgWeightKg <= 0) {
+      return { error: `stocked in ${toUnit} but the recipe calls for ${fromUnit} — set an Average Weight per Unit on the product` }
+    }
+    return { qty: (qty * from.factor) / avgWeightKg }
+  }
+  // Same dimension (kg↔g, L↔ml, …).
+  if (from && to && from.dim === to.dim) {
+    return { qty: qty * (from.factor / to.factor) }
+  }
+  // Weight↔volume is deliberately not bridged: it needs a density this app does
+  // not hold, and a wrong density is worse than a refusal.
+  return { error: `cannot convert ${fromUnit} to ${toUnit}` }
+}
+
+// ─── Sales explosion (backflush) ──────────────────────────────
+// Given "this menu item sold N times", work out what comes off the shelf.
+//
+// The bill of materials is exactly two levels deep and cannot be deeper:
+// finished_product_items may reference a recipe or a product, but recipe_items
+// has no item_type column, so a recipe holds only products. The depth guard
+// below is therefore unreachable today — it exists so that if recipe_items ever
+// gains an item_type, the failure is a loud error and not an infinite loop.
+//
+// This function is pure: everything it needs is passed in, and units are left
+// as the BOM wrote them. Binding a deduction to the unit its inventory bin is
+// actually held in happens later, against the bins themselves.
+
+type Deduction = {
+  item_id: string
+  item_type: 'raw_material' | 'batch' | 'finished_product'
+  item_name: string
+  qty: number
+  unit: string
+}
+
+type ExplodeCtx = {
+  recipes:     Map<string, { id: string; name: string; servings: number; yield_unit: string; production_mode: string }>
+  recipeItems: Map<string, { product_id: string; product_name: string; quantity: number; unit: string }[]>
+  fpItems:     Map<string, { item_type: string; ref_id: string; ref_name: string; quantity: number; unit: string }[]>
+}
+
+type ExplodeOut = { deductions: Deduction[]; errors: string[]; notes: string[] }
+
+function explodeRecipe(
+  recipeId: string, amount: number, amountUnit: string,
+  ctx: ExplodeCtx, depth: number, out: ExplodeOut
+) {
+  if (depth > 1) { out.errors.push('Recipe nesting deeper than two levels is not supported.'); return }
+  const r = ctx.recipes.get(recipeId)
+  if (!r) { out.errors.push('A recipe used by this item no longer exists.'); return }
+
+  const yieldUnit = r.yield_unit || 'kg'
+  const servings  = Number(r.servings) || 1
+
+  // Same arithmetic as Produce Batch, inverted: sell N portions, then produce N
+  // portions, and stock is back where it started.
+  const conv = convertQty(amount, amountUnit || yieldUnit, yieldUnit, null)
+  if (conv.error) { out.errors.push(`${r.name}: ${conv.error}`); return }
+  const scale = (conv.qty as number) / servings
+
+  const lines = ctx.recipeItems.get(recipeId) || []
+  if (!lines.length) { out.notes.push(`${r.name} has no ingredients, so nothing came off stock for it.`); return }
+
+  for (const ri of lines) {
+    const q = (Number(ri.quantity) || 0) * scale
+    if (!(q > 0)) continue
+    out.deductions.push({
+      item_id: ri.product_id, item_type: 'raw_material',
+      item_name: ri.product_name, qty: q, unit: ri.unit || '',
+    })
+  }
+}
+
+function explodeSale(
+  target: { type: string; id: string },
+  soldQty: number, qtyPerSale: number, saleUnit: string, ctx: ExplodeCtx
+): ExplodeOut {
+  const out: ExplodeOut = { deductions: [], errors: [], notes: [] }
+  const units = (Number(soldQty) || 0) * (Number(qtyPerSale) || 1)
+  if (!(units > 0)) return out
+
+  if (target.type === 'finished_product') {
+    const lines = ctx.fpItems.get(target.id) || []
+    if (!lines.length) { out.notes.push('That finished product has no ingredients listed.'); return out }
+
+    for (const line of lines) {
+      const lineQty = (Number(line.quantity) || 0) * units
+      if (!(lineQty > 0)) continue
+
+      if (line.item_type === 'recipe') {
+        const r = ctx.recipes.get(line.ref_id)
+        const mode = r ? (r.production_mode || 'on_demand') : 'on_demand'
+        if (mode === 'ignore') {
+          out.notes.push(`${line.ref_name} is set to never come off stock.`)
+        } else if (mode === 'batched') {
+          // THE ANTI-DOUBLE-COUNT BRANCH. This recipe is produced ahead into a
+          // batch bin, so the sale consumes that bin and stops. Produce Batch is
+          // what turns raw ingredients into it. Exploding here as well would
+          // count every tomato twice.
+          out.deductions.push({
+            item_id: line.ref_id, item_type: 'batch',
+            item_name: line.ref_name, qty: lineQty, unit: line.unit || '',
+          })
+        } else {
+          explodeRecipe(line.ref_id, lineQty, line.unit || '', ctx, 1, out)
+        }
+      } else {
+        // 'product' in finished_product_items is 'raw_material' in inventory —
+        // two different namespaces for item_type. Pack Run maps them the same way.
+        out.deductions.push({
+          item_id: line.ref_id, item_type: 'raw_material',
+          item_name: line.ref_name, qty: lineQty, unit: line.unit || '',
+        })
+      }
+    }
+    return out
+  }
+
+  if (target.type === 'recipe') {
+    const r = ctx.recipes.get(target.id)
+    if (!r) { out.errors.push('That recipe no longer exists.'); return out }
+    const mode = r.production_mode || 'on_demand'
+    if (mode === 'ignore') { out.notes.push(`${r.name} is set to never come off stock.`); return out }
+    if (mode === 'batched') {
+      out.deductions.push({
+        item_id: r.id, item_type: 'batch', item_name: r.name,
+        qty: units, unit: saleUnit || r.yield_unit || 'kg',
+      })
+      return out
+    }
+    explodeRecipe(target.id, units, saleUnit || r.yield_unit || '', ctx, 0, out)
+    return out
+  }
+
+  return out
+}
+
+// Load every recipe, recipe line and finished-product line for one org, keyed
+// for explodeSale. One read for the whole import rather than per sale line.
+async function buildExplodeCtx(db: D1Database, org: string | null): Promise<ExplodeCtx> {
+  const [recipeRows, recipeItemRows, fpItemRows] = await Promise.all([
+    db.prepare(`SELECT id, name, servings, yield_unit, production_mode FROM recipes WHERE org_id IS ?`).bind(org).all(),
+    db.prepare(`SELECT recipe_id, product_id, product_name, quantity, unit FROM recipe_items WHERE org_id IS ?`).bind(org).all(),
+    db.prepare(`SELECT finished_product_id, item_type, ref_id, ref_name, quantity, unit FROM finished_product_items WHERE org_id IS ?`).bind(org).all(),
+  ])
+
+  const recipes = new Map<string, any>()
+  for (const r of (recipeRows.results || []) as any[]) recipes.set(r.id, r)
+
+  const recipeItems = new Map<string, any[]>()
+  for (const ri of (recipeItemRows.results || []) as any[]) {
+    if (!recipeItems.has(ri.recipe_id)) recipeItems.set(ri.recipe_id, [])
+    recipeItems.get(ri.recipe_id)!.push(ri)
+  }
+
+  const fpItems = new Map<string, any[]>()
+  for (const fi of (fpItemRows.results || []) as any[]) {
+    if (!fpItems.has(fi.finished_product_id)) fpItems.set(fi.finished_product_id, [])
+    fpItems.get(fi.finished_product_id)!.push(fi)
+  }
+
+  return { recipes, recipeItems, fpItems }
 }
 
 // ─── Product combine helpers (shared by Merge and Group) ──────
@@ -3731,10 +4718,55 @@ app.get('/api/pnl', async (c) => {
     }
   }
 
+  // ── Imported POS revenue, per month ──────────────────────────
+  // DERIVED, never written into sales_monthly. Two writers of one number is the
+  // bug: sales_monthly stays purely the hand-typed figure, and this is purely
+  // what the till reported. Which of the two the P&L shows is decided in the
+  // frontend from revenue_source, so voiding an import flips a month back to
+  // the typed figure on its own — this query simply stops returning it.
+  //
+  // The category join is the first real use of the food/beverage split reserved
+  // in 0022. Unmatched categories fall to food, which is what /api/pnl already
+  // does for invoice lines.
+  const impRows = await c.env.DB.prepare(`
+    SELECT substr(l.sold_date, 1, 7) AS period,
+           SUM(l.net_sales)          AS net,
+           SUM(l.gross_sales)        AS gross,
+           SUM(CASE WHEN COALESCE(cat.type, 'food') = 'beverage' THEN l.net_sales ELSE 0 END) AS beverage,
+           SUM(CASE WHEN COALESCE(cat.type, 'food') = 'beverage' THEN 0 ELSE l.net_sales END) AS food,
+           COUNT(*)                  AS lines
+      FROM pos_sale_lines l
+      JOIN pos_imports i ON i.id = l.import_id
+      LEFT JOIN categories cat
+             ON LOWER(TRIM(cat.name)) = LOWER(TRIM(l.pos_category))
+            AND cat.org_id IS ?
+     WHERE l.voided_at IS NULL
+       AND i.status = 'Closed'
+       AND i.voided_at IS NULL
+       AND substr(l.sold_date, 1, 7) BETWEEN ? AND ?
+       AND l.org_id IS ?
+       AND i.org_id IS ?
+     GROUP BY period
+  `).bind(org, from, to, org, org).all()
+
+  const salesByMonth: Record<string, any> = {}
+  let importedTotal = 0
+  for (const r of (impRows.results ?? []) as any[]) {
+    salesByMonth[r.period] = {
+      imported_net:   round2(r.net ?? 0),
+      imported_gross: round2(r.gross ?? 0),
+      food:           round2(r.food ?? 0),
+      beverage:       round2(r.beverage ?? 0),
+      lines:          r.lines ?? 0,
+    }
+    importedTotal += Number(r.net) || 0
+  }
+
   return c.json({
     from,
     to,
     month: from === to ? from : undefined,
+    sales: { by_month: salesByMonth, imported_total: round2(importedTotal) },
     food_cost:     round2(food),
     beverage_cost: round2(beverage),
     supplies_cost: round2(supplies),

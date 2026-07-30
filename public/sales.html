@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Private application surface: keep out of search results. The
+       marketing page (public/index.html) is the only indexable page. -->
+  <meta name="robots" content="noindex, nofollow" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <title>Sales — DoughMeter</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260730-2" />
+  <style>
+    /* ===== Drop zone (mirrors upload-invoice.html, single file, no camera) ===== */
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 2rem 1rem;
+      text-align: center;
+      background: #fafafe;
+      transition: var(--transition);
+    }
+    .drop-zone.dragging { border-color: var(--primary); background: #eef2ff; }
+    .drop-icon  { font-size: 2rem; color: var(--primary); margin-bottom: .6rem; }
+    .drop-title { font-weight: 600; margin-bottom: .25rem; }
+    .drop-sub   { font-size: .82rem; color: var(--text-muted); margin-bottom: .9rem; }
+    /* Dragging is impossible on touch, so don't promise it there. */
+    @media (hover: none) {
+      .drop-title { display: none; }
+      .drop-sub::before { content: "Choose your sales export. "; }
+    }
+
+    /* ===== Where to find the export ===== */
+    .pos-help {
+      margin-top: .9rem; padding: .7rem .85rem;
+      border-radius: var(--radius-sm);
+      background: #f8fafc; border: 1px solid var(--border);
+      font-size: .8rem; color: var(--text-muted); line-height: 1.5;
+    }
+
+    /* ===== Review summary strip ===== */
+    .pos-summary {
+      display: flex; flex-wrap: wrap; gap: 1.4rem;
+      padding: .85rem 1rem; margin-bottom: .9rem;
+      border-radius: var(--radius-sm); background: #f8fafc;
+      border: 1px solid var(--border);
+    }
+    .pos-summary div span { display: block; }
+    .pos-sum-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em;
+                     color: var(--text-muted); font-weight: 600; }
+    .pos-sum-value { font-size: 1.05rem; font-weight: 700; color: var(--text); }
+
+    /* Coverage is the number that decides whether the numbers can be trusted. */
+    .pos-coverage.good  .pos-sum-value { color: #047857; }
+    .pos-coverage.part  .pos-sum-value { color: #b45309; }
+    .pos-coverage.bad   .pos-sum-value { color: #b91c1c; }
+
+    .pos-banner {
+      display: flex; align-items: flex-start; gap: .55rem;
+      padding: .7rem .85rem; margin-bottom: .9rem;
+      border-radius: var(--radius-sm);
+      background: #fef3c7; border: 1px solid #fcd34d; color: #92400e;
+      font-size: .82rem; line-height: 1.5;
+    }
+
+    /* ===== Mapping table ===== */
+    .pos-map-target { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+    .pos-pill {
+      display: inline-flex; align-items: center; gap: .3rem;
+      padding: .15rem .5rem; border-radius: 999px;
+      font-size: .72rem; font-weight: 600; white-space: nowrap;
+    }
+    .pos-pill.mapped     { background: #ecfdf5; color: #047857; border: 1px solid #6ee7b7; }
+    .pos-pill.suggested  { background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe; }
+    .pos-pill.unmapped   { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+    .pos-pill.ignored    { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+    .pos-type-badge {
+      font-size: .66rem; text-transform: uppercase; letter-spacing: .04em;
+      color: var(--text-muted); font-weight: 600;
+    }
+    .pos-row-actions { display: flex; gap: .35rem; flex-wrap: wrap; }
+
+    /* ===== Link picker ===== */
+    .pos-link-results { max-height: 320px; overflow-y: auto; margin-top: .6rem; }
+    .pos-link-item {
+      display: flex; justify-content: space-between; align-items: center; gap: .5rem;
+      padding: .5rem .6rem; border-radius: 7px; font-size: .875rem; cursor: pointer;
+    }
+    .pos-link-item:hover, .pos-link-item.active { background: #eef2ff; }
+    .pos-link-empty { padding: .6rem; font-size: .875rem; color: var(--text-muted); }
+    .pos-recipe-qty { margin-top: .8rem; padding-top: .8rem; border-top: 1px solid var(--border); }
+  </style>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav class="navbar">
+    <div class="nav-brand"><i class="fas fa-receipt"></i> DoughMeter</div>
+    <div class="nav-links">
+      <a href="/home.html"><i class="fas fa-chart-line"></i> Price Movers</a>
+      <a href="/upload-invoice.html"><i class="fas fa-file-invoice"></i> Upload Invoice</a>
+      <a href="/invoices.html"><i class="fas fa-list-alt"></i> Invoices</a>
+      <a href="/sales.html" class="active"><i class="fas fa-cash-register"></i> Sales</a>
+      <a href="/pnl.html"><i class="fas fa-chart-pie"></i> P&amp;L</a>
+      <a href="/products.html"><i class="fas fa-boxes"></i> Products</a>
+      <a href="/recipes.html"><i class="fas fa-utensils"></i> Recipes</a>
+      <a href="/finished-products.html"><i class="fas fa-tag"></i> Finished Products</a>
+      <a href="/inventory.html"><i class="fas fa-warehouse"></i> Inventory</a>
+      <a href="/suppliers.html"><i class="fas fa-truck"></i> Suppliers</a>
+      <a href="/staff.html"><i class="fas fa-users"></i> Staff</a>
+    </div>
+  </nav>
+
+  <div class="container" id="sales-page-marker">
+
+    <div class="page-header">
+      <h1><i class="fas fa-cash-register"></i> Sales</h1>
+      <p>Import what you sold from your POS, so stock comes off as dishes go out.</p>
+    </div>
+
+    <div class="header-actions">
+      <button class="btn btn-primary" id="posUploadBtn">
+        <i class="fas fa-file-csv"></i> Import sales
+      </button>
+    </div>
+
+    <section class="card">
+      <div class="card-body">
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Period</th>
+                <th>Source</th>
+                <th>Sales lines</th>
+                <th>Net sales</th>
+                <th>Coverage</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="posImportsBody">
+              <tr><td colspan="7" class="empty-row"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </div><!-- /container -->
+
+  <!-- UPLOAD MODAL -->
+  <div class="modal-overlay hidden" id="posUploadModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3><i class="fas fa-file-csv"></i> Import sales</h3>
+        <button class="modal-close" id="posUploadClose"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Which till system is this from?</label>
+          <select id="posSourceSelect">
+            <option value="square">Square</option>
+            <option value="clover" disabled>Clover — coming soon</option>
+          </select>
+        </div>
+
+        <div class="drop-zone" id="posDropZone">
+          <i class="fas fa-cloud-upload-alt drop-icon"></i>
+          <p class="drop-title">Drag &amp; drop your sales export here</p>
+          <p class="drop-sub">A single CSV file.</p>
+          <label class="btn btn-primary" for="posFileInput">
+            <i class="fas fa-folder-open"></i> Choose File
+          </label>
+          <input type="file" id="posFileInput" accept=".csv,text/csv" hidden />
+        </div>
+
+        <div class="pos-help" id="posSourceHelp"></div>
+        <div id="posUploadError"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- REVIEW MODAL -->
+  <div class="modal-overlay hidden" id="posReviewModal">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h3><i class="fas fa-list-check"></i> Review sales</h3>
+        <button class="modal-close" id="posReviewClose"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <div id="posReviewSummary"></div>
+        <div id="posReviewBanner"></div>
+
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>What sold</th>
+                <th>Qty</th>
+                <th>Net sales</th>
+                <th>Comes off as</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="posMapBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="posReviewCancel">Close</button>
+        <button class="btn btn-success" id="posCommitBtn">
+          <i class="fas fa-check"></i> Confirm &amp; Import
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- LINK PICKER -->
+  <div class="modal-overlay hidden" id="posLinkModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3><i class="fas fa-link"></i> What does this make?</h3>
+        <button class="modal-close" id="posLinkClose"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <p class="hint" id="posLinkSubtitle"></p>
+        <input type="text" id="posLinkSearch" class="search-input" placeholder="Search recipes and finished products…" />
+        <div class="pos-link-results" id="posLinkResults"></div>
+
+        <div class="pos-recipe-qty hidden" id="posLinkQtyWrap">
+          <label>How much of it does one sale use?</label>
+          <div class="pack-size-row">
+            <input type="number" id="posLinkQty" min="0" step="any" value="1" />
+            <input type="text" id="posLinkUnit" placeholder="unit" />
+          </div>
+          <small style="display:block;color:var(--text-muted);font-size:.78rem;margin-top:.35rem">
+            Leave as 1 to use one whole batch-yield per sale.
+          </small>
+        </div>
+
+        <label style="display:flex;align-items:center;gap:.45rem;margin-top:.9rem;font-size:.85rem">
+          <input type="checkbox" id="posLinkAllSizes" />
+          Apply to every size of this item
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="posLinkCancel">Cancel</button>
+        <button class="btn btn-primary" id="posLinkConfirm" disabled>Link</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/static/utils.js?v=20260731-1"></script>
+  <script src="/static/pos-parse.js?v=20260731-1"></script>
+  <script src="/static/sales.js?v=20260731-1"></script>
+</body>
+</html>

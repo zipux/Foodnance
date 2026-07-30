@@ -22,6 +22,7 @@ const PAGES = [
   ['home.html',              'home.js'],
   ['inventory.html',         'inventory.js'],
   ['invoices.html',          'invoices.js'],
+  ['sales.html',             'sales.js'],
   ['recipes.html',           'recipes.js'],
   ['finished-products.html', 'finished-products.js'],
 ];

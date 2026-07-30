@@ -228,7 +228,21 @@ function render() {
   const months   = monthsInRange(pnlFrom, pnlTo);
   const nMonths  = months.length;
   const single   = pnlFrom === pnlTo;     // month-scoped edits only make sense here
-  const sales    = pnlSalesRows.reduce((s, r) => s + (parseFloat(r.sales_total) || 0), 0);
+  // ── Revenue: imported wins, unless the month was explicitly overridden ──
+  // Resolved PER MONTH, not for the period as a whole, so a range where some
+  // months were imported and others typed in still totals correctly.
+  const imported = (pnlCosts.sales && pnlCosts.sales.by_month) || {};
+  const salesFor = (m) => {
+    const row  = pnlSalesRows.find(r => r.period === m);
+    const typed = parseFloat(row && row.sales_total) || 0;
+    const imp   = parseFloat(imported[m] && imported[m].imported_net) || 0;
+    const overridden = !!row && row.revenue_source === 'manual';
+    if (imp > 0 && !overridden) return { amount: imp, source: 'pos', typed, imported: imp, row };
+    return { amount: typed, source: overridden && imp > 0 ? 'manual-override' : 'manual',
+             typed, imported: imp, row };
+  };
+  const salesByMonth = months.map(m => ({ month: m, ...salesFor(m) }));
+  const sales = salesByMonth.reduce((s, x) => s + x.amount, 0);
   const foodBought = parseFloat(pnlCosts.food_cost) || 0;
   const bevBought  = parseFloat(pnlCosts.beverage_cost) || 0;
   const supplies = parseFloat(pnlCosts.supplies_cost) || 0;
@@ -249,8 +263,9 @@ function render() {
     .map(r => ({ row: r, ...spreadAllocationRange(r, pnlFrom, pnlTo) }))
     .filter(x => x.allocated > 0.0049);
   const spreadTotal = spreadThisMonth.reduce((s, x) => s + x.allocated, 0);
-  // Months with no sales entered — a period total silently understates without this.
-  const missingSales = months.filter(m => !pnlSalesRows.some(r => r.period === m));
+  // Months with no revenue at all — a period total silently understates without
+  // this. A month covered by a POS import is not missing, however it got there.
+  const missingSales = salesByMonth.filter(x => x.amount <= 0).map(x => x.month);
   // Expense invoices (utilities/rent/etc.) uploaded and classified as expenses.
   const expenseInv = pnlCosts.expense_invoices || [];
   const expenseInvTotal = expenseInv.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
@@ -334,15 +349,34 @@ function render() {
 
   // Net sales: editable for a single month (one sales_monthly row), read-only
   // sum over a longer period — you can't type one number into several months.
-  const salesCell = single
+  // A month whose revenue came from the till is shown, not typed — two writers
+  // of one number is how they end up disagreeing. The override is explicit and
+  // reversible, and it says what the import reported so the difference is
+  // visible rather than hidden.
+  const thisMonth = single ? salesByMonth[0] : null;
+  const salesCell = !single
     ? `<div style="grid-column:2/4;text-align:right">
-         <input type="number" step="0.01" min="0" id="pnlSalesInput"
-                value="${sales ? sales : ''}" placeholder="0.00"
-                onchange="pnlSaveSales(this.value)" />
-       </div>`
-    : `<div style="grid-column:2/4;text-align:right">
          <div class="pnl-amount">${fmtMoney(sales)}</div>
          <div class="pnl-sub">Total of ${nMonths} months · open a single month to edit</div>
+       </div>`
+    : thisMonth.source === 'pos'
+    ? `<div style="grid-column:2/4;text-align:right">
+         <div class="pnl-amount">${fmtMoney(thisMonth.amount)}</div>
+         <div class="pnl-sub">
+           <i class="fas fa-cash-register"></i> From POS import · ${imported[thisMonth.month].lines} sales
+           · <a href="#" onclick="pnlUseManualSales('${thisMonth.month}');return false;">use my own figure</a>
+         </div>
+       </div>`
+    : `<div style="grid-column:2/4;text-align:right">
+         <input type="number" step="0.01" min="0" id="pnlSalesInput"
+                value="${thisMonth.amount ? thisMonth.amount : ''}" placeholder="0.00"
+                onchange="pnlSaveSales(this.value)" />
+         ${thisMonth.source === 'manual-override'
+           ? `<div class="pnl-sub">Overridden · the POS import said
+                ${fmtMoney(thisMonth.imported)}
+                · <a href="#" onclick="pnlUseImportedSales('${thisMonth.month}');return false;">use that instead</a>
+              </div>`
+           : ''}
        </div>`;
 
   const missingSalesNote = (!single && missingSales.length)
@@ -480,6 +514,33 @@ async function pnlSaveSales(value) {
     showToast('Save failed: ' + e.message, 'error');
   }
 }
+
+// ── Which revenue figure this month uses ────────────────────────
+// The imported total is derived from pos_sale_lines and never written here, so
+// switching sources only ever flips this flag. A typed figure is preserved when
+// an import takes over, and comes straight back if the user overrides — losing
+// what someone entered by hand because a file arrived would be its own bug.
+async function pnlSetRevenueSource(period, source) {
+  try {
+    const existing = pnlAllSales.find(r => r.period === period);
+    if (existing) {
+      await apiPatch(`tables/sales_monthly/${existing.id}`, { revenue_source: source });
+      existing.revenue_source = source;
+    } else {
+      // No typed figure yet — create the row that carries the override.
+      const row = await apiPost(`tables/sales_monthly`,
+        { period, sales_total: 0, revenue_source: source });
+      pnlSalesRows.push(row);
+      pnlAllSales.push(row);
+    }
+    render();
+  } catch (e) {
+    showToast('Could not change the revenue source: ' + e.message, 'error');
+  }
+}
+
+function pnlUseManualSales(period)   { return pnlSetRevenueSource(period, 'manual'); }
+function pnlUseImportedSales(period) { return pnlSetRevenueSource(period, 'auto'); }
 
 // ── Overheads ──────────────────────────────────────────────────
 async function pnlAddOverhead() {

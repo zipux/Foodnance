@@ -74,5 +74,55 @@ Category names are unique **per organization**, enforced by the expression index
 
 **New organizations are seeded** with both master lists (`DEFAULT_UNITS` and `DEFAULT_CATEGORIES`) in the same `DB.batch()` as the org and owner row, in `POST /api/admin/organizations`. Without this a new account's pickers read "No units defined yet", which first bites during invoice import. `storage_sections`, `certification_types` and `vendor_fee_templates` are still not seeded.
 
+### POS sales import & inventory backflush
+Sales are imported from a POS CSV export (Square first) and deduct ingredients
+from stock. `public/sales.html` ↔ `static/sales.js`, parser in
+`static/pos-parse.js`, schema in migrations `0042`/`0043`. **Pro only**
+(`pos_sales`), gated by the `/api/pos-` prefix in `featureForPath`.
+
+Flow mirrors invoices exactly: parse in the browser → save a draft
+(`pos_imports.status='Action Required'`, whole payload in `parsed_data`) → review
+and map each POS item to a recipe or finished product → commit, which clears
+`parsed_data` and writes `pos_sale_lines`. Learned mappings live in
+`pos_item_map`, keyed `lower(item)|lower(price point)`; a key ending in `|` is
+the "any size" fallback. `target_type='ignore'` is how gift cards and bottled
+drinks stop lighting the unmapped warning.
+
+**The two-level BOM limit is load-bearing.** `finished_product_items` may
+reference a recipe or a product, but `recipe_items` has no `item_type` — a recipe
+holds only products. `explodeSale`/`explodeRecipe` in `src/index.ts` rely on
+that; if `recipe_items` ever gains an `item_type`, the depth guard turns a silent
+infinite loop into a loud error.
+
+**`recipes.production_mode` prevents double-counting** and must not be bypassed.
+`on_demand` (default) explodes a sale into raw materials; `batched` deducts that
+recipe's `batch` bin instead and leaves Produce Batch to refill it. Doing both
+would count the same flour twice. Migration `0043` backfills `batched` for any
+recipe already holding batch stock.
+
+**Idempotency is three layers**: `pos_imports.content_hash` (same file re-uploaded
+→ 409, overridable with `force`), the partial unique index on
+`pos_sale_lines.external_ref` (the real guard — overlapping date ranges), and the
+`status='Action Required'` gate on commit. The commit route **pre-queries**
+existing refs and skips those lines; letting the index throw would roll back the
+whole `DB.batch()`.
+
+`planPosDepletion()` is shared by `/preview` and `/commit`, so the panel a user
+approves is produced by the code that writes. Movements aggregate per ingredient
+**per business day** (per import above `POS_MAX_MOVEMENTS`), write
+`stock_log.reason_code='usage'` and carry `pos_import_id` — which is what lets
+`/void` reverse exactly its own movements. Inventory updates are **relative**
+(`quantity = ROUND(quantity - ?, 6)`), never absolute, so they don't race a
+concurrent Produce Batch. A unit that won't convert drops that one deduction and
+warns; it never aborts the import. Negative stock is allowed and reported.
+
+P&L revenue is **derived**, never written into `sales_monthly`: `/api/pnl`
+returns `sales.by_month` from `pos_sale_lines`, and `sales_monthly.revenue_source`
+(`'auto'`|`'manual'`) decides which figure `pnl.js` shows. Voiding an import
+flips the month back to the typed figure on its own.
+
+Known gap: a recipe left on `on_demand` can still be sent through Produce Batch,
+creating batch stock nothing draws down.
+
 ### Data model (two-level product design)
 `generic_products` (the abstract item) + `product_entries` (per-supplier purchase records with FIFO pricing) is the central pattern. `recipes`/`recipe_items` cost from products; `finished_products`/`finished_product_items` cost from recipes; producing/packing deducts `inventory` and writes `stock_log`. Stock takes (`stock_takes`/`stock_take_items`) reconcile counted vs system stock.

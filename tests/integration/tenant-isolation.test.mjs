@@ -106,6 +106,16 @@ const orgB = await mkOrg(B);
 t.check('two businesses created', orgA.status === 200 && orgB.status === 200,
   `A=${orgA.status} B=${orgB.status} ${JSON.stringify(orgA.data?.error || orgB.data?.error || '')}`);
 
+// Both on Pro. New accounts default to Essential, where stock takes are gated —
+// which used to make the stock-take section below pass VACUOUSLY (403 leaves an
+// empty items array, and .every() on nothing is true) and then crash on the
+// next line, so the last four isolation checks never ran at all. Isolation has
+// to be proved on the plan that can actually reach every feature.
+const idA = orgA.data?.organization?.id || orgA.data?.id;
+const idB = orgB.data?.organization?.id || orgB.data?.id;
+await post(admin, `/api/admin/organizations/${idA}/plan`, { plan: 'pro' });
+await post(admin, `/api/admin/organizations/${idB}/plan`, { plan: 'pro' });
+
 const a = jar(), b = jar();
 await post(a, '/api/auth/login', { email: A.email, password: A.password });
 await post(b, '/api/auth/login', { email: B.email, password: B.password });

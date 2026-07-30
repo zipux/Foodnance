@@ -16,7 +16,8 @@
     "db:wipe:local": "wrangler d1 execute invoicedb-production --local --file=./wipe-data.sql",
     "db:wipe:prod": "wrangler d1 execute invoicedb-production --remote --file=./wipe-data.sql",
     "test:isolation": "node tests/integration/tenant-isolation.test.mjs",
-    "test:lifecycle": "node tests/integration/account-lifecycle.test.mjs"
+    "test:lifecycle": "node tests/integration/account-lifecycle.test.mjs",
+    "test:pos": "node tests/integration/pos-import.test.mjs"
   },
   "dependencies": {
     "hono": "^4.12.7"

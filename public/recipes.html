@@ -206,6 +206,7 @@
       <a href="/home.html"><i class="fas fa-chart-line"></i> Price Movers</a>
       <a href="/upload-invoice.html"><i class="fas fa-file-invoice"></i> Upload Invoice</a>
       <a href="/invoices.html"><i class="fas fa-list-alt"></i> Invoices</a>
+      <a href="/sales.html"><i class="fas fa-cash-register"></i> Sales</a>
       <a href="/pnl.html"><i class="fas fa-chart-pie"></i> P&amp;L</a>
       <a href="/products.html"><i class="fas fa-boxes"></i> Products</a>
       <a href="/recipes.html" class="active"><i class="fas fa-utensils"></i> Recipes</a>
@@ -248,6 +249,17 @@
                 <option value="">Loading…</option>
               </select>
             </div>
+          </div>
+          <!-- Decides where stock comes off when a sale is imported. Made to
+               order explodes to raw ingredients; made ahead deducts the stored
+               batch. Doing both would count the same flour twice. -->
+          <div class="form-group">
+            <label>How is this made?</label>
+            <select id="recipeProductionMode">
+              <option value="on_demand">Made to order — when the dish is sold</option>
+              <option value="batched">Made ahead in batches — stored and used later</option>
+            </select>
+            <small id="recipeProductionModeHint" style="display:block;color:var(--text-muted);font-size:.78rem;margin-top:.35rem"></small>
           </div>
 
           <!-- Ingredient lines -->
@@ -398,8 +410,8 @@
     </div>
   </div>
 
-  <script src="/static/utils.js?v=20260730-4"></script>
+  <script src="/static/utils.js?v=20260731-1"></script>
   <script src="/static/inventory.js?v=20260727-2"></script>
-  <script src="/static/recipes.js?v=20260724-1"></script>
+  <script src="/static/recipes.js?v=20260731-1"></script>
 </body>
 </html>

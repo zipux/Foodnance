@@ -22,6 +22,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('saveRecipeBtn').addEventListener('click', saveRecipe);
   document.getElementById('clearRecipeBtn').addEventListener('click', clearRecipeForm);
   document.getElementById('recipeYieldQty').addEventListener('input',  recalcCosts);
+  document.getElementById('recipeProductionMode').addEventListener('change', updateProductionModeHint);
   document.getElementById('recipeYieldUnit').addEventListener('change', e => {
     if (e.target.value === '__manage_units__') {
       e.target.value = e.target.dataset.prevUnit || '';
@@ -877,6 +878,7 @@ async function saveRecipe() {
   const desc      = document.getElementById('recipeDesc').value.trim();
   const yieldQty  = parseFloat(document.getElementById('recipeYieldQty').value) || 1;
   const yieldUnit = document.getElementById('recipeYieldUnit').value || 'kg';
+  const prodMode  = document.getElementById('recipeProductionMode').value || 'on_demand';
   const editId    = document.getElementById('editRecipeId').value;
 
   if (!name) { showToast('Recipe name is required.', 'error'); return; }
@@ -904,7 +906,7 @@ async function saveRecipe() {
 
     if (editId) {
       // Update recipe
-      await apiPut(`tables/${RECIPES_TABLE}/${editId}`, { name, description: desc, servings: yieldQty, yield_unit: yieldUnit, total_cost: total });
+      await apiPut(`tables/${RECIPES_TABLE}/${editId}`, { name, description: desc, servings: yieldQty, yield_unit: yieldUnit, total_cost: total, production_mode: prodMode });
       recipeId = editId;
       // Delete old items
       const oldItems = await apiGet(`tables/${RECIPE_ITEMS_TABLE}?page=1&limit=200`);
@@ -914,7 +916,7 @@ async function saveRecipe() {
       }
       showToast('Recipe updated!', 'success');
     } else {
-      const recipe = await apiPost(`tables/${RECIPES_TABLE}`, { name, description: desc, servings: yieldQty, yield_unit: yieldUnit, total_cost: total });
+      const recipe = await apiPost(`tables/${RECIPES_TABLE}`, { name, description: desc, servings: yieldQty, yield_unit: yieldUnit, total_cost: total, production_mode: prodMode });
       recipeId = recipe.id;
       showToast('Recipe saved!', 'success');
     }
@@ -942,12 +944,43 @@ async function saveRecipe() {
 }
 
 // ── Clear Form ─────────────────────────────────────────────────
+// ── Production mode ────────────────────────────────────────────
+// Decides where stock comes off when a sale is imported from the POS.
+//
+//   on_demand — the sale explodes this recipe into its raw ingredients.
+//   batched   — the sale deducts the stored batch instead, and Produce Batch is
+//               what refills that batch from raw ingredients.
+//
+// Only one of those may fire, or the same flour is counted twice: once when the
+// dough is made and again when the pizza is sold. That is why this is a choice
+// per recipe rather than a setting for the whole account — a real kitchen preps
+// its dough ahead and assembles the pizza to order.
+const PRODUCTION_MODE_HINTS = {
+  on_demand: 'Selling a dish that uses this recipe takes its ingredients straight out of stock.',
+  batched:   'Selling a dish that uses this recipe draws down the batch you produced. Use Produce Batch to make more.',
+};
+
+function setProductionMode(mode) {
+  const sel = document.getElementById('recipeProductionMode');
+  if (!sel) return;
+  sel.value = PRODUCTION_MODE_HINTS[mode] ? mode : 'on_demand';
+  updateProductionModeHint();
+}
+
+function updateProductionModeHint() {
+  const sel  = document.getElementById('recipeProductionMode');
+  const hint = document.getElementById('recipeProductionModeHint');
+  if (!sel || !hint) return;
+  hint.textContent = PRODUCTION_MODE_HINTS[sel.value] || '';
+}
+
 function clearRecipeForm() {
   document.getElementById('editRecipeId').value    = '';
   document.getElementById('recipeName').value      = '';
   document.getElementById('recipeDesc').value      = '';
   document.getElementById('recipeYieldQty').value  = '';
   setSelectValueCI_r(document.getElementById('recipeYieldUnit'), 'kg');
+  setProductionMode('on_demand');
   document.getElementById('recipeFormTitle').innerHTML = '<i class="fas fa-plus-circle"></i> New Recipe';
   document.getElementById('ingredientLines').innerHTML = '';
   ingredientRows = [];
@@ -1042,6 +1075,9 @@ async function openRecipeDetail(id) {
     <div class="detail-info-grid">
       ${recipe.description ? `<div class="detail-info-item"><span>Description</span><span>${esc(recipe.description)}</span></div>` : ''}
       <div class="detail-info-item"><span>Yield</span><span>${recipe.servings ? recipe.servings + ' ' + esc(yieldUnit) : '—'}</span></div>
+      <div class="detail-info-item"><span>How it's made</span><span>${
+        recipe.production_mode === 'batched' ? 'Made ahead in batches' : 'Made to order'
+      }</span></div>
     </div>
 
     <div class="detail-section-title">Ingredients</div>
@@ -1181,6 +1217,7 @@ async function loadRecipeIntoForm(id) {
   document.getElementById('recipeDesc').value      = recipe.description || '';
   document.getElementById('recipeYieldQty').value  = recipe.servings || '';
   setSelectValueCI_r(document.getElementById('recipeYieldUnit'), recipe.yield_unit || 'kg');
+  setProductionMode(recipe.production_mode || 'on_demand');
   document.getElementById('recipeFormTitle').innerHTML =
     '<i class="fas fa-edit"></i> Edit Recipe: ' + esc(recipe.name);
 

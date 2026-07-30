@@ -65,6 +65,7 @@ const API_BASE = '/api';
 // stop an Essential customer being shown a screen that would only fill with
 // permission errors.
 const PLAN_GATED_PAGES = {
+  '/sales':          { feature: 'pos_sales',       name: 'Sales' },
   '/inventory':      { feature: 'inventory_tools', name: 'Inventory' },
   '/stock-take':     { feature: 'stock_takes',     name: 'Stock Takes' },
   '/storage-layout': { feature: 'storage_layout',  name: 'Storage Layout' },
@@ -449,10 +450,14 @@ function _pausedError() {
 // Turn a failed response into an Error carrying the status and, when the server
 // sent one, its message rather than the method + URL.
 async function _apiFail(method, url, r) {
-  let msg = '';
-  try { msg = (await r.json()).error || ''; } catch (_) {}
+  let msg = '', payload = null;
+  // The whole body is kept, not just .error: some refusals carry the detail the
+  // caller needs to offer a way forward — the plan gate's { feature, plan }, or
+  // a duplicate import's { import_id, imported_at }.
+  try { payload = await r.json(); msg = (payload && payload.error) || ''; } catch (_) {}
   const err = new Error(msg || `${method} ${url} failed: ${r.status}`);
   err.status = r.status;
+  err.payload = payload;
   if (r.status === 402) err.paused = true;
   return err;
 }
@@ -1235,6 +1240,9 @@ function invConvertUnitCost(cost, fromUnit, toUnit, avgWeightPerUnit) {
   return { error: `Cannot convert ${fromUnit} to ${toUnit}` };
 }
 
+// KEEP IN SYNC with convertQty() in src/index.ts — the POS sales backflush
+// converts server-side and must reach the same number this does, or a preview
+// and the deduction it previewed would disagree.
 function invConvertQty(qty, fromUnit, toUnit, avgWeightPerUnit) {
   if (invSameUnit(fromUnit, toUnit)) return { qty };
 

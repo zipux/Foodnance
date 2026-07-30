@@ -15,6 +15,9 @@
 --   units            — unit definitions (kg, lb, Each, …)
 --   categories       — product category list
 --   adjust_reasons   — stock-adjustment reason list
+--   storage_sections — the shape of the walk-in/shelving, which is the room
+--                      itself rather than what is currently in it. The stock
+--                      placed in those sections (item_placements) IS wiped.
 -- To also wipe one of the above, add a matching DELETE line below.
 --
 -- NOTE: uploaded invoice IMAGES live in R2 file storage, NOT in this database,
@@ -26,6 +29,10 @@
 
 DELETE FROM staff_certifications;
 DELETE FROM stock_take_items;
+DELETE FROM pos_sale_lines;
+DELETE FROM pos_imports;
+DELETE FROM pos_item_map;
+DELETE FROM item_placements;
 DELETE FROM invoice_lines;
 DELETE FROM finished_product_items;
 DELETE FROM recipe_items;
@@ -44,4 +51,14 @@ DELETE FROM vendor_fee_templates;
 DELETE FROM staff;
 DELETE FROM certification_types;
 
--- Reference data intentionally KEPT: units, categories, adjust_reasons
+-- P&L inputs and AI usage. These were missing until 2026-07-31, so a "wiped"
+-- database still showed the previous tenant's revenue, overheads and AI spend.
+DELETE FROM sales_monthly;
+DELETE FROM operating_expenses;
+DELETE FROM recurring_expenses;
+DELETE FROM spread_expenses;
+DELETE FROM ai_parse_log;
+DELETE FROM ai_cap_blocks;
+
+-- Reference data intentionally KEPT: units, categories, adjust_reasons,
+-- storage_sections
