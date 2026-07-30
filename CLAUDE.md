@@ -16,7 +16,7 @@ npm run dev:sandbox      # wrangler pages dev against dist/, local D1, port 3000
 
 # Database (D1) — migrations live in migrations/, numbered NNNN_name.sql
 npm run db:migrate:local # apply migrations to local SQLite
-npm run db:migrate:prod  # apply migrations to production D1
+npm run db:migrate:prod  # ⚠️ DO NOT RUN — see "Production migration state" below
 npm run db:reset         # wipe local D1 and re-apply all migrations
 npm run db:wipe:local    # run wipe-data.sql (clears data, keeps schema) — local
 npm run db:wipe:prod     # same against remote D1
@@ -24,7 +24,54 @@ npm run db:wipe:prod     # same against remote D1
 npm run cf-typegen       # regenerate Cloudflare binding types
 ```
 
-There is **no test suite, linter, or typecheck script** — `tsc` is available via tsconfig but not wired to a script. Verify changes by running the app.
+### ⚠️ Production migration state — read before any prod DB work
+
+**Never run `npm run db:migrate:prod`.** Production's `d1_migrations` table
+records only up to **`0023_adjust_reasons_table.sql`** (29 rows), while the real
+schema is at **0043**. Everything from 0024 on — org scoping, plans, suspension,
+the invoice cap, POS sales import — was applied **by hand and never recorded**
+(verified against live D1 on 2026-07-31).
+
+So that command would try to replay 0024–0043. That set now contains
+**`0042_sales_monthly_per_org.sql`, which does `DROP TABLE sales_monthly`** after
+copying rows out. Replaying it against a database that already has the new shape
+**destroys live revenue data**. Before 0042 the un-recorded migrations were all
+additive and a stray replay merely errored; that is no longer true.
+
+**Apply to production one file at a time instead:**
+```bash
+npx wrangler d1 execute invoicedb-production --remote --file=./migrations/0044_x.sql
+```
+And **back up any table a migration rebuilds before running it** — 0042 was
+applied this way: the three `sales_monthly` rows were dumped to JSON first and
+verified after.
+
+**The fix, when there's time** (~15 min, not yet done): build a pristine schema by
+applying `0001`→`0043` to a throwaway SQLite file, diff production against it
+(read-only), fix whatever gaps turn up, and *only then* insert `d1_migrations`
+rows for 0024–0043. Recording them without the diff would permanently hide any
+partially-applied migration — which is exactly what had happened locally, where
+0033 had its column but not its index and 0035 was half-applied. The local
+database has since been repaired and `npm run db:migrate:local` works normally.
+
+There **is** a test suite now (it predates this note being written, which said there wasn't one):
+
+```bash
+npm test               # unit — auto-discovers every tests/*.test.mjs
+npm run test:pos       # POS sales import  — needs `npm run dev:sandbox` running
+npm run test:isolation # tenant isolation  — needs the sandbox; the pre-launch gate
+npm run test:lifecycle # account lifecycle — needs the sandbox
+```
+
+Plain Node, no framework, no dependencies. `tests/helpers/browser-module.mjs`
+evaluates `public/static/*.js` so unit tests exercise the *shipped* frontend
+source rather than a copy. Two of the unit tests are static audits that will fail
+the build on their own: `org-scoping.test.mjs` parses every `DB.prepare()` in
+`src/index.ts` and rejects any tenant-table statement missing `org_id`, and
+`dom-ids.test.mjs` cross-checks each page's `getElementById` calls against the
+ids in its HTML. There is still **no linter, and no typecheck script** — `tsc`
+is in tsconfig but not wired up (and not installed), so type errors only surface
+at runtime. Verify changes by running the app.
 
 Local dev uses a local SQLite file under `.wrangler/state/v3/d1/`. The `ecosystem.config.cjs` pm2 file has a stale `cwd` (`/home/user/webapp`) from another machine — prefer `npm run dev` / `npm run dev:sandbox` locally.
 
