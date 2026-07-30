@@ -87,6 +87,57 @@ body {
 }
 .nav-links a.active i { opacity: 1; }
 
+/* ===== SESSION CHIP ===== */
+/* Injected by renderSessionChip() in utils.js, not written into the HTML. */
+.session-chip {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  flex-shrink: 0;
+  font-size: .78rem;
+  color: rgba(255,255,255,.92);
+  white-space: nowrap;
+}
+.session-chip .session-who {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Icon-only affordances (admin cog, change password). */
+.session-chip .session-icon {
+  color: #fff;
+  opacity: .8;
+  text-decoration: none;
+  padding: .35rem;
+  border-radius: 6px;
+  line-height: 1;
+}
+.session-chip .session-icon:hover { opacity: 1; background: rgba(255,255,255,.14); }
+/* Sign out is a real, labelled button: it's the one control a customer has to
+   be able to find without hovering for a tooltip. */
+.session-chip .session-signout {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  color: #fff;
+  text-decoration: none;
+  font-size: .8rem;
+  font-weight: 600;
+  padding: .4rem .7rem;
+  border: 1px solid rgba(255,255,255,.35);
+  border-radius: 7px;
+  background: rgba(255,255,255,.08);
+  transition: background .15s ease, border-color .15s ease;
+}
+.session-chip .session-signout:hover {
+  background: rgba(255,255,255,.2);
+  border-color: rgba(255,255,255,.6);
+}
+
 /* ===== CONTAINER ===== */
 .container {
   max-width: 1280px;
@@ -887,6 +938,12 @@ body {
   .container { padding: 1.25rem 1rem 3rem; }
   .navbar { padding: 0 1rem; }
   .nav-brand { font-size: 1rem; }
+  /* Narrow screens: drop the org name and the button's word, keep the button
+     itself — its aria-label carries the meaning for screen readers. */
+  .session-chip { gap: .3rem; }
+  .session-chip .session-who span { display: none; }
+  .session-chip .session-signout span { display: none; }
+  .session-chip .session-signout { padding: .4rem .55rem; }
   .form-grid { grid-template-columns: 1fr; }
   .ingredient-line { grid-template-columns: 1fr 70px 36px; }
   .ingredient-line .unit-group { display: none; }

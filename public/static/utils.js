@@ -81,6 +81,62 @@ function _planPagePath(href) {
   } catch (_) { return ''; }
 }
 
+// ─── Suspension gating (client side) ──────────────────────────
+// A paused account is READ-ONLY, not locked out: they keep every page and every
+// number, they just can't change anything. So this greys out the controls that
+// write instead of hiding pages the way plan gating does.
+//
+// Which controls write is read off the styling, not a list of ids. The app is
+// consistent about it — .btn-success is save/create/submit/produce/pack,
+// .btn-danger is delete/void/clear — and a 60-id registry would go stale the
+// first time someone adds a button. Every element carrying either class was
+// checked against its handler; the one that does NOT write is listed below.
+//
+// This is polish, not the guarantee. The guarantee is that the api* helpers
+// refuse while paused (and the server refuses regardless), so a button this
+// misses still fails instantly with a truthful message instead of losing work.
+const PAUSE_ALLOWED_CONTROLS = new Set([
+  'clearBatchBtn',   // only discards locally staged files; touches no API
+]);
+
+function _lockWriteControl(el) {
+  if (PAUSE_ALLOWED_CONTROLS.has(el.id)) return;
+  if (el.dataset.pauseLocked === '1' && el.disabled) return;
+  el.dataset.pauseLocked = '1';
+  el.disabled = true;
+  el.setAttribute('aria-disabled', 'true');
+}
+
+function _lockWriteControlsIn(root) {
+  if (root.nodeType !== 1) return;
+  if (root.matches?.('.btn-success, .btn-danger')) _lockWriteControl(root);
+  root.querySelectorAll?.('.btn-success, .btn-danger').forEach(_lockWriteControl);
+}
+
+// Most of these controls don't exist at page load — they live in modals and
+// detail panels rendered later — and several controllers re-enable their own
+// button when an operation finishes. So this watches rather than sweeping once.
+function applySuspensionGating() {
+  if (!isAccountPaused()) return;
+  document.body.classList.add('account-paused');
+  _lockWriteControlsIn(document.body);
+
+  new MutationObserver(records => {
+    for (const rec of records) {
+      if (rec.type === 'childList') {
+        rec.addedNodes.forEach(_lockWriteControlsIn);
+      } else if (rec.target.dataset?.pauseLocked === '1' && !rec.target.disabled) {
+        // A controller re-enabled a button we locked. Re-lock it. This settles:
+        // setting disabled back to true fires one more record, which then sees
+        // an already-disabled element and stops.
+        rec.target.disabled = true;
+      }
+    }
+  }).observe(document.body, {
+    childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'],
+  });
+}
+
 // Hide nav links the plan doesn't include, and — if this IS a gated page,
 // reached by URL or bookmark — replace its content with an upgrade note.
 function applyPlanGating(me) {
@@ -153,7 +209,15 @@ async function renderSessionChip() {
   // Paused for non-payment: the app still reads, but every save will be
   // refused. Say so up front rather than letting them fill in a stock take and
   // lose it at the last step.
-  if (me.suspended) renderSuspendedBar(me.suspend_reason);
+  //
+  // Also recorded on window so page controllers can refuse to START work that
+  // can only end in a 402 — see isAccountPaused() below.
+  window.__accountPaused       = !!me.suspended;
+  window.__accountPauseReason  = me.suspend_reason || '';
+  if (me.suspended) {
+    renderSuspendedBar(me.suspend_reason);
+    applySuspensionGating();
+  }
 
   // Before the chip, so a gated page swaps its content in the same frame rather
   // than flashing the real screen first.
@@ -161,20 +225,18 @@ async function renderSessionChip() {
 
   const chip = document.createElement('div');
   chip.id = 'sessionChip';
-  chip.style.cssText =
-    'margin-left:auto;display:flex;align-items:center;gap:.6rem;' +
-    'font-size:.78rem;color:rgba(255,255,255,.92);white-space:nowrap';
+  chip.className = 'session-chip';
   chip.innerHTML = `
-    <span title="${esc(me.email)}">
+    <span class="session-who" title="${esc(me.email)}">
       <i class="fas fa-user-circle"></i>
-      ${esc(me.org_name || (me.is_super_admin ? 'Admin' : me.email))}
+      <span>${esc(me.org_name || (me.is_super_admin ? 'Admin' : me.email))}</span>
     </span>
-    ${me.is_super_admin ? '<a href="/admin" style="color:#fff;opacity:.85;text-decoration:none" title="Admin"><i class="fas fa-gear"></i></a>' : ''}
-    <a href="#" id="navChangePw" style="color:#fff;opacity:.85;text-decoration:none" title="Change password">
+    ${me.is_super_admin ? '<a href="/admin" class="session-icon" title="Admin" aria-label="Admin"><i class="fas fa-gear"></i></a>' : ''}
+    <a href="#" id="navChangePw" class="session-icon" title="Change password" aria-label="Change password">
       <i class="fas fa-key"></i>
     </a>
-    <a href="#" id="navSignOut" style="color:#fff;opacity:.85;text-decoration:none" title="Sign out">
-      <i class="fas fa-arrow-right-from-bracket"></i>
+    <a href="#" id="navSignOut" class="session-signout" title="Sign out" aria-label="Sign out">
+      <i class="fas fa-arrow-right-from-bracket"></i><span>Sign out</span>
     </a>`;
   nav.appendChild(chip);
 
@@ -183,10 +245,22 @@ async function renderSessionChip() {
     openChangePasswordModal();
   });
 
-  document.getElementById('navSignOut').addEventListener('click', async (e) => {
+  const signOut = document.getElementById('navSignOut');
+  signOut.addEventListener('click', async (e) => {
     e.preventDefault();
-    await fetch('/api/auth/logout', { method: 'POST' });
-    location.href = '/login';
+    if (signOut.dataset.busy) return;
+    signOut.dataset.busy = '1';
+    // Only leave for /login once the cookie is actually cleared. Redirecting on a
+    // failed request would show the login screen with a live session behind it —
+    // on a shared kitchen terminal that reads as "signed out" when it isn't.
+    try {
+      const r = await fetch('/api/auth/logout', { method: 'POST' });
+      if (!r.ok) throw new Error('logout failed');
+      location.href = '/login';
+    } catch (_) {
+      delete signOut.dataset.busy;
+      showToast('Could not sign out — check your connection and try again.', 'error');
+    }
   });
 }
 
@@ -290,6 +364,14 @@ async function submitChangePassword() {
   }
 }
 
+// True once renderSessionChip() has seen a paused account. Deliberately false
+// until /api/auth/me answers: a wrong "not paused" costs one refused request,
+// a wrong "paused" would block a paying customer. The server is the authority
+// either way — this only decides whether we bother asking it.
+function isAccountPaused() {
+  return window.__accountPaused === true;
+}
+
 // Red bar pinned to the top while the account is paused for non-payment.
 // Deliberately not dismissible: it is the only explanation the customer gets
 // for why saving stopped working, and the 402 responses are silent.
@@ -343,41 +425,83 @@ function renderViewingAsBar(org) {
 document.addEventListener('DOMContentLoaded', renderSessionChip);
 
 // API helpers
+//
+// Every write helper shares one error path (_apiFail) so the server's own
+// explanation reaches the user. They used to differ: apiPost read the message
+// off the body, while apiPut/apiPatch/apiDelete threw the bare status, so
+// creating a recipe on a paused account said "Your account is paused…" and
+// editing the same recipe said "PUT tables/recipes/abc123 failed: 402".
+// Word for word what the server's 402 says, so the customer gets one sentence
+// whether the refusal came from here or from the API.
+const PAUSED_MESSAGE =
+  'Your account is paused because payment is overdue. Contact us to restore access.';
+
+// Thrown without touching the network when the account is paused. The server
+// would refuse this anyway (402 in the /api/* middleware); refusing here just
+// makes the failure instant and the wording identical everywhere.
+function _pausedError() {
+  const err = new Error(PAUSED_MESSAGE);
+  err.status = 402;
+  err.paused = true;
+  return err;
+}
+
+// Turn a failed response into an Error carrying the status and, when the server
+// sent one, its message rather than the method + URL.
+async function _apiFail(method, url, r) {
+  let msg = '';
+  try { msg = (await r.json()).error || ''; } catch (_) {}
+  const err = new Error(msg || `${method} ${url} failed: ${r.status}`);
+  err.status = r.status;
+  if (r.status === 402) err.paused = true;
+  return err;
+}
+
 async function apiGet(url) {
   const r = await fetch(`${API_BASE}/${url}`);
-  if (!r.ok) throw new Error(`GET ${url} failed: ${r.status}`);
+  if (!r.ok) throw await _apiFail('GET', url, r);
   return r.json();
 }
 async function apiPost(url, data) {
+  if (isAccountPaused()) throw _pausedError();
   const r = await fetch(`${API_BASE}/${url}`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
-  if (!r.ok) {
-    let msg = `POST ${url} failed: ${r.status}`;
-    try { const j = await r.json(); if (j.error) msg = j.error; } catch (_) {}
-    throw new Error(msg);
-  }
+  if (!r.ok) throw await _apiFail('POST', url, r);
   return r.json();
 }
 async function apiPut(url, data) {
+  if (isAccountPaused()) throw _pausedError();
   const r = await fetch(`${API_BASE}/${url}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
-  if (!r.ok) throw new Error(`PUT ${url} failed: ${r.status}`);
+  if (!r.ok) throw await _apiFail('PUT', url, r);
   return r.json();
 }
 async function apiPatch(url, data) {
+  if (isAccountPaused()) throw _pausedError();
   const r = await fetch(`${API_BASE}/${url}`, { method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
-  if (!r.ok) throw new Error(`PATCH ${url} failed: ${r.status}`);
+  if (!r.ok) throw await _apiFail('PATCH', url, r);
   return r.json();
 }
 async function apiDelete(url) {
+  if (isAccountPaused()) throw _pausedError();
   const r = await fetch(`${API_BASE}/${url}`, { method: 'DELETE' });
-  if (!r.ok && r.status !== 204) throw new Error(`DELETE ${url} failed: ${r.status}`);
+  if (!r.ok && r.status !== 204) throw await _apiFail('DELETE', url, r);
 }
 
 // Upload a file to R2, returns { key, url, name }
 async function apiUploadFile(file) {
+  if (isAccountPaused()) throw _pausedError();
   const fd = new FormData();
   fd.append('file', file);
   const r = await fetch(`${API_BASE}/upload`, { method: 'POST', body: fd });
-  if (!r.ok) throw new Error('File upload failed: ' + r.status);
+  if (!r.ok) {
+    // Carry the status (and the server's explanation, when it sent one) on the
+    // error. Callers need to tell a transient failure — worth retrying — apart
+    // from a refusal like 402 "account paused", which will never succeed.
+    let msg = '';
+    try { msg = (await r.json()).error || ''; } catch (_) {}
+    const err = new Error(msg || 'File upload failed: ' + r.status);
+    err.status = r.status;
+    throw err;
+  }
   return r.json();
 }
 

@@ -25,6 +25,7 @@ let currentFileKey  = '';
 let currentFileUrl  = '';
 let currentPageKeys = [];   // R2 keys for every uploaded page (index 0 = page 1 = currentFileKey)
 let currentUploadFailed = false; // true when the primary image failed to store in R2
+let currentUploadError  = null;  // the error that caused it, so the panel can name the real reason
 
 let currentTaxGst        = 0;
 let currentTaxPst        = 0;
@@ -379,6 +380,12 @@ function resetSubmitButton() {
 async function submitBatch() {
   if (!stagedFiles.length) return;
 
+  // Paused account: every write in this pipeline (R2 upload, Claude parse,
+  // invoice save) will be refused with a 402, so don't start. Checked here
+  // rather than at the first failure so we don't spend a minute on image
+  // preprocessing and PDF text extraction before saying no.
+  if (isAccountPaused()) { showPausedBlocker(); return; }
+
   const btn = document.getElementById('submitBatchBtn');
   btn.disabled = true;
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading…';
@@ -423,10 +430,19 @@ async function submitBatch() {
 }
 
 // Upload a single file to R2 with one retry, to ride out transient hiccups.
+//
+// A refusal is not a hiccup: 402 (account paused) and 403 (plan/limit) are
+// decisions the server will repeat verbatim, so retrying just doubles the wait
+// before the same answer. Only genuinely transient failures get a second go.
+function _isPermanentRefusal(err) {
+  return err && (err.status === 402 || err.status === 403);
+}
+
 async function _uploadWithRetry(file) {
   try {
     return await apiUploadFile(file);
   } catch (firstErr) {
+    if (_isPermanentRefusal(firstErr)) throw firstErr;
     console.warn('R2 upload failed, retrying once:', firstErr.message);
     return await apiUploadFile(file);  // second attempt; throws if it also fails
   }
@@ -442,6 +458,7 @@ async function uploadAllPages(files) {
   currentPageKeys = [];
   currentFileName = files[0].name;
   currentUploadFailed = false;
+  currentUploadError  = null;
   for (let i = 0; i < files.length; i++) {
     try {
       const uploaded = await _uploadWithRetry(files[i]);
@@ -453,6 +470,7 @@ async function uploadAllPages(files) {
     } catch (upErr) {
       console.warn(`R2 upload failed for page ${i + 1}:`, upErr.message);
       currentUploadFailed = true;
+      currentUploadError  = upErr;   // the caller picks its panel from this
       return false;  // hard-stop: don't parse/save an invoice with a missing image
     }
   }
@@ -506,7 +524,8 @@ async function processPDFBatch() {
     extractedRows = mapAiResult(result, files[0].name);
   } catch (aiErr) {
     hideProgress();
-    if (aiErr.capBlocked) showCapBlocker(aiErr.message);
+    if (aiErr.paused) showPausedBlocker();
+    else if (aiErr.capBlocked) showCapBlocker(aiErr.message);
     else showToast('Claude parsing failed: ' + aiErr.message, 'error');
     resetSubmitButton();
     return;
@@ -554,7 +573,8 @@ async function processImageBatch() {
     extractedRows = mapAiResult(result, files[0].name);
   } catch (aiErr) {
     hideProgress();
-    if (aiErr.capBlocked) showCapBlocker(aiErr.message);
+    if (aiErr.paused) showPausedBlocker();
+    else if (aiErr.capBlocked) showCapBlocker(aiErr.message);
     else showToast('Claude parsing failed: ' + aiErr.message, 'error');
     resetSubmitButton();
     return;
@@ -828,10 +848,52 @@ function showCapBlocker(message) {
   });
 }
 
+// Shown when the account is paused for non-payment. Deliberately has NO retry
+// button: the refusal is a decision, not a hiccup, and it will be identical
+// every time. Pointing them at their connection (which is what the generic
+// upload failure used to do) sends them to troubleshoot the wrong thing.
+function showPausedBlocker() {
+  removeBlocker('parseBlocker');
+  removeBlocker('uploadBlocker');
+  const reason = window.__accountPauseReason || '';
+  const blocker = document.createElement('div');
+  blocker.id = 'uploadBlocker';
+  blocker.style.cssText = `
+    margin-top: 1.25rem;
+    padding: 1.1rem 1.25rem;
+    background: #fef2f2;
+    border: 2px solid #ef4444;
+    border-radius: 10px;
+    color: #991b1b;
+    font-size: .92rem;
+    line-height: 1.6;
+  `;
+  blocker.innerHTML = `
+    <div style="display:flex;align-items:flex-start;gap:.75rem">
+      <i class="fas fa-circle-pause" style="font-size:1.3rem;margin-top:.1rem;flex-shrink:0"></i>
+      <div style="flex:1">
+        <strong style="display:block;font-size:1rem;margin-bottom:.4rem">Account Paused — Invoices Can't Be Uploaded</strong>
+        <div>
+          Your account is paused because payment is overdue, so invoices can't be
+          uploaded or read right now.${reason ? ` (${esc(reason)})` : ''}
+          Nothing was saved and nothing was charged. Everything already in your
+          account stays visible — contact us to restore access.
+        </div>
+      </div>
+    </div>
+  `;
+  const uploadCard = document.querySelector('.upload-card');
+  if (uploadCard?.parentNode) uploadCard.parentNode.insertBefore(blocker, uploadCard.nextSibling);
+  showToast('Account paused — payment overdue. Invoices cannot be uploaded.', 'error');
+  resetSubmitButton();
+}
+
 // Shown when a page image fails to upload to storage. The pipeline stops before
 // parsing/saving so nothing is written; the user must retry. A Retry button
 // re-runs the whole submit (the staged files are still there).
 function showUploadBlocker() {
+  // A paused account is not a storage problem — say what actually happened.
+  if (currentUploadError?.status === 402 || isAccountPaused()) return showPausedBlocker();
   removeBlocker('parseBlocker');
   removeBlocker('uploadBlocker');
   const blocker = document.createElement('div');
@@ -879,6 +941,9 @@ async function callClaudeParse(files) {
   const data = await response.json();
   if (!response.ok || data.error) {
     const err = new Error(data.error || `Server error ${response.status}`);
+    // Account paused — not a parsing failure either. The server refuses this
+    // before it calls Anthropic, so a paused account cannot run up a bill.
+    if (response.status === 402 || data.suspended) err.paused = true;
     // Over the monthly allowance — not a parsing failure, and shown differently.
     if (data.upgrade_required) {
       err.capBlocked = true;
