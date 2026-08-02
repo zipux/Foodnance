@@ -215,6 +215,13 @@ async function renderSessionChip() {
   // can only end in a 402 — see isAccountPaused() below.
   window.__accountPaused       = !!me.suspended;
   window.__accountPauseReason  = me.suspend_reason || '';
+
+  // The plan decides the costing basis (see buildLiveCostIndex). This bootstrap
+  // is async and races the page's own catalogue loads, so a controller may have
+  // already built a cost index without knowing the plan. Announce it rather than
+  // hoping we won the race — the same mistake that left recipe lists showing $0.
+  window.__accountPlan = String(me.plan || '').toLowerCase();
+  window.dispatchEvent(new CustomEvent('dm:plan-known', { detail: window.__accountPlan }));
   if (me.suspended) {
     renderSuspendedBar(me.suspend_reason);
     applySuspensionGating();
@@ -1154,31 +1161,86 @@ function fifoEntryQtyIn(entry, toUnit, avgWeightKg) {
   return conv.error ? null : conv.qty;
 }
 
+// Costing bases. FIFO only means anything when the app knows how much has been
+// used — it picks the price layer by comparing what was bought against what is
+// left. With no consumption ever recorded those two are equal, so FIFO concludes
+// nothing has been touched and pins the price to the FIRST invoice ever
+// uploaded. That number then never moves, however many deliveries arrive, while
+// still looking perfectly plausible. LATEST is the honest answer in that case.
+const COST_BASIS_FIFO   = 'fifo';
+const COST_BASIS_LATEST = 'latest';
+
+// A cost that quietly changes basis is the same trap as a cost that is quietly
+// wrong. Say which one produced the number — but only for the fallback, so the
+// note stays out of the way when FIFO is doing its job. On Pro it doubles as the
+// reason to start recording usage.
+function costBasisNote(basis) {
+  if (basis !== COST_BASIS_LATEST) return '';
+  const pro = String(window.__accountPlan || '').toLowerCase() === 'pro';
+  return `<div class="cost-basis-note">
+    <i class="fas fa-circle-info"></i>
+    Priced from your most recent invoice.${pro
+      ? ' Record stock usage — import sales or complete a stock take — and costs will follow the batch you are actually using.'
+      : ''}
+  </div>`;
+}
+
 // The entry whose batch is currently being consumed, or null for no entries.
 // Purchases that can't be expressed in `toUnit` are skipped for layer selection
 // (they can't be placed on the same axis); if none can be converted, falls back
 // to the newest entry so costing still resolves to something.
-function fifoActiveEntryIn(sortedEntries, invQty, toUnit, avgWeightKg) {
-  if (!sortedEntries || !sortedEntries.length) return null;
+//
+// `opts.alwaysLatest` forces the newest purchase regardless of stock — the
+// Essential basis, where stock tracking is not part of the plan. Pro keeps FIFO,
+// but still falls back to newest when it has no consumption to go on (a Pro
+// account that has not connected a till or done a count yet). That fallback
+// switches itself off the moment real usage lands.
+//
+// Returns the entry. Use fifoActiveEntryWithBasis() when the caller also needs
+// to know WHICH basis was used, so the UI can say so rather than stay silent.
+function fifoActiveEntryIn(sortedEntries, invQty, toUnit, avgWeightKg, opts) {
+  return fifoActiveEntryWithBasis(sortedEntries, invQty, toUnit, avgWeightKg, opts).entry;
+}
+
+function fifoActiveEntryWithBasis(sortedEntries, invQty, toUnit, avgWeightKg, opts) {
+  const none = { entry: null, basis: COST_BASIS_LATEST };
+  if (!sortedEntries || !sortedEntries.length) return none;
 
   const usable = [];
   for (const e of sortedEntries) {
     const q = fifoEntryQtyIn(e, toUnit, avgWeightKg);
     if (q != null) usable.push({ entry: e, qty: q });
   }
-  if (!usable.length) return sortedEntries[sortedEntries.length - 1];
+  // Nothing could be placed on a common axis — newest is the only honest answer.
+  if (!usable.length) {
+    return { entry: sortedEntries[sortedEntries.length - 1], basis: COST_BASIS_LATEST };
+  }
+
+  const newest = usable[usable.length - 1].entry;
+
+  // One delivery: both bases give the same row, so report it as FIFO rather
+  // than raising a "priced from your latest invoice" note about nothing.
+  if (usable.length === 1) return { entry: newest, basis: COST_BASIS_FIFO };
+
+  if (opts && opts.alwaysLatest) return { entry: newest, basis: COST_BASIS_LATEST };
 
   let totalPurchased = 0;
   for (const u of usable) totalPurchased += u.qty;
 
   const consumed = Math.max(0, totalPurchased - Math.max(0, invQty));
 
+  // Nothing ever recorded as used — including the case where stock on hand
+  // exceeds everything ever bought, which means someone typed a delivery
+  // straight into inventory. Either way there is no evidence to pick a layer
+  // with, so don't pretend: use the newest price.
+  if (consumed <= 0) return { entry: newest, basis: COST_BASIS_LATEST };
+
   let cumulative = 0;
   for (const u of usable) {
     cumulative += u.qty;
-    if (cumulative > consumed) return u.entry;
+    if (cumulative > consumed) return { entry: u.entry, basis: COST_BASIS_FIFO };
   }
-  return usable[usable.length - 1].entry;
+  return { entry: newest, basis: COST_BASIS_FIFO };
 }
 
 /* ── Shared pack facts ──────────────────────────────────────────
@@ -1287,7 +1349,13 @@ function liveRecipeLineCost(rc, quantity, unit) {
 function buildLiveCostIndex({
   generics = [], entries = [], inventory = [],
   recipes = [], recipeItems = [], finishedProducts = [], fpItems = [],
+  plan = '',
 } = {}) {
+  // Essential does not include stock tracking, so FIFO has nothing to work from
+  // and would anchor every cost to the first invoice ever uploaded. Price from
+  // the latest invoice instead. Pro keeps FIFO and only falls back per-product
+  // when that product has no consumption recorded — see fifoActiveEntryWithBasis.
+  const alwaysLatest = String(plan || '').toLowerCase() === 'essential';
   // ── Level 1: raw materials, at the FIFO layer currently being consumed ──
   const entriesByProduct = new Map();
   for (const e of entries) {
@@ -1309,20 +1377,21 @@ function buildLiveCostIndex({
     if (!mine.length) {
       // Never purchased: no price, but keep the declared stocking unit so the
       // line still lands on a unit that converts.
-      product.set(g.id, { ...base, cost_per_unit: 0, pack_unit: String(g.base_unit || '').trim() || 'unit', pack_qty: 1, priced: false });
+      product.set(g.id, { ...base, cost_per_unit: 0, pack_unit: String(g.base_unit || '').trim() || 'unit', pack_qty: 1, priced: false, basis: COST_BASIS_FIFO });
       continue;
     }
     const inv    = inventory.find(r => r.item_id === g.id && r.item_type === 'raw_material');
-    const active = fifoActiveEntryIn(
+    const picked = fifoActiveEntryWithBasis(
       mine, parseFloat(inv?.quantity) || 0,
-      String(inv?.unit || g.base_unit || '').trim(), avgW);
-    const facts = entryPackFacts(active);
+      String(inv?.unit || g.base_unit || '').trim(), avgW, { alwaysLatest });
+    const facts = entryPackFacts(picked.entry);
     product.set(g.id, {
       ...base,
       cost_per_unit: facts.cost_per_unit,
       pack_unit:     facts.pack_unit,
       pack_qty:      facts.pack_qty,
       priced:        true,
+      basis:         picked.basis,
     });
   }
 
@@ -1335,9 +1404,11 @@ function buildLiveCostIndex({
 
   const recipe = new Map();
   for (const r of recipes) {
-    let total = 0, uncostable = false;
+    let total = 0, uncostable = false, anyLatest = false;
     for (const ri of itemsByRecipe.get(r.id) || []) {
-      const c = liveProductLineCost(product.get(ri.product_id), ri.quantity, ri.unit);
+      const pc = product.get(ri.product_id);
+      if (pc && pc.priced && pc.basis === COST_BASIS_LATEST) anyLatest = true;
+      const c = liveProductLineCost(pc, ri.quantity, ri.unit);
       if (c === null || isNaN(c)) { uncostable = true; continue; }
       total += c;
     }
@@ -1348,6 +1419,9 @@ function buildLiveCostIndex({
       yield_unit:          r.yield_unit || 'kg',
       servings,
       uncostable,
+      // One ingredient on the latest-invoice basis is enough to make the whole
+      // total a latest-invoice figure — say so rather than implying FIFO.
+      basis: anyLatest ? COST_BASIS_LATEST : COST_BASIS_FIFO,
     });
   }
 
@@ -1360,18 +1434,22 @@ function buildLiveCostIndex({
 
   const finished = new Map();
   for (const fp of finishedProducts) {
-    let total = 0, uncostable = false;
+    let total = 0, uncostable = false, anyLatest = false;
     for (const fi of itemsByFp.get(fp.id) || []) {
+      const src = fi.item_type === 'recipe' ? recipe.get(fi.ref_id) : product.get(fi.ref_id);
+      if (fi.item_type === 'recipe') {
+        if (src && src.basis === COST_BASIS_LATEST) anyLatest = true;
+        // A recipe that couldn't be fully costed makes every product using it
+        // understated too — carry the flag up rather than showing a confident total.
+        if (src && src.uncostable) uncostable = true;
+      } else if (src && src.priced && src.basis === COST_BASIS_LATEST) {
+        anyLatest = true;
+      }
       const c = fi.item_type === 'recipe'
-        ? liveRecipeLineCost(recipe.get(fi.ref_id), fi.quantity, fi.unit)
-        : liveProductLineCost(product.get(fi.ref_id), fi.quantity, fi.unit);
+        ? liveRecipeLineCost(src, fi.quantity, fi.unit)
+        : liveProductLineCost(src, fi.quantity, fi.unit);
       if (c === null || isNaN(c)) { uncostable = true; continue; }
       total += c;
-    }
-    // A recipe that couldn't be fully costed makes every product using it
-    // understated too — carry the flag up rather than showing a confident total.
-    for (const fi of itemsByFp.get(fp.id) || []) {
-      if (fi.item_type === 'recipe' && recipe.get(fi.ref_id)?.uncostable) uncostable = true;
     }
     const selling = parseFloat(fp.selling_price) || 0;
     finished.set(fp.id, {
@@ -1380,6 +1458,7 @@ function buildLiveCostIndex({
       profit: selling - total,
       margin_pct: selling > 0 ? ((selling - total) / selling) * 100 : null,
       uncostable,
+      basis: anyLatest ? COST_BASIS_LATEST : COST_BASIS_FIFO,
     });
   }
 

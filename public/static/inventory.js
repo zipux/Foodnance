@@ -112,6 +112,7 @@ async function loadInventory() {
         recipeItems:      riData.data  || [],
         finishedProducts: fpData.data  || [],
         fpItems:          fiData.data  || [],
+        plan:             window.__accountPlan || '',
       })
     );
 

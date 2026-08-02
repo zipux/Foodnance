@@ -17,7 +17,9 @@ let _rCatalogue    = { generics: [], entries: [], inventory: [], recipeItems: []
 let rCostIndex     = { product: new Map(), recipe: new Map(), finished: new Map() };
 
 function rebuildRecipeCostIndex() {
-  rCostIndex = buildLiveCostIndex({ ..._rCatalogue, recipes: allRecipes });
+  rCostIndex = buildLiveCostIndex({
+    ..._rCatalogue, recipes: allRecipes, plan: window.__accountPlan || '',
+  });
   // The catalogue and the recipe list load CONCURRENTLY, and the list wins the
   // race — one fetch against four. Its first render therefore comes off a
   // half-built index and prints $0 for everything. Repaint here so whichever
@@ -38,6 +40,11 @@ function recipeLiveCost(r) {
 // ── Bootstrap ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   if (!document.getElementById('recipeName')) return; // guard
+
+  // Registered before the loads, not after: the plan arrives from /api/auth/me
+  // on its own schedule and decides the costing basis. A listener added after
+  // the awaits would miss an event that fired during them.
+  window.addEventListener('dm:plan-known', () => rebuildRecipeCostIndex());
 
   await Promise.all([loadProductCatalogue(), loadRecipes(), loadUnits()]);
 
@@ -1103,6 +1110,7 @@ async function openRecipeDetail(id) {
   }
 
   let body = `
+    ${costBasisNote(rCostIndex.recipe.get(recipe.id)?.basis)}
     <div class="detail-section-title">Recipe Info</div>
     <div class="detail-info-grid">
       ${recipe.description ? `<div class="detail-info-item"><span>Description</span><span>${esc(recipe.description)}</span></div>` : ''}

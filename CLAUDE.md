@@ -207,6 +207,26 @@ it. A supplier price rise therefore moves menu costs **on its own**: the FIFO
 layer follows what's left in the bin (`fifoActiveEntryIn`), so when the cheap
 stock runs out the price rolls over with no staff action.
 
+**Costing basis (`plan` argument to `buildLiveCostIndex`).** FIFO only means
+anything when the app knows how much has been used — it picks the price layer by
+comparing purchases against stock on hand. With no consumption ever recorded
+those are equal, so FIFO pins every cost to the **first invoice ever uploaded**
+and it never moves again, however many deliveries arrive. Two rules:
+**Essential** always prices from the latest invoice (stock tracking isn't in the
+plan); **Pro** uses FIFO but falls back per-product when that product has no
+consumption recorded. The Pro fallback matters most just after an upgrade — a
+plain plan check would swap a working latest-invoice cost for a FIFO one anchored
+months back, right after the customer paid more. It switches itself off when real
+usage lands. `fifoActiveEntryWithBasis()` returns which basis was used;
+`costBasisNote()` surfaces it in the detail modals, only for the fallback.
+
+The plan reaches the browser via `publicUser()` → `window.__accountPlan`, and
+that bootstrap **races the pages' own catalogue loads**. `utils.js` dispatches
+`dm:plan-known` when it lands and both pages rebuild + repaint on it — listeners
+registered *before* their `Promise.all`, or an event firing during the loads is
+missed. An unknown plan behaves like Pro, so the worst case is a repaint rather
+than a silently wrong basis for a paying account.
+
 `recipes.total_cost` and `finished_products.total_cost` still exist and are still
 *written* on save, but **nothing reads them for display**. Treat them as a
 last-known value, not the truth — they freeze at the last Save and go stale the

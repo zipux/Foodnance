@@ -35,6 +35,7 @@ function rebuildFpCostIndex() {
     recipeItems:      allRecipeItems_fp,
     finishedProducts: allFp,
     fpItems:          allFpItems_fp,
+    plan:             window.__accountPlan || '',
   });
   // Same race as recipes.js: loadFinishedProducts (one fetch) beats
   // loadFpCatalogues (six), so the first render comes off a half-built index
@@ -65,6 +66,11 @@ function fmtLiveLine(v) {
 // ── Bootstrap ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   if (!document.getElementById('fpName')) return;
+
+  // Registered before the loads, not after: the plan arrives from /api/auth/me
+  // on its own schedule and decides the costing basis. A listener added after
+  // the awaits would miss an event that fired during them.
+  window.addEventListener('dm:plan-known', () => rebuildFpCostIndex());
 
   await Promise.all([loadFpCatalogues(), loadFinishedProducts(), loadFpUnits()]);
 
@@ -1011,6 +1017,7 @@ async function openFpDetail(id) {
   const margin       = selling > 0 ? (profit / selling) * 100 : 0;
 
   let body = `
+    ${costBasisNote(fpCostIndex.finished.get(fp.id)?.basis)}
     <div class="detail-section-title">Product Info</div>
     <div class="detail-info-grid">
       ${fp.description ? `<div class="detail-info-item"><span>Description</span><span>${esc(fp.description)}</span></div>` : ''}

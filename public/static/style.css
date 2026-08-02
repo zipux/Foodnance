@@ -1119,3 +1119,14 @@ body {
 }
 .pb-deduction-row:last-child { border-bottom: none; }
 .pb-deduction-row:nth-child(odd) { background: #fafafa; }
+
+/* Says which basis produced a cost, shown only for the latest-invoice fallback
+   (see costBasisNote in utils.js). Informational, not a warning — the number is
+   the best available, it just isn't FIFO. */
+.cost-basis-note {
+  display: flex; align-items: flex-start; gap: .5rem;
+  padding: .55rem .7rem; margin-bottom: .9rem;
+  border-radius: var(--radius-sm);
+  background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af;
+  font-size: .8rem; line-height: 1.45;
+}
