@@ -196,7 +196,10 @@ function renderProductTable() {
   }
 
   tbody.innerHTML = slice.map(g => {
-    const entries      = allEntries.filter(e => e.generic_product_id === g.id);
+    // Live entries only — a voided invoice must not supply the price or the
+    // vendor shown here. (The entries table inside the modal deliberately still
+    // lists voided rows, so they can be seen and restored.)
+    const entries      = allEntries.filter(e => e.generic_product_id === g.id && !e.voided_at);
     const supplierCount = [...new Set(entries.map(e => e.supplier_name).filter(Boolean))].length;
     const latestSupplierName = [...entries].reverse().find(e => e.supplier_name)?.supplier_name || '';
     const supplierLabel = supplierCount === 0
@@ -1398,17 +1401,10 @@ async function deleteEntry(entryId) {
 }
 
 // ── Pack size helpers for entries ──────────────────────────────
-function entryPackQty(e) {
-  // Prefer dedicated columns; fall back to parsing legacy pack_size string
-  if (e.pack_qty != null && e.pack_qty !== '') return parseFloat(e.pack_qty) || 1;
-  const m = (e.pack_size || '').match(/^([\d.]+)/);
-  return m ? parseFloat(m[1]) : 1;
-}
-function entryPackUnit(e) {
-  if (e.pack_unit) return e.pack_unit;
-  const m = (e.pack_size || '').match(/[\d.]+\s*(.+)$/);
-  return m ? m[1].trim() : 'unit';
-}
+// Both defer to entryPackFacts() in utils.js, shared with recipes.js and
+// finished-products.js so all three pages read pack shape identically.
+function entryPackQty(e)  { return entryPackFacts(e).pack_qty; }
+function entryPackUnit(e) { return entryPackFacts(e).pack_unit; }
 
 // ── Add-to-Inventory prompt (shown after saving a new supplier entry) ──
 function openEntryInvPrompt({ genericId, itemName, packQty, packUnit, category, invoiceRef }) {
@@ -1779,7 +1775,7 @@ function renderGroupPicker() {
   }
 
   list.innerHTML = rows.map(g => {
-    const entries  = allEntries.filter(e => e.generic_product_id === g.id);
+    const entries  = allEntries.filter(e => e.generic_product_id === g.id && !e.voided_at);
     const vendors  = [...new Set(entries.map(e => e.supplier_name).filter(Boolean))];
     const sub      = vendors.length === 0 ? 'no purchases'
                    : vendors.length === 1 ? vendors[0]

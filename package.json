@@ -17,7 +17,9 @@
     "db:wipe:prod": "wrangler d1 execute invoicedb-production --remote --file=./wipe-data.sql",
     "test:isolation": "node tests/integration/tenant-isolation.test.mjs",
     "test:lifecycle": "node tests/integration/account-lifecycle.test.mjs",
-    "test:pos": "node tests/integration/pos-import.test.mjs"
+    "test:pos": "node tests/integration/pos-import.test.mjs",
+    "test:fp-costing": "node tests/integration/finished-product-costing.test.mjs",
+    "test:live-costing": "node tests/integration/live-costing.test.mjs"
   },
   "dependencies": {
     "hono": "^4.12.7"

@@ -77,13 +77,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 async function loadInventory() {
   try {
     // Fetch inventory + all price reference tables in parallel
-    const [invData, gdData, edData, recData, fpData, catData] = await Promise.all([
+    // The two *_items tables are loaded so batch and finished-product stock can
+    // be valued from today's ingredient prices rather than a stored total_cost.
+    const [invData, gdData, edData, recData, fpData, catData, riData, fiData] = await Promise.all([
       apiGet(`tables/${INV_TABLE}?page=1&limit=500`),
       apiGet(`tables/generic_products?page=1&limit=500`),
       apiGet(`tables/product_entries?page=1&limit=1000`),
       apiGet(`tables/recipes?page=1&limit=500`),
       apiGet(`tables/finished_products?page=1&limit=500`),
       apiGet(`tables/categories?page=1&limit=200`),
+      apiGet(`tables/recipe_items?page=1&limit=1000`),
+      apiGet(`tables/finished_product_items?page=1&limit=1000`),
     ]);
     allInventory = invData.data || [];
     allGenericInv = gdData.data || [];
@@ -99,7 +103,16 @@ async function loadInventory() {
       gdData.data  || [],
       edData.data  || [],
       recData.data || [],
-      fpData.data  || []
+      fpData.data  || [],
+      buildLiveCostIndex({
+        generics:         gdData.data  || [],
+        entries:          edData.data  || [],
+        inventory:        allInventory,
+        recipes:          recData.data || [],
+        recipeItems:      riData.data  || [],
+        finishedProducts: fpData.data  || [],
+        fpItems:          fiData.data  || [],
+      })
     );
 
     // Fetch stock-take statuses (fire-and-forget — render even if it fails)
@@ -125,16 +138,21 @@ async function loadInventory() {
  * Batch         → total recipe cost (what it cost to make it) + cost per yield unit
  * Finished prod → cost per unit packed + selling price
  */
-function buildPriceMap(inventory, generics, entries, recipes, finishedProducts) {
+function buildPriceMap(inventory, generics, entries, recipes, finishedProducts, liveCost) {
   const map = {};
+  const live = liveCost || { recipe: new Map(), finished: new Map() };
 
   // ── Raw Materials: FIFO active entry cost/unit ──────────────
   inventory.filter(r => r.item_type === 'raw_material').forEach(r => {
     const g = generics.find(x => x.id === r.item_id);
     if (!g) { map[r.item_id] = null; return; }
 
+    // Voided lines are excluded: voiding an invoice sets voided_at on the
+    // entries it created so they stop counting toward pricing. Leaving them in
+    // both prices off a cancelled invoice AND inflates the purchased total,
+    // which shifts the FIFO layer to the wrong one.
     const myEntries = entries
-      .filter(e => e.generic_product_id === g.id)
+      .filter(e => e.generic_product_id === g.id && !e.voided_at)
       .sort((a, b) => (a.purchase_date || '') > (b.purchase_date || '') ? 1 : -1);
 
     if (!myEntries.length) { map[r.item_id] = null; return; }
@@ -159,23 +177,30 @@ function buildPriceMap(inventory, generics, entries, recipes, finishedProducts) 
   });
 
   // ── Batches: recipe total cost + cost per yield unit ────────
+  // Derived from current ingredient prices, so a batch bin is valued at what it
+  // would cost to make today — not at whatever was stored when the recipe was
+  // last saved. Falls back to the stored figure only if the live index is absent.
   inventory.filter(r => r.item_type === 'batch').forEach(r => {
     const recipe = recipes.find(x => x.id === r.item_id);
     if (!recipe) { map[r.item_id] = null; return; }
-    const totalCost  = parseFloat(recipe.total_cost) || 0;
+    const lc         = live.recipe.get(recipe.id);
+    const totalCost  = lc ? lc.total_cost : (parseFloat(recipe.total_cost) || 0);
     const servings   = parseFloat(recipe.servings)   || 1;
     const yieldUnit  = recipe.yield_unit || 'unit';
     map[r.item_id] = { type: 'batch', totalCost, cpu: totalCost / servings, unit: yieldUnit };
   });
 
   // ── Finished Products: cost/unit + selling price ─────────────
+  // total_cost is the cost of ONE finished unit, so cost per unit is that
+  // figure directly — dividing by the quantity on hand valued a bin of 10 at a
+  // tenth of the right price.
   inventory.filter(r => r.item_type === 'finished_product').forEach(r => {
     const fp = finishedProducts.find(x => x.id === r.item_id);
     if (!fp) { map[r.item_id] = null; return; }
-    const totalCost    = parseFloat(fp.total_cost)    || 0;
+    const lc           = live.finished.get(fp.id);
+    const costPerUnit  = lc ? lc.total_cost : (parseFloat(fp.total_cost) || 0);
     const sellingPrice = parseFloat(fp.selling_price) || 0;
-    const qty          = parseFloat(r.quantity)       || 1;
-    map[r.item_id] = { type: 'finished', costPerUnit: qty > 0 ? totalCost / qty : totalCost, sellingPrice, totalCost };
+    map[r.item_id] = { type: 'finished', costPerUnit, sellingPrice, totalCost: costPerUnit };
   });
 
   return map;
@@ -337,10 +362,11 @@ function buildPriceCell(r) {
   }
 
   if (info.type === 'finished') {
-    const qty = parseFloat(r.quantity) || 1;
-    const cpu = qty > 0 ? info.totalCost / qty : info.totalCost;
+    // costPerUnit is already per finished unit — the BOM is the recipe for ONE
+    // of them. Dividing by the quantity on hand here made a $3 pizza read as
+    // $0.30 whenever ten were in stock.
     return `<div style="line-height:1.5">
-      <div><span style="font-weight:600;color:#0f172a">${fmt(cpu)}</span>
+      <div><span style="font-weight:600;color:#0f172a">${fmt(info.costPerUnit)}</span>
         <span style="color:var(--text-muted);font-size:.78rem"> / unit cost</span></div>
       ${info.sellingPrice > 0
         ? `<div style="font-size:.8rem;color:#059669">${fmt(info.sellingPrice)} / unit selling</div>`

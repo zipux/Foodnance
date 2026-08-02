@@ -1181,6 +1181,211 @@ function fifoActiveEntryIn(sortedEntries, invQty, toUnit, avgWeightKg) {
   return usable[usable.length - 1].entry;
 }
 
+/* ── Shared pack facts ──────────────────────────────────────────
+ * What one purchase entry says about pack shape and unit price. Every page that
+ * costs a product off an entry needs the same four numbers, and they used to be
+ * derived independently on each page — which is how finished-products.js ended
+ * up reading a `pack_size` column that `product_entries` has never had (the
+ * schema splits it into pack_qty + pack_unit, migration 0001). That silently
+ * gave every product a pack unit of 'unit' and a per-*pack* price.
+ *
+ * Two subtleties worth keeping in one place:
+ *  - `cost` is the LINE total, not the price of one pack. A line of 5 × 10 kg
+ *    sacks at $165 is $3.30/kg, not $16.50 — so the divisor is pack_qty ×
+ *    qty_ordered. Stored `cost_per_unit` already accounts for this and wins
+ *    whenever it's present; the division is only a fallback for older rows.
+ *  - Objects in the legacy "5 kg" single-string shape are still accepted, so
+ *    callers holding one keep working. Dedicated columns take precedence.
+ */
+function entryPackFacts(entry) {
+  const e      = entry || {};
+  const packSz = String(e.pack_size || '');
+
+  const qtyFromCol = (e.pack_qty != null && e.pack_qty !== '') ? parseFloat(e.pack_qty) : NaN;
+  const qtyFromStr = parseFloat((packSz.match(/^([\d.]+)/) || [])[1]);
+  const packQty    = qtyFromCol > 0 ? qtyFromCol : (qtyFromStr > 0 ? qtyFromStr : 1);
+
+  const packUnit = String(
+    e.pack_unit || (packSz.match(/[\d.]+\s*(.+)$/) || [])[1] || 'unit'
+  ).trim() || 'unit';
+
+  const cost    = parseFloat(e.cost) || 0;
+  const ordered = parseFloat(e.qty_ordered) || 1;
+  const stored  = parseFloat(e.cost_per_unit);
+  const costPerUnit = stored > 0
+    ? stored
+    : (packQty > 0 ? cost / (packQty * (ordered > 0 ? ordered : 1)) : cost);
+
+  return {
+    pack_size:     packSz,
+    pack_qty:      packQty,
+    pack_unit:     packUnit,
+    cost,
+    cost_per_unit: costPerUnit,
+  };
+}
+
+/* ── Live costing ───────────────────────────────────────────────
+ * What a recipe or finished product costs RIGHT NOW.
+ *
+ * Cost is DERIVED, never read from a stored figure. `recipes.total_cost` and
+ * `finished_products.total_cost` are snapshots written when someone last
+ * pressed Save; they go stale the moment a supplier price moves, and nobody on
+ * the floor should have to re-save a recipe to correct a menu margin. Raw
+ * materials already worked this way (the FIFO layer follows what's left in the
+ * bin, so the price rolls over on its own once the old stock is used up) — this
+ * extends the same treatment up through recipes to finished products.
+ *
+ * Costs flow in one direction, which is what makes a single pass enough:
+ *      purchase entry  ->  product  ->  recipe  ->  finished product
+ * Recipes hold only products (the two-level BOM limit, see CLAUDE.md), so there
+ * is no recursion to guard here.
+ *
+ * A line whose units cannot be bridged is UNCOSTABLE (null), never zero: it is
+ * excluded from the total and flagged, because a silent zero reads as "this
+ * ingredient is free" and quietly understates every margin above it.
+ */
+
+// Cost of one product line: sub-unit path first, then unit conversion.
+// null when the units can't be bridged. Mirrors the recipe and finished-product
+// line calculations, which is the point — there was one of these per page.
+function liveProductLineCost(pc, quantity, unit) {
+  if (!pc) return null;
+  const qty     = parseFloat(quantity) || 0;
+  const u       = String(unit || pc.pack_unit || '').trim();
+  const subName = String(pc.sub_unit_name || '').trim();
+  const subQty  = parseFloat(pc.sub_unit_qty) || 0;
+
+  // Priced per pack, used by the piece (a case of 24 cans used one can at a time).
+  if (subName && subQty > 0 && u.toLowerCase() === subName.toLowerCase()) {
+    return (pc.cost_per_unit || 0) * (pc.pack_qty || 1) / subQty * qty;
+  }
+  const conv = invConvertUnitCost(
+    pc.cost_per_unit || 0, pc.pack_unit || 'kg', u || 'kg', pc.avg_weight);
+  return conv.error ? null : conv.cost * qty;
+}
+
+// Cost of one recipe line inside a finished product, priced off the recipe's
+// live cost per yield unit. A recipe carries no average weight, so it can only
+// be measured in its own dimension.
+function liveRecipeLineCost(rc, quantity, unit) {
+  if (!rc || rc.cost_per_yield_unit == null) return null;
+  const qty  = parseFloat(quantity) || 0;
+  const conv = invConvertUnitCost(
+    rc.cost_per_yield_unit, rc.yield_unit || 'kg',
+    String(unit || rc.yield_unit || 'kg').trim() || 'kg', null);
+  return conv.error ? null : conv.cost * qty;
+}
+
+/**
+ * One pass over an org's catalogues -> current cost of every product, recipe
+ * and finished product. Callers pass whatever they already loaded; missing
+ * collections just mean those levels come back empty rather than throwing.
+ *
+ * @returns {{product: Map, recipe: Map, finished: Map}}
+ */
+function buildLiveCostIndex({
+  generics = [], entries = [], inventory = [],
+  recipes = [], recipeItems = [], finishedProducts = [], fpItems = [],
+} = {}) {
+  // ── Level 1: raw materials, at the FIFO layer currently being consumed ──
+  const entriesByProduct = new Map();
+  for (const e of entries) {
+    if (e.voided_at) continue;
+    if (!entriesByProduct.has(e.generic_product_id)) entriesByProduct.set(e.generic_product_id, []);
+    entriesByProduct.get(e.generic_product_id).push(e);
+  }
+
+  const product = new Map();
+  for (const g of generics) {
+    const mine = (entriesByProduct.get(g.id) || [])
+      .sort((a, b) => (a.purchase_date || '') > (b.purchase_date || '') ? 1 : -1);
+    const avgW = g.avg_weight_per_unit != null ? parseFloat(g.avg_weight_per_unit) : null;
+    const base = {
+      sub_unit_name: g.sub_unit_name || '',
+      sub_unit_qty:  parseFloat(g.sub_unit_qty) || 0,
+      avg_weight:    avgW,
+    };
+    if (!mine.length) {
+      // Never purchased: no price, but keep the declared stocking unit so the
+      // line still lands on a unit that converts.
+      product.set(g.id, { ...base, cost_per_unit: 0, pack_unit: String(g.base_unit || '').trim() || 'unit', pack_qty: 1, priced: false });
+      continue;
+    }
+    const inv    = inventory.find(r => r.item_id === g.id && r.item_type === 'raw_material');
+    const active = fifoActiveEntryIn(
+      mine, parseFloat(inv?.quantity) || 0,
+      String(inv?.unit || g.base_unit || '').trim(), avgW);
+    const facts = entryPackFacts(active);
+    product.set(g.id, {
+      ...base,
+      cost_per_unit: facts.cost_per_unit,
+      pack_unit:     facts.pack_unit,
+      pack_qty:      facts.pack_qty,
+      priced:        true,
+    });
+  }
+
+  // ── Level 2: recipes, summed from their ingredient lines ──
+  const itemsByRecipe = new Map();
+  for (const ri of recipeItems) {
+    if (!itemsByRecipe.has(ri.recipe_id)) itemsByRecipe.set(ri.recipe_id, []);
+    itemsByRecipe.get(ri.recipe_id).push(ri);
+  }
+
+  const recipe = new Map();
+  for (const r of recipes) {
+    let total = 0, uncostable = false;
+    for (const ri of itemsByRecipe.get(r.id) || []) {
+      const c = liveProductLineCost(product.get(ri.product_id), ri.quantity, ri.unit);
+      if (c === null || isNaN(c)) { uncostable = true; continue; }
+      total += c;
+    }
+    const servings = parseFloat(r.servings) || 1;
+    recipe.set(r.id, {
+      total_cost:          total,
+      cost_per_yield_unit: servings > 0 ? total / servings : total,
+      yield_unit:          r.yield_unit || 'kg',
+      servings,
+      uncostable,
+    });
+  }
+
+  // ── Level 3: finished products ──
+  const itemsByFp = new Map();
+  for (const fi of fpItems) {
+    if (!itemsByFp.has(fi.finished_product_id)) itemsByFp.set(fi.finished_product_id, []);
+    itemsByFp.get(fi.finished_product_id).push(fi);
+  }
+
+  const finished = new Map();
+  for (const fp of finishedProducts) {
+    let total = 0, uncostable = false;
+    for (const fi of itemsByFp.get(fp.id) || []) {
+      const c = fi.item_type === 'recipe'
+        ? liveRecipeLineCost(recipe.get(fi.ref_id), fi.quantity, fi.unit)
+        : liveProductLineCost(product.get(fi.ref_id), fi.quantity, fi.unit);
+      if (c === null || isNaN(c)) { uncostable = true; continue; }
+      total += c;
+    }
+    // A recipe that couldn't be fully costed makes every product using it
+    // understated too — carry the flag up rather than showing a confident total.
+    for (const fi of itemsByFp.get(fp.id) || []) {
+      if (fi.item_type === 'recipe' && recipe.get(fi.ref_id)?.uncostable) uncostable = true;
+    }
+    const selling = parseFloat(fp.selling_price) || 0;
+    finished.set(fp.id, {
+      total_cost: total,
+      selling_price: selling,
+      profit: selling - total,
+      margin_pct: selling > 0 ? ((selling - total) / selling) * 100 : null,
+      uncostable,
+    });
+  }
+
+  return { product, recipe, finished };
+}
+
 /* ── Shared quantity conversion ─────────────────────────────────
  * Products may be invoiced in a different unit than they're stocked in (one
  * supplier bills potatoes in kg, another in lb — see migration 0032). Anything

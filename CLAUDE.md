@@ -129,23 +129,38 @@ from stock. `public/sales.html` ↔ `static/sales.js`, parser in
 
 Flow mirrors invoices exactly: parse in the browser → save a draft
 (`pos_imports.status='Action Required'`, whole payload in `parsed_data`) → review
-and map each POS item to a recipe or finished product → commit, which clears
+and map each POS item to a **finished product** → commit, which clears
 `parsed_data` and writes `pos_sale_lines`. Learned mappings live in
 `pos_item_map`, keyed `lower(item)|lower(price point)`; a key ending in `|` is
 the "any size" fallback. `target_type='ignore'` is how gift cards and bottled
 drinks stop lighting the unmapped warning.
 
+**A sale maps to a finished product only — never straight to a recipe.** A POS
+line is a thing sold over the counter, which is what a finished product models;
+the recipes behind it are still reached through `finished_product_items` when the
+sale is exploded. `target_type` is therefore `finished_product` or `ignore`.
+Enforced in three places: the picker in `sales.js` loads only
+`finished_products`, `sanitizePosTargets()` scrubs anything else off whatever the
+review screen posts to `/preview` and `/commit`, and `explodeSale` has no
+top-level recipe branch. Legacy `pos_item_map` rows with `target_type='recipe'`
+are **not** migrated — they fail the `nameOf` lookup at draft creation and demote
+to unmapped (`match_source='stale'`), so the reviewer re-links them once against
+a finished product and the upsert overwrites the old rule. Committed
+`pos_sale_lines` are history and are left alone.
+
 **The two-level BOM limit is load-bearing.** `finished_product_items` may
 reference a recipe or a product, but `recipe_items` has no `item_type` — a recipe
 holds only products. `explodeSale`/`explodeRecipe` in `src/index.ts` rely on
 that; if `recipe_items` ever gains an `item_type`, the depth guard turns a silent
-infinite loop into a loud error.
+infinite loop into a loud error. `explodeRecipe` is still very much in use — it
+is how a finished product made of recipes reaches its raw materials.
 
 **`recipes.production_mode` prevents double-counting** and must not be bypassed.
-`on_demand` (default) explodes a sale into raw materials; `batched` deducts that
-recipe's `batch` bin instead and leaves Produce Batch to refill it. Doing both
-would count the same flour twice. Migration `0043` backfills `batched` for any
-recipe already holding batch stock.
+It is read where a finished product's line references a recipe: `on_demand`
+(default) explodes that line into raw materials; `batched` deducts the recipe's
+`batch` bin instead and leaves Produce Batch to refill it. Doing both would count
+the same flour twice. Migration `0043` backfills `batched` for any recipe already
+holding batch stock.
 
 **Idempotency is three layers**: `pos_imports.content_hash` (same file re-uploaded
 → 409, overridable with `force`), the partial unique index on
@@ -170,6 +185,39 @@ flips the month back to the typed figure on its own.
 
 Known gap: a recipe left on `on_demand` can still be sent through Produce Batch,
 creating batch stock nothing draws down.
+
+### Costing is derived, never stored
+Cost flows one way — `product_entries` → product → recipe → finished product —
+and every level is computed **at read time** from current invoice prices.
+`buildLiveCostIndex()` in `public/static/utils.js` does the whole pass in one
+call; `recipes.js`, `finished-products.js` and `inventory.js` all display from
+it. A supplier price rise therefore moves menu costs **on its own**: the FIFO
+layer follows what's left in the bin (`fifoActiveEntryIn`), so when the cheap
+stock runs out the price rolls over with no staff action.
+
+`recipes.total_cost` and `finished_products.total_cost` still exist and are still
+*written* on save, but **nothing reads them for display**. Treat them as a
+last-known value, not the truth — they freeze at the last Save and go stale the
+moment a price moves. Anything new that needs a cost must go through
+`buildLiveCostIndex()`, never these columns.
+
+**Voided invoice lines must never price anything.** Voiding sets `voided_at` on
+the `product_entries` the invoice created, so every catalogue that derives a
+price filters `!e.voided_at`. Leaving them in is doubly wrong: a cancelled
+invoice can become the active layer, *and* it inflates the purchased total,
+which shifts FIFO onto the wrong layer even when the voided row isn't the one
+picked. `tests/voided-entries.test.mjs` is a static audit that fails the build if
+a costing page reintroduces an unfiltered filter. The one deliberate exception is
+`renderEntriesTable()` in `products.js` — the entries table inside the product
+modal still lists voided rows so they can be seen and restored.
+
+Pack facts come from `entryPackFacts()` (also `utils.js`): `product_entries`
+stores `pack_qty` + `pack_unit` as columns and has **no `pack_size`** — parsing
+that non-existent field gave every product a pack unit of `'unit'`. Note `cost`
+is the **line total**, so unit price is `cost ÷ (pack_qty × qty_ordered)`;
+`cost_per_unit` is stored and wins when present. A line whose units can't be
+bridged is **uncostable (null)**, never `0` — a silent zero reads as a free
+ingredient and understates every margin above it.
 
 ### Data model (two-level product design)
 `generic_products` (the abstract item) + `product_entries` (per-supplier purchase records with FIFO pricing) is the central pattern. `recipes`/`recipe_items` cost from products; `finished_products`/`finished_product_items` cost from recipes; producing/packing deducts `inventory` and writes `stock_log`. Stock takes (`stock_takes`/`stock_take_items`) reconcile counted vs system stock.

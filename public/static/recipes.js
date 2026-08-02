@@ -9,6 +9,22 @@ let ingredientRows = [];      // [{product_id, product_name, quantity, unit, uni
 let allRecipes     = [];      // full recipe list
 let currentDetailId = null;
 let allUnits_r     = [];      // units table rows, sorted by sort_order
+// Live cost per recipe, derived from current invoice prices rather than the
+// stored recipes.total_cost snapshot. The detail modal already recalculated on
+// open; this gives the list the same treatment, so a supplier price rise moves
+// every card without anyone re-saving a recipe.
+let _rCatalogue    = { generics: [], entries: [], inventory: [], recipeItems: [] };
+let rCostIndex     = { product: new Map(), recipe: new Map(), finished: new Map() };
+
+function rebuildRecipeCostIndex() {
+  rCostIndex = buildLiveCostIndex({ ..._rCatalogue, recipes: allRecipes });
+}
+// Live total for a saved recipe; the stored column is a last resort only while
+// the catalogue is still loading.
+function recipeLiveCost(r) {
+  const c = rCostIndex.recipe.get(r?.id);
+  return c ? c.total_cost : (parseFloat(r?.total_cost) || 0);
+}
 
 // ── Bootstrap ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -110,22 +126,11 @@ function setSelectValueCI_r(select, value) {
 }
 
 // ── Unit helpers ──────────────────────────────────────────────
-// Prefer dedicated pack_qty / pack_unit columns (written by products.js); fall back to parsing legacy pack_size.
-function packQty(p) {
-  if (p.pack_qty != null && p.pack_qty !== '') return parseFloat(p.pack_qty) || 1;
-  const m = (p.pack_size || '').match(/^([\d.]+)/);
-  return m ? parseFloat(m[1]) : 1;
-}
-function packUnit(p) {
-  if (p.pack_unit) return p.pack_unit;
-  const m = (p.pack_size || '').match(/[\d.]+\s*(.+)$/);
-  return m ? m[1].trim() : 'unit';
-}
+// All three defer to entryPackFacts() in utils.js, shared with finished-products.js.
+function packQty(p)  { return entryPackFacts(p).pack_qty; }
+function packUnit(p) { return entryPackFacts(p).pack_unit; }
 // Cost per single base unit (e.g. per kg, per L)
-function costPerUnit(p) {
-  const qty = packQty(p);
-  return qty > 0 ? (p.cost || 0) / qty : (p.cost || 0);
-}
+function costPerUnit(p) { return entryPackFacts(p).cost_per_unit; }
 
 // kg-equivalent of one weight unit (used for all weight ↔ weight math). 'oz' is
 // the WEIGHT ounce (28.35 g); fluid ounces are the separate 'fl oz' volume unit.
@@ -238,28 +243,39 @@ function buildUnitOptions(selectedUnit, product) {
 async function loadProductCatalogue() {
   try {
     // Load generic products, their entries, and current inventory levels
-    const [gd, ed, invd] = await Promise.all([
+    // recipe_items comes along so the list can cost every recipe live, the same
+    // way the detail modal already does.
+    const [gd, ed, invd, rid] = await Promise.all([
       apiGet(`tables/generic_products?page=1&limit=500`),
       apiGet(`tables/product_entries?page=1&limit=1000`),
       apiGet(`tables/inventory?page=1&limit=500`),
+      apiGet(`tables/${RECIPE_ITEMS_TABLE}?page=1&limit=1000`),
     ]);
     const allEntries_r  = ed.data  || [];
     const allInventory_r = invd.data || [];
+    _rCatalogue = { generics: gd.data || [], entries: allEntries_r, inventory: allInventory_r, recipeItems: rid.data || [] };
 
     allProducts = (gd.data || []).map(g => {
-      // All entries for this generic product, sorted oldest purchase first (FIFO order)
+      // All LIVE entries for this generic product, oldest purchase first (FIFO
+      // order). Voided lines are excluded: voiding an invoice sets voided_at on
+      // the entries it created so they stop counting toward pricing. Leaving
+      // them in both prices off a cancelled invoice AND inflates the purchased
+      // total, which shifts the FIFO layer to the wrong one.
       const entries = allEntries_r
-        .filter(e => e.generic_product_id === g.id)
+        .filter(e => e.generic_product_id === g.id && !e.voided_at)
         .sort((a, b) => (a.purchase_date || '') > (b.purchase_date || '') ? 1 : -1);
 
+      // Never purchased: no price yet, but the product's declared stocking unit
+      // is a better default than 'unit', which isn't in the units list at all.
       if (!entries.length) {
+        const baseU = String(g.base_unit || '').trim() || 'unit';
         return {
           id: g.id, name: g.name, category: g.category,
           deleted_at: g.deleted_at || null,   // archived items stay resolvable but are hidden from pickers
           avg_weight_per_unit: g.avg_weight_per_unit ?? null,  // kg per "each" — enables each↔weight costing
           pack_size: '', cost: 0,
           sub_unit_name: g.sub_unit_name || '', sub_unit_qty: g.sub_unit_qty || 0,
-          _cpu: 0, _packUnit: 'unit',
+          pack_qty: 1, pack_unit: baseU, _cpu: 0, _packUnit: baseU,
         };
       }
 
@@ -275,17 +291,13 @@ async function loadProductCatalogue() {
       const avgWKg    = g.avg_weight_per_unit != null ? parseFloat(g.avg_weight_per_unit) : null;
       const activeEntry = fifoActiveEntry(entries, invQty, stockUnit, avgWKg);
 
-      const packSz  = activeEntry.pack_size || '';
-      const pqMatch = packSz.match(/^([\d.]+)/);
-      const puMatch = packSz.match(/[\d.]+\s*(.+)$/);
-      // Prefer dedicated columns (written by products.js); fall back to parsing pack_size string.
-      const pQty    = (activeEntry.pack_qty != null && activeEntry.pack_qty !== '')
-           ? (parseFloat(activeEntry.pack_qty) || 1)
-           : (pqMatch ? parseFloat(pqMatch[1]) : 1);
-      const pUnit   = activeEntry.pack_unit || (puMatch ? puMatch[1].trim() : 'unit');
-      const cpu     = (activeEntry.cost_per_unit != null && activeEntry.cost_per_unit > 0)
-           ? activeEntry.cost_per_unit
-           : (pQty > 0 ? activeEntry.cost / pQty : 0);
+      // Pack shape and unit price — shared with finished-products.js so the two
+      // pages cost a product identically. See entryPackFacts() in utils.js.
+      const facts   = entryPackFacts(activeEntry);
+      const packSz  = facts.pack_size;
+      const pQty    = facts.pack_qty;
+      const pUnit   = facts.pack_unit;
+      const cpu     = facts.cost_per_unit;
 
       return {
         id:            g.id,
@@ -296,6 +308,10 @@ async function loadProductCatalogue() {
         pack_size:     packSz,
         pack_qty:      pQty,
         pack_unit:     pUnit,
+        // Carried so costPerUnit() on this object resolves the same way it does
+        // on the entry. `cost` below is the line total, so dividing it by
+        // pack_qty alone would overstate whenever more than one pack was ordered.
+        cost_per_unit: cpu,
         cost:          activeEntry.cost || 0,
         sub_unit_name: g.sub_unit_name || '',
         sub_unit_qty:  g.sub_unit_qty  || 0,
@@ -303,6 +319,7 @@ async function loadProductCatalogue() {
         _packUnit:     pUnit,
       };
     });
+    rebuildRecipeCostIndex();
   } catch (e) {
     console.error('Failed to load products', e);
     allProducts = [];
@@ -994,6 +1011,7 @@ async function loadRecipes() {
   try {
     const data = await apiGet(`tables/${RECIPES_TABLE}?page=1&limit=200`);
     allRecipes = data.data || [];
+    rebuildRecipeCostIndex();
     renderRecipeList('');
   } catch (e) {
     document.getElementById('recipeListContainer').innerHTML =
@@ -1017,7 +1035,12 @@ function renderRecipeList(query) {
     return;
   }
 
-  container.innerHTML = list.map(r => `
+  container.innerHTML = list.map(r => {
+    const cost = recipeLiveCost(r);
+    const warn = rCostIndex.recipe.get(r.id)?.uncostable
+      ? ' <span title="An ingredient could not be costed — set an average weight, or check its unit" style="color:#dc2626">&#9888;</span>'
+      : '';
+    return `
     <div class="recipe-card" onclick="openRecipeDetail('${esc(r.id)}')">
       <div>
         <div class="recipe-card-name">${esc(r.name)}</div>
@@ -1025,11 +1048,11 @@ function renderRecipeList(query) {
         <div class="recipe-card-meta">${r.servings ? `<i class="fas fa-weight-hanging"></i> ${r.servings} ${esc(r.yield_unit || 'kg')} yield` : ''}</div>
       </div>
       <div style="text-align:right">
-        <div class="recipe-card-cost">${fmt(r.total_cost)}</div>
-        ${r.servings ? `<div class="recipe-card-meta">${fmt((r.total_cost||0)/r.servings)} / ${esc(r.yield_unit || 'kg')}</div>` : ''}
+        <div class="recipe-card-cost">${fmt(cost)}${warn}</div>
+        ${r.servings ? `<div class="recipe-card-meta">${fmt(cost / r.servings)} / ${esc(r.yield_unit || 'kg')}</div>` : ''}
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 // ── Recipe Detail Modal ────────────────────────────────────────

@@ -14,6 +14,47 @@ let fpRecipeRows    = [];   // [{ref_id, ref_name, quantity, unit, yield_unit, c
 let fpProductRows   = [];   // [{ref_id, ref_name, quantity, unit, unit_cost, pack_unit}]
 let allFp           = [];   // saved finished products
 let currentFpDetailId = null;
+// Live cost of every product / recipe / finished product, derived from current
+// invoice prices. Rebuilt whenever the catalogues or the saved list reload, so
+// a supplier price rise shows up on its own — nobody re-saves a recipe to move
+// a menu cost. The stored total_cost columns are NOT read for display.
+let fpCostIndex     = { product: new Map(), recipe: new Map(), finished: new Map() };
+let allRecipeItems_fp = [];
+let allFpItems_fp     = [];
+let _fpRawCatalogue   = { generics: [], entries: [] };
+
+// Rebuilt from whatever has loaded so far. loadFpCatalogues() and
+// loadFinishedProducts() run concurrently, so each calls this on the way out —
+// the first pass may see half the inputs, the second completes it.
+function rebuildFpCostIndex() {
+  fpCostIndex = buildLiveCostIndex({
+    generics:         _fpRawCatalogue.generics,
+    entries:          _fpRawCatalogue.entries,
+    inventory:        allInventory_fp,
+    recipes:          allRecipes_fp,
+    recipeItems:      allRecipeItems_fp,
+    finishedProducts: allFp,
+    fpItems:          allFpItems_fp,
+  });
+}
+
+// Live cost of one saved finished product, with the stored column as a last
+// resort only for a product that isn't in the index yet (mid-load).
+function fpLiveCost(fp) {
+  const c = fpCostIndex.finished.get(fp?.id);
+  return c ? c.total_cost : (parseFloat(fp?.total_cost) || 0);
+}
+function fpLiveUncostable(fp) {
+  return !!fpCostIndex.finished.get(fp?.id)?.uncostable;
+}
+
+// A line whose units can't be bridged shows a warning, never $0.00 — a zero
+// reads as "this ingredient is free" and hides the reason the total is low.
+function fmtLiveLine(v) {
+  return (v === null || isNaN(v))
+    ? '<span style="color:#dc2626" title="Units can\'t be converted — set an average weight on the product, or change the line\'s unit">&#9888;&nbsp;n/a</span>'
+    : fmt(v);
+}
 
 // ── Bootstrap ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -57,31 +98,47 @@ document.addEventListener('DOMContentLoaded', async () => {
 // ── Load catalogues ────────────────────────────────────────────
 async function loadFpCatalogues() {
   try {
-    const [gd, ed, rd, invd] = await Promise.all([
+    // recipe_items and finished_product_items are loaded so cost can be derived
+    // from the bills of materials rather than read from a stored snapshot.
+    const [gd, ed, rd, invd, rid, fid] = await Promise.all([
       apiGet(`tables/${PROD_TABLE}?page=1&limit=500`),
       apiGet(`tables/${ENTRIES_TABLE_FP}?page=1&limit=1000`),
       apiGet(`tables/${REC_TABLE}?page=1&limit=500`),
       apiGet(`tables/inventory?page=1&limit=500`),
+      apiGet(`tables/recipe_items?page=1&limit=1000`),
+      apiGet(`tables/${FP_ITEMS_TABLE}?page=1&limit=1000`),
     ]);
     const generics     = gd.data   || [];
     const entries      = ed.data   || [];
     allInventory_fp     = invd.data || [];
+    allRecipeItems_fp   = rid.data  || [];
+    allFpItems_fp       = fid.data  || [];
     const allInv        = allInventory_fp;
+    _fpRawCatalogue     = { generics, entries };
 
     // Build allProducts_fp: one entry per generic product, inventory-aware FIFO cost
     allProducts_fp = generics.map(g => {
+      // Voided lines are excluded: voiding an invoice sets voided_at on the
+      // entries it created precisely so they stop counting toward pricing.
+      // Leaving them in both prices off a cancelled invoice AND inflates the
+      // purchased total, which shifts the FIFO layer to the wrong one.
       const myEntries = entries
-        .filter(e => e.generic_product_id === g.id)
+        .filter(e => e.generic_product_id === g.id && !e.voided_at)
         .sort((a, b) => (a.purchase_date || '') > (b.purchase_date || '') ? 1 : -1);
 
+      // Never purchased: there is no price yet, but the product still has a
+      // declared stocking unit. Defaulting to 'unit' here would put the line on
+      // a unit that isn't even in the units list, so the dropdown lands on
+      // something arbitrary and the first conversion fails.
       if (!myEntries.length) {
+        const baseU = String(g.base_unit || '').trim() || 'unit';
         return {
           id: g.id, name: g.name, category: g.category,
           deleted_at: g.deleted_at || null,   // archived items stay resolvable but are hidden from the picker
           pack_size: '', cost: 0,
           sub_unit_name: g.sub_unit_name || '', sub_unit_qty: g.sub_unit_qty || 0,
           avg_weight_per_unit: g.avg_weight_per_unit ?? null, pack_qty: 1,
-          _cpu: 0, _packUnit: 'unit',
+          pack_unit: baseU, _cpu: 0, _packUnit: baseU,
         };
       }
 
@@ -95,29 +152,33 @@ async function loadFpCatalogues() {
       const avgWKg    = g.avg_weight_per_unit != null ? parseFloat(g.avg_weight_per_unit) : null;
       const activeEntry = fp_fifoActiveEntry(myEntries, invQty, stockUnit, avgWKg);
 
-      const packSz  = activeEntry.pack_size || '';
-      const pqMatch = packSz.match(/^([\d.]+)/);
-      const puMatch = packSz.match(/[\d.]+\s*(.+)$/);
-      const pQty    = pqMatch ? parseFloat(pqMatch[1]) : 1;
-      const pUnit   = puMatch ? puMatch[1].trim() : 'unit';
-      const cpu     = pQty > 0 ? activeEntry.cost / pQty : 0;
+      // Pack shape and unit price come from the shared helper in utils.js — this
+      // page used to parse a `pack_size` string that product_entries does not
+      // have, so every product costed as one nameless 'unit' at the whole pack
+      // price. See entryPackFacts().
+      const facts = entryPackFacts(activeEntry);
 
       return {
         id:            g.id,
         name:          g.name,
         category:      g.category,
         deleted_at:    g.deleted_at || null,   // archived items stay resolvable but are hidden from the picker
-        pack_size:     packSz,
-        cost:          activeEntry.cost || 0,
+        pack_size:     facts.pack_size,
+        cost:          facts.cost,
+        // Carried so fp_costPerUnit() on this object resolves the same way it
+        // does on the entry — `cost` is the line total, not the per-pack price.
+        cost_per_unit: facts.cost_per_unit,
         sub_unit_name: g.sub_unit_name || '',
         sub_unit_qty:  g.sub_unit_qty  || 0,
         avg_weight_per_unit: g.avg_weight_per_unit ?? null,
-        pack_qty:      pQty,
-        _cpu:          cpu,
-        _packUnit:     pUnit,
+        pack_qty:      facts.pack_qty,
+        pack_unit:     facts.pack_unit,
+        _cpu:          facts.cost_per_unit,
+        _packUnit:     facts.pack_unit,
       };
     });
     allRecipes_fp = rd.data || [];
+    rebuildFpCostIndex();
   } catch (e) {
     console.error('Failed to load catalogues', e);
   }
@@ -168,20 +229,20 @@ registerUnitRefreshCallback(async () => {
 });
 
 // ── Unit helpers (same logic as recipes.js) ────────────────────
+// All three defer to entryPackFacts() in utils.js so this page reads pack shape
+// the same way recipes.js does. The pre-computed FIFO values still win when the
+// caller already resolved the active price layer.
 function fp_packQty(p) {
-  const m = (p.pack_size || '').match(/^([\d.]+)/);
-  return m ? parseFloat(m[1]) : 1;
+  return entryPackFacts(p).pack_qty;
 }
 function fp_packUnit(p) {
   if (p._packUnit !== undefined) return p._packUnit; // use pre-computed FIFO pack unit
-  const m = (p.pack_size || '').match(/[\d.]+\s*(.+)$/);
-  return m ? m[1].trim() : 'unit'; // preserve original case e.g. 'Each', 'L', 'kg'
+  return entryPackFacts(p).pack_unit;                // preserves case, e.g. 'Each', 'L', 'kg'
 }
 function fp_costPerUnit(p) {
-  // Use pre-computed FIFO cpu if available, otherwise parse from pack_size
+  // Use pre-computed FIFO cpu if available, otherwise derive from the entry.
   if (p._cpu !== undefined) return p._cpu;
-  const qty = fp_packQty(p);
-  return qty > 0 ? (p.cost || 0) / qty : (p.cost || 0);
+  return entryPackFacts(p).cost_per_unit;
 }
 // 'oz' is the WEIGHT ounce (28.35 g); fluid ounces are the separate 'fl oz' unit.
 const _FP_WEIGHT_KG = { kg: 1, g: 0.001, lb: 0.453592, oz: 0.0283495231 };
@@ -857,6 +918,7 @@ async function loadFinishedProducts() {
   try {
     const data = await apiGet(`tables/${FP_TABLE}?page=1&limit=200`);
     allFp = data.data || [];
+    rebuildFpCostIndex();
     renderFpList('');
   } catch (e) {
     document.getElementById('fpListContainer').innerHTML =
@@ -881,14 +943,21 @@ function renderFpList(query) {
   }
 
   container.innerHTML = list.map(fp => {
-    const profit     = fp.profit || 0;
-    const margin     = fp.margin_pct || 0;
-    const profitChip = profit > 0
+    // Cost, profit and margin are all derived from today's invoice prices —
+    // never the stored columns, which freeze at the last Save.
+    const cost       = fpLiveCost(fp);
+    const selling    = parseFloat(fp.selling_price) || 0;
+    const profit     = selling > 0 ? selling - cost : 0;
+    const margin     = selling > 0 ? (profit / selling) * 100 : 0;
+    const warn       = fpLiveUncostable(fp)
+      ? ' <span title="An ingredient could not be costed — set an average weight, or check its unit" style="color:#dc2626">&#9888;</span>'
+      : '';
+    const profitChip = selling > 0 && profit > 0
       ? `<span class="fp-chip fp-chip-profit"><i class="fas fa-arrow-trend-up"></i> +${fmt(profit)}</span>`
-      : profit < 0
+      : selling > 0 && profit < 0
       ? `<span class="fp-chip fp-chip-loss"><i class="fas fa-arrow-trend-down"></i> ${fmt(profit)}</span>`
       : '';
-    const marginChip = fp.selling_price
+    const marginChip = selling > 0
       ? `<span class="fp-chip fp-chip-margin">${margin.toFixed(1)}% margin</span>`
       : '';
 
@@ -897,14 +966,14 @@ function renderFpList(query) {
         <div class="fp-card-header">
           <div class="fp-card-name">${esc(fp.name)}</div>
           <div style="text-align:right;white-space:nowrap">
-            ${fp.selling_price ? `<div style="font-weight:700;color:#059669;font-size:1rem">${fmt(fp.selling_price)}</div>` : ''}
-            <div style="font-size:.78rem;color:var(--text-muted)">Cost: ${fmt(fp.total_cost)}</div>
+            ${selling ? `<div style="font-weight:700;color:#059669;font-size:1rem">${fmt(selling)}</div>` : ''}
+            <div style="font-size:.78rem;color:var(--text-muted)">Cost: ${fmt(cost)}${warn}</div>
           </div>
         </div>
         ${fp.description ? `<div class="fp-card-desc">${esc(fp.description)}</div>` : ''}
         <div class="fp-card-chips">
-          <span class="fp-chip fp-chip-cost"><i class="fas fa-calculator"></i> ${fmt(fp.total_cost)}</span>
-          ${fp.selling_price ? `<span class="fp-chip fp-chip-price"><i class="fas fa-tag"></i> ${fmt(fp.selling_price)}</span>` : ''}
+          <span class="fp-chip fp-chip-cost"><i class="fas fa-calculator"></i> ${fmt(cost)}</span>
+          ${selling ? `<span class="fp-chip fp-chip-price"><i class="fas fa-tag"></i> ${fmt(selling)}</span>` : ''}
           ${profitChip}
           ${marginChip}
         </div>
@@ -929,10 +998,11 @@ async function openFpDetail(id) {
 
   const recipeItems  = items.filter(i => i.item_type === 'recipe');
   const productItems = items.filter(i => i.item_type === 'product');
-  const totalCost    = fp.total_cost || 0;
-  const selling      = fp.selling_price || 0;
-  const profit       = fp.profit || 0;
-  const margin       = fp.margin_pct || 0;
+  // Derived from today's prices, not the stored snapshot — see fpLiveCost().
+  const totalCost    = fpLiveCost(fp);
+  const selling      = parseFloat(fp.selling_price) || 0;
+  const profit       = selling > 0 ? selling - totalCost : 0;
+  const margin       = selling > 0 ? (profit / selling) * 100 : 0;
 
   let body = `
     <div class="detail-section-title">Product Info</div>
@@ -957,7 +1027,7 @@ async function openFpDetail(id) {
               <tr>
                 <td><span class="fp-type-badge recipe">Recipe</span> <strong>${esc(it.ref_name)}</strong></td>
                 <td>${it.quantity}</td>
-                <td><strong>${fmt(it.line_cost)}</strong></td>
+                <td><strong>${fmtLiveLine(liveRecipeLineCost(fpCostIndex.recipe.get(it.ref_id), it.quantity, it.unit))}</strong></td>
               </tr>
             `).join('')}
           </tbody>
@@ -979,7 +1049,7 @@ async function openFpDetail(id) {
                 <td><span class="fp-type-badge product">Product</span> <strong>${esc(it.ref_name)}</strong></td>
                 <td>${it.quantity}</td>
                 <td>${esc(it.unit || '—')}</td>
-                <td><strong>${fmt(it.line_cost)}</strong></td>
+                <td><strong>${fmtLiveLine(liveProductLineCost(fpCostIndex.product.get(it.ref_id), it.quantity, it.unit))}</strong></td>
               </tr>
             `).join('')}
           </tbody>
