@@ -235,6 +235,36 @@ t.check('Margherita is remembered from last time',
   m2?.match_source === 'remembered' && m2?.target_id === pizzaId,
   JSON.stringify({ src: m2?.match_source, id: m2?.target_id }));
 
+// ── recipes are not a link target ────────────────────────────────
+// The picker only offers finished products, but the review screen posts its
+// mapping decisions back, so the server has to hold this on its own. A forged
+// recipe target must be scrubbed to unmapped rather than deducting the recipe's
+// batch bin. Uses /preview, which writes nothing, so the P&L numbers below stay
+// exactly as the commits above left them.
+t.section('a sale can only point at a finished product');
+const previewOf = (items) => call(u, 'POST',
+  `/api/pos-imports/${secondDraft.data.import_id}/preview`, { items });
+
+const basePreview = await previewOf(secondDraft.data.items);
+const sauceMoved = (p) => (p.data.movements || [])
+  .some(m => m.item_type === 'batch' && m.item_id === sauceId);
+t.check('baseline: the finished product does deduct the sauce batch',
+  basePreview.status === 200 && sauceMoved(basePreview), `${basePreview.status}`);
+
+const forged = JSON.parse(JSON.stringify(secondDraft.data.items));
+for (const it of forged) {
+  if (it.pos_item_name !== 'Margherita Pizza') continue;
+  it.target_type = 'recipe'; it.target_id = sauceId;
+  it.target_name = 'Tomato Sauce'; it.qty_per_sale = 1; it.target_unit = 'kg';
+}
+const forgedPreview = await previewOf(forged);
+t.check('a forged recipe target deducts nothing',
+  forgedPreview.status === 200 && !sauceMoved(forgedPreview),
+  JSON.stringify((forgedPreview.data.movements || []).map(m => `${m.item_type}:${m.item_name}`)));
+t.check('and the line is counted as unmapped instead',
+  forgedPreview.data.unmapped_lines > basePreview.data.unmapped_lines,
+  `base=${basePreview.data.unmapped_lines} forged=${forgedPreview.data.unmapped_lines}`);
+
 // ── P&L revenue ─────────────────────────────────────────────────
 t.section('imported sales become P&L revenue');
 const pnl = await call(u, 'GET', '/api/pnl?from=2026-07&to=2026-07');

@@ -1683,6 +1683,26 @@ const POS_AUTO_MIN_LEN = 8
 // single D1 batch alongside the sale lines, so the whole commit stays atomic.
 const POS_MAX_MOVEMENTS = 1500
 
+// A POS item may only resolve to a finished product, or be explicitly ignored.
+// Enforced here rather than in the browser for the usual reason — the review
+// screen posts its mapping decisions back and nothing stops a caller sending
+// something else — and it also scrubs legacy `recipe` rules out of drafts saved
+// before that was true. A scrubbed item lands as unmapped, which shows on the
+// review screen as "Not linked" and asks for one click, instead of looking
+// mapped while quietly moving no stock.
+function sanitizePosTargets(items: any[]): any[] {
+  for (const it of items || []) {
+    const t = it && it.target_type
+    if (t && t !== 'finished_product' && t !== 'ignore') {
+      it.target_type = ''
+      it.target_id   = ''
+      it.target_name = ''
+      it.match_source = 'stale'
+    }
+  }
+  return items || []
+}
+
 app.post('/api/pos-imports', async (c) => {
   const org = orgOf(c)
   const body = await c.req.json().catch(() => ({})) as {
@@ -1713,30 +1733,27 @@ app.post('/api/pos-imports', async (c) => {
     }
   }
 
-  // Candidates for mapping: everything the customer actually sells.
-  const [fpRows, recipeRows, mapRows] = await Promise.all([
+  // Candidates for mapping: the finished products the customer sells. Recipes
+  // are deliberately not offered — a POS line is a thing sold over the counter,
+  // which is a finished product. The recipes behind it are still reached, via
+  // finished_product_items, when the sale is exploded.
+  const [fpRows, mapRows] = await Promise.all([
     c.env.DB.prepare(`SELECT id, name FROM finished_products WHERE org_id IS ?`).bind(org).all(),
-    c.env.DB.prepare(`SELECT id, name, yield_unit FROM recipes WHERE org_id IS ?`).bind(org).all(),
     c.env.DB.prepare(
       `SELECT pos_item_key, target_type, target_id, qty_per_sale, target_unit
          FROM pos_item_map WHERE org_id IS ? AND source = ?`
     ).bind(org, String(parsed.source || 'square')).all(),
   ])
 
-  const fps     = (fpRows.results || []) as { id: string; name: string }[]
-  const recipes = (recipeRows.results || []) as { id: string; name: string; yield_unit: string }[]
-  const nameOf  = new Map<string, string>()
+  const fps    = (fpRows.results || []) as { id: string; name: string }[]
+  const nameOf = new Map<string, string>()
   for (const f of fps) nameOf.set('finished_product:' + f.id, f.name)
-  for (const r of recipes) nameOf.set('recipe:' + r.id, r.name)
 
   const learned = new Map<string, any>()
   for (const m of (mapRows.results || []) as any[]) learned.set(m.pos_item_key, m)
 
   // Candidates for fuzzy matching, tagged so the winner's kind is known.
-  const candidates = [
-    ...fps.map(f => ({ id: 'finished_product:' + f.id, name: f.name })),
-    ...recipes.map(r => ({ id: 'recipe:' + r.id, name: r.name })),
-  ]
+  const candidates = fps.map(f => ({ id: 'finished_product:' + f.id, name: f.name }))
 
   const items = (parsed.items || []) as PosParsedItem[]
   let mappedNet = 0, unmappedNet = 0
@@ -1754,8 +1771,11 @@ app.post('/api/pos-imports', async (c) => {
       it.qty_per_sale = Number(rule.qty_per_sale) || 1
       it.target_unit  = rule.target_unit || ''
       it.match_source = 'remembered'
-      // A remembered rule pointing at a deleted recipe is worse than no rule —
-      // it would look mapped and deduct nothing. Demote it to unmapped.
+      // A remembered rule that no longer resolves is worse than no rule — it
+      // would look mapped and deduct nothing. Two ways to get here: the target
+      // was deleted, or it is a legacy `recipe` rule from when a sale could
+      // point straight at a recipe. Both demote to unmapped so the reviewer
+      // re-links them against a finished product.
       if (rule.target_type !== 'ignore' && !it.target_name) {
         it.target_type = ''; it.target_id = ''; it.match_source = 'stale'
       }
@@ -1767,7 +1787,7 @@ app.post('/api/pos-imports', async (c) => {
         it.target_id    = id
         it.target_name  = m.match.name
         it.qty_per_sale = 1
-        it.target_unit  = kind === 'recipe' ? (recipes.find(r => r.id === id)?.yield_unit || '') : ''
+        it.target_unit  = ''
         it.match_source = 'auto'
       } else if (m.decision === 'suggest' && m.match) {
         const [kind, id] = m.match.id.split(':')
@@ -1891,7 +1911,7 @@ async function planPosDepletion(
 
     const res = explodeSale(
       { type: it.target_type, id: it.target_id },
-      Number(l.qty) || 0, Number(it.qty_per_sale) || 1, it.target_unit || '', ctx
+      Number(l.qty) || 0, Number(it.qty_per_sale) || 1, ctx
     )
     for (const n of res.notes) notes.add(n)
     if (res.errors.length && !lineErrors.has(l.pos_item_key)) {
@@ -2057,7 +2077,9 @@ app.post('/api/pos-imports/:id/preview', async (c) => {
 
   // Mapping decisions from the review screen win; the stored ones are the
   // fallback so a preview works before anything is touched.
-  const items = Array.isArray(body.items) && body.items.length ? body.items : (parsed.items || [])
+  const items = sanitizePosTargets(
+    Array.isArray(body.items) && body.items.length ? body.items : (parsed.items || [])
+  )
   const byKey = new Map<string, any>()
   for (const it of items) byKey.set(it.pos_item_key, it)
 
@@ -2090,7 +2112,9 @@ app.post('/api/pos-imports/:id/commit', async (c) => {
     return c.json({ error: 'Could not read that import.' }, 500)
   }
 
-  const items = Array.isArray(body.items) && body.items.length ? body.items : (parsed.items || [])
+  const items = sanitizePosTargets(
+    Array.isArray(body.items) && body.items.length ? body.items : (parsed.items || [])
+  )
   const byKey = new Map<string, any>()
   for (const it of items) byKey.set(it.pos_item_key, it)
 
@@ -3195,9 +3219,12 @@ function explodeRecipe(
   }
 }
 
+// A sale always resolves to a finished product. `explodeRecipe` below is still
+// very much in use — it is how a finished product made of recipes reaches its
+// raw materials — but a POS item can no longer point straight at a recipe.
 function explodeSale(
   target: { type: string; id: string },
-  soldQty: number, qtyPerSale: number, saleUnit: string, ctx: ExplodeCtx
+  soldQty: number, qtyPerSale: number, ctx: ExplodeCtx
 ): ExplodeOut {
   const out: ExplodeOut = { deductions: [], errors: [], notes: [] }
   const units = (Number(soldQty) || 0) * (Number(qtyPerSale) || 1)
@@ -3240,22 +3267,12 @@ function explodeSale(
     return out
   }
 
-  if (target.type === 'recipe') {
-    const r = ctx.recipes.get(target.id)
-    if (!r) { out.errors.push('That recipe no longer exists.'); return out }
-    const mode = r.production_mode || 'on_demand'
-    if (mode === 'ignore') { out.notes.push(`${r.name} is set to never come off stock.`); return out }
-    if (mode === 'batched') {
-      out.deductions.push({
-        item_id: r.id, item_type: 'batch', item_name: r.name,
-        qty: units, unit: saleUnit || r.yield_unit || 'kg',
-      })
-      return out
-    }
-    explodeRecipe(target.id, units, saleUnit || r.yield_unit || '', ctx, 0, out)
-    return out
+  // Anything else (notably a legacy `recipe` target) deducts nothing. It is
+  // reported rather than silently skipped, because a line that looks mapped and
+  // moves no stock is the failure mode this whole screen exists to prevent.
+  if (target.type) {
+    out.errors.push('This item is linked to a recipe. Re-link it to a finished product.')
   }
-
   return out
 }
 

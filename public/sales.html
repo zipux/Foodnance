@@ -87,7 +87,6 @@
     }
     .pos-link-item:hover, .pos-link-item.active { background: #eef2ff; }
     .pos-link-empty { padding: .6rem; font-size: .875rem; color: var(--text-muted); }
-    .pos-recipe-qty { margin-top: .8rem; padding-top: .8rem; border-top: 1px solid var(--border); }
   </style>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
@@ -226,19 +225,8 @@
       </div>
       <div class="modal-body">
         <p class="hint" id="posLinkSubtitle"></p>
-        <input type="text" id="posLinkSearch" class="search-input" placeholder="Search recipes and finished products…" />
+        <input type="text" id="posLinkSearch" class="search-input" placeholder="Search finished products…" />
         <div class="pos-link-results" id="posLinkResults"></div>
-
-        <div class="pos-recipe-qty hidden" id="posLinkQtyWrap">
-          <label>How much of it does one sale use?</label>
-          <div class="pack-size-row">
-            <input type="number" id="posLinkQty" min="0" step="any" value="1" />
-            <input type="text" id="posLinkUnit" placeholder="unit" />
-          </div>
-          <small style="display:block;color:var(--text-muted);font-size:.78rem;margin-top:.35rem">
-            Leave as 1 to use one whole batch-yield per sale.
-          </small>
-        </div>
 
         <label style="display:flex;align-items:center;gap:.45rem;margin-top:.9rem;font-size:.85rem">
           <input type="checkbox" id="posLinkAllSizes" />
@@ -254,8 +242,8 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/static/utils.js?v=20260731-1"></script>
+  <script src="/static/utils.js?v=20260802-4"></script>
   <script src="/static/pos-parse.js?v=20260731-1"></script>
-  <script src="/static/sales.js?v=20260731-1"></script>
+  <script src="/static/sales.js?v=20260802-1"></script>
 </body>
 </html>

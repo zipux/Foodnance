@@ -8,8 +8,8 @@
 let posImports    = [];   // the list
 let posDraft      = null; // { import_id, items, ... } while reviewing
 let posLinkTarget = null; // index into posDraft.items being linked
-let posLinkPick   = null; // { type, id, name, yield_unit }
-let posCandidates = null; // recipes + finished products, loaded on first link
+let posLinkPick   = null; // { type, id, name }
+let posCandidates = null; // finished products, loaded on first link
 
 document.addEventListener('DOMContentLoaded', () => {
   if (!document.getElementById('sales-page-marker')) return;
@@ -244,7 +244,7 @@ function renderPosReview() {
   document.getElementById('posReviewBanner').innerHTML = unmapped.length
     ? `<div class="pos-banner"><i class="fas fa-triangle-exclamation"></i><div>
          <strong>${unmapped.length} ${unmapped.length === 1 ? 'item isn\'t' : 'items aren\'t'}
-         linked to a recipe</strong> (${fmt(unmappedNet)} — ${pct}% of sales).
+         linked to a finished product</strong> (${fmt(unmappedNet)} — ${pct}% of sales).
          Their revenue will still be counted, but no ingredients come off stock,
          so your food cost will look lower than it really is.
        </div></div>`
@@ -255,7 +255,7 @@ function renderPosReview() {
     let target;
     if (state === 'mapped') {
       target = `<span class="pos-pill mapped"><i class="fas fa-check"></i> ${esc(it.target_name || '')}</span>
-                <span class="pos-type-badge">${it.target_type === 'recipe' ? 'Recipe' : 'Finished product'}</span>
+                <span class="pos-type-badge">Finished product</span>
                 ${it.match_source === 'remembered' ? '<span class="pos-type-badge">remembered</span>' : ''}
                 ${it.match_source === 'auto' ? '<span class="pos-type-badge">matched by name</span>' : ''}`;
     } else if (state === 'suggested') {
@@ -322,7 +322,6 @@ async function openPosLink(i) {
   document.getElementById('posLinkSubtitle').textContent =
     `"${it.pos_item_name}${it.price_point ? ' · ' + it.price_point : ''}" sold ${it.qty} times for ${fmt(it.net_sales)}.`;
   document.getElementById('posLinkSearch').value = '';
-  document.getElementById('posLinkQtyWrap').classList.add('hidden');
   document.getElementById('posLinkAllSizes').checked = !it.price_point;
   document.getElementById('posLinkConfirm').disabled = true;
 
@@ -331,20 +330,15 @@ async function openPosLink(i) {
       '<div class="pos-link-empty"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
     openModal('posLinkModal');
     try {
-      const [fps, recipes] = await Promise.all([
-        apiGet('tables/finished_products?page=1&limit=500'),
-        apiGet('tables/recipes?page=1&limit=500'),
-      ]);
-      posCandidates = [
-        ...(fps.data || []).map(f => ({ type: 'finished_product', id: f.id, name: f.name })),
-        ...(recipes.data || []).map(r => ({
-          type: 'recipe', id: r.id, name: r.name,
-          yield_unit: r.yield_unit || 'kg', production_mode: r.production_mode || 'on_demand',
-        })),
-      ];
+      // Finished products only. A POS line is something sold over the counter;
+      // the recipes behind it are picked up through the finished product's
+      // ingredients when the sale is exploded.
+      const fps = await apiGet('tables/finished_products?page=1&limit=500');
+      posCandidates = (fps.data || [])
+        .map(f => ({ type: 'finished_product', id: f.id, name: f.name }));
     } catch (err) {
       document.getElementById('posLinkResults').innerHTML =
-        `<div class="pos-link-empty">Couldn't load your recipes — ${esc(err.message)}</div>`;
+        `<div class="pos-link-empty">Couldn't load your finished products — ${esc(err.message)}</div>`;
       return;
     }
   } else {
@@ -364,31 +358,22 @@ function renderLinkResults() {
     box.innerHTML = `<div class="pos-link-empty">${
       posCandidates && posCandidates.length
         ? 'Nothing matches that.'
-        : "You haven't set up any recipes or finished products yet."
+        : `You haven't set up any finished products yet.
+           <a href="/finished-products.html">Create one</a> and it will show up here.`
     }</div>`;
     return;
   }
 
-  box.innerHTML = list.map(c => {
-    const badge = c.type === 'recipe'
-      ? `Recipe${c.production_mode === 'batched' ? ' · made ahead' : ''}`
-      : 'Finished product';
-    return `<div class="pos-link-item ${posLinkPick && posLinkPick.id === c.id ? 'active' : ''}"
-                 onclick="pickPosLink('${c.type}','${esc(c.id)}')">
+  box.innerHTML = list.map(c => `
+    <div class="pos-link-item ${posLinkPick && posLinkPick.id === c.id ? 'active' : ''}"
+         onclick="pickPosLink('${c.type}','${esc(c.id)}')">
       <span>${esc(c.name)}</span>
-      <span class="pos-type-badge">${badge}</span>
-    </div>`;
-  }).join('');
+      <span class="pos-type-badge">Finished product</span>
+    </div>`).join('');
 }
 
 function pickPosLink(type, id) {
   posLinkPick = (posCandidates || []).find(c => c.type === type && c.id === id) || null;
-  const isRecipe = posLinkPick && posLinkPick.type === 'recipe';
-  document.getElementById('posLinkQtyWrap').classList.toggle('hidden', !isRecipe);
-  if (isRecipe) {
-    document.getElementById('posLinkQty').value  = 1;
-    document.getElementById('posLinkUnit').value = posLinkPick.yield_unit || '';
-  }
   document.getElementById('posLinkConfirm').disabled = !posLinkPick;
   renderLinkResults();
 }
@@ -402,14 +387,8 @@ function confirmPosLink() {
   it.target_name  = posLinkPick.name;
   it.match_source = 'linked';
   it.all_sizes    = document.getElementById('posLinkAllSizes').checked;
-
-  if (posLinkPick.type === 'recipe') {
-    it.qty_per_sale = parseFloat(document.getElementById('posLinkQty').value) || 1;
-    it.target_unit  = document.getElementById('posLinkUnit').value.trim() || posLinkPick.yield_unit || '';
-  } else {
-    it.qty_per_sale = 1;
-    it.target_unit  = '';
-  }
+  it.qty_per_sale = 1;
+  it.target_unit  = '';
 
   delete it.suggested_id; delete it.suggested_name; delete it.suggested_score;
   closeModal('posLinkModal');
