@@ -431,6 +431,24 @@ async function commitPosImport() {
       );
     }
 
+    // A batch bin AND its ingredients both moving looks exactly like double
+    // counting. It isn't — the tub ran short, and whatever it couldn't cover was
+    // never recorded as produced, so those ingredients were still on the shelf.
+    // Say so in full, with the numbers, or someone will "fix" it by hand.
+    if ((res.fell_through || []).length) {
+      alert(
+        `Some prep was used that had never been recorded as made:\n\n  ` +
+        res.fell_through.map(f =>
+          `${f.item_name}: ${f.from_bin} ${f.unit} came out of stock, ` +
+          `the other ${f.from_raw} ${f.unit} was taken as raw ingredients`
+        ).join('\n  ') +
+        `\n\nNothing is counted twice — ingredients only come off once, either ` +
+        `when you press Produce Batch or when the sale is imported. Press ` +
+        `Produce Batch when a batch is made if you want to see it in stock ` +
+        `during the week.`
+      );
+    }
+
     await loadPosImports();
   } catch (err) {
     showToast(err.message || 'Could not import those sales.', 'error');

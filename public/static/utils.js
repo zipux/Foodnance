@@ -189,6 +189,53 @@ function applyPlanGating(me) {
     .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
 }
 
+// A restaurant sells over the counter. It never packs a product for sale, and it
+// never needs to be ASKED how a recipe is made:
+//   - Produce Batch records that on its own (confirmProduceBatch in recipes.js
+//     writes production_mode = 'batched'), so the answer comes from what the
+//     kitchen actually did rather than from a form somebody filled in once.
+//   - A stale answer can no longer hurt anyone. takeFromBatch in src/index.ts
+//     falls through to raw materials when the bin cannot cover a sale, so a
+//     recipe left on 'batched' after the kitchen stopped batching it simply
+//     drains its bin to zero and then behaves as made-to-order. It corrects
+//     itself; there is nothing for the dropdown to rescue.
+//
+// That second point is the whole reason this is safe to hide now and was not
+// before. Hiding it earlier would have stranded any recipe migration 0043
+// backfilled to 'batched' in a state with no way out.
+//
+// Unknown account type returns false, i.e. show everything. The bootstrap below
+// is async, so this is briefly true on every page load; showing a control we
+// later hide is recoverable, hiding one the account needs is not.
+function restaurantAccount() {
+  return String(window.__accountType || '').toLowerCase() === 'restaurant';
+}
+
+// Produce Batch is the exception a restaurant KEEPS — on Pro. It is the only way
+// to see prep during the week, and sales draw the bin down before falling
+// through, so pressing it is rewarded and forgetting it costs nothing.
+//
+// On ESSENTIAL it goes, because nothing there ever draws a bin down: no sales
+// import, no stock take. It could only ever add stock that sits untouched.
+// This is also what still hides the read-only "How it's made" row in the recipe
+// detail — with no Produce Batch there is nothing the account can do to change
+// it, whereas a Pro restaurant reads it as feedback on a batch they just made.
+function batchWorkflowHidden() {
+  return restaurantAccount()
+      && String(window.__accountPlan || '').toLowerCase() === 'essential';
+}
+
+// Presentation only, like applyPlanGating — _routes.json sends just /api/* to
+// the worker, so static pages cannot be gated server-side. Nothing here is a
+// security boundary; it removes controls that would do nothing useful.
+// Every id is static markup and no controller touches their display, so setting
+// it once holds for the life of the page.
+function applyBatchWorkflowGating() {
+  const hide = (id) => { const el = document.getElementById(id); if (el) el.style.display = 'none'; };
+  if (restaurantAccount()) { hide('recipeProductionModeGroup'); hide('packRunBtn'); }
+  if (batchWorkflowHidden()) hide('produceBatchBtn');
+}
+
 // Small "signed in as … / Sign out" chip, injected into the nav of whichever
 // app page is loaded. Done here rather than editing 13 HTML files, and it
 // gives every page a way to sign out.
@@ -221,6 +268,7 @@ async function renderSessionChip() {
   // already built a cost index without knowing the plan. Announce it rather than
   // hoping we won the race — the same mistake that left recipe lists showing $0.
   window.__accountPlan = String(me.plan || '').toLowerCase();
+  window.__accountType = String(me.account_type || '').toLowerCase();
   window.dispatchEvent(new CustomEvent('dm:plan-known', { detail: window.__accountPlan }));
   if (me.suspended) {
     renderSuspendedBar(me.suspend_reason);
@@ -230,6 +278,7 @@ async function renderSessionChip() {
   // Before the chip, so a gated page swaps its content in the same frame rather
   // than flashing the real screen first.
   applyPlanGating(me);
+  applyBatchWorkflowGating();
 
   const chip = document.createElement('div');
   chip.id = 'sessionChip';

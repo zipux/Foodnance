@@ -1899,9 +1899,19 @@ async function planPosDepletion(
   // Which POS items actually moved stock. Distinguishes "mapped and depleted"
   // from "mapped but the recipe is empty" — different problems, different fixes.
   const depletedKeys = new Set<string>()
+  // Batch bin → running split, so one line per recipe is reported however many
+  // sales it took to empty the tub.
+  const batchSplit = new Map<string, FellThrough>()
   let mappedLines = 0, unmappedLines = 0
 
-  for (const l of lines) {
+  // Oldest sale first. A batch bin is now spent down as the loop runs, so file
+  // order would decide which DAY a tub ran dry and therefore which day its
+  // ingredients came off instead. The totals are the same either way; the dates
+  // are only right if the tub empties in the order the sales happened.
+  const ordered = [...lines].sort((a, b) =>
+    String(a.sold_date || '').localeCompare(String(b.sold_date || '')))
+
+  for (const l of ordered) {
     const it = itemsByKey.get(l.pos_item_key)
     if (!it || !it.target_type || it.target_type === 'ignore' || !it.target_id) {
       unmappedLines++
@@ -1919,6 +1929,16 @@ async function planPosDepletion(
     }
 
     if (res.deductions.length) depletedKeys.add(l.pos_item_key)
+
+    for (const f of res.batchSplit) {
+      const cur = batchSplit.get(f.item_name)
+      if (cur && sameUnitName(cur.unit, f.unit)) {
+        cur.from_bin = round6(cur.from_bin + f.from_bin)
+        cur.from_raw = round6(cur.from_raw + f.from_raw)
+      } else if (!cur) {
+        batchSplit.set(f.item_name, { ...f })
+      }
+    }
 
     for (const d of res.deductions) {
       const key = `${l.sold_date}|${d.item_type}|${d.item_id}`
@@ -1940,19 +1960,13 @@ async function planPosDepletion(
     }
   }
 
-  // Bind every deduction to the bin it will actually come out of — one read for
-  // all of them rather than one per movement.
-  const wanted = [...new Set([...agg.values()].map(a => a.item_type + '|' + a.item_id))]
+  // Bind every deduction to the bin it will actually come out of. The rows came
+  // with the ctx — takeFromBatch needed them before this loop could run, so
+  // re-reading the table here would only risk the two views disagreeing.
   const bins = new Map<string, any>()
-  if (wanted.length) {
-    const rows = await db.prepare(
-      `SELECT id, item_id, item_type, item_name, quantity, unit, category
-         FROM inventory WHERE org_id IS ?`
-    ).bind(org).all()
-    for (const r of (rows.results || []) as any[]) {
-      const k = r.item_type + '|' + r.item_id
-      if (!bins.has(k)) bins.set(k, r)   // first match wins, as findInvRow does
-    }
+  for (const r of ctx.invRows) {
+    const k = r.item_type + '|' + r.item_id
+    if (!bins.has(k)) bins.set(k, r)   // first match wins, as findInvRow does
   }
 
   // Raw-material defaults for bins that do not exist yet, plus the average
@@ -2056,6 +2070,9 @@ async function planPosDepletion(
   return {
     movements, warnings, notes: [...notes], collapsed, depletedKeys,
     mapped_lines: mappedLines, unmapped_lines: unmappedLines,
+    // Only the recipes that actually ran short. A tub that covered everything is
+    // the normal case and needs no explaining.
+    fell_through: [...batchSplit.values()].filter(f => f.from_raw > 0),
     bins_negative: [...new Set(negative)],
     bins_created: [...new Set(movements.filter(m => !m.bin_exists)
       .map(m => m.item_type + '|' + m.item_id))].length,
@@ -2155,7 +2172,7 @@ app.post('/api/pos-imports/:id/commit', async (c) => {
   const plan = deplete
     ? await planPosDepletion(c.env.DB, org, lines, byKey)
     : { movements: [], warnings: [], notes: [], collapsed: false,
-        depletedKeys: new Set<string>(),
+        depletedKeys: new Set<string>(), fell_through: [] as FellThrough[],
         mapped_lines: 0, unmapped_lines: lines.length, bins_negative: [], bins_created: 0 }
 
   const now = new Date().toISOString()
@@ -2311,6 +2328,7 @@ app.post('/api/pos-imports/:id/commit', async (c) => {
     movements: plan.movements.length, bins_created: plan.bins_created,
     bins_negative: plan.bins_negative, collapsed: plan.collapsed,
     warnings: plan.warnings, notes: plan.notes,
+    fell_through: plan.fell_through,
     unmapped_net: round2(unmappedNet),
   })
 })
@@ -3169,9 +3187,11 @@ function convertQty(
 // below is therefore unreachable today — it exists so that if recipe_items ever
 // gains an item_type, the failure is a loud error and not an infinite loop.
 //
-// This function is pure: everything it needs is passed in, and units are left
-// as the BOM wrote them. Binding a deduction to the unit its inventory bin is
-// actually held in happens later, against the bins themselves.
+// Everything it needs is passed in, and units are left as the BOM wrote them —
+// binding a deduction to the unit its inventory bin is actually held in happens
+// later, against the bins themselves. The one exception, and it is deliberate:
+// a batched line spends down ctx.batchRemaining, so calls within one import are
+// ordered and NOT independent. See takeFromBatch.
 
 type Deduction = {
   item_id: string
@@ -3185,9 +3205,71 @@ type ExplodeCtx = {
   recipes:     Map<string, { id: string; name: string; servings: number; yield_unit: string; production_mode: string }>
   recipeItems: Map<string, { product_id: string; product_name: string; quantity: number; unit: string }[]>
   fpItems:     Map<string, { item_type: string; ref_id: string; ref_name: string; quantity: number; unit: string }[]>
+  // MUTABLE. How much of each batch bin is still unspent as this import is
+  // planned — see takeFromBatch. It has to be a running balance and not a
+  // per-sale lookup of the same figure: a tub holding 6 kg against ten sales of
+  // 1 kg would otherwise satisfy all ten from a tub that ran dry at the sixth.
+  batchRemaining: Map<string, { qty: number; unit: string }>
+  // Every inventory row for the org, read once here so planPosDepletion does not
+  // read the same table a second time to bind its movements.
+  invRows: any[]
 }
 
-type ExplodeOut = { deductions: Deduction[]; errors: string[]; notes: string[] }
+type FellThrough = { item_name: string; from_bin: number; from_raw: number; unit: string }
+
+// One entry per batched line, whether or not the tub covered it. Only the
+// recipes that ran short are worth telling anyone about, but the covered lines
+// have to be counted too or the "came out of stock" half of the message reads
+// as zero — the tub does its work on the early sales and runs dry on the late
+// ones, so the shortfall lines alone know nothing about what it did cover.
+type ExplodeOut = { deductions: Deduction[]; errors: string[]; notes: string[]; batchSplit: FellThrough[] }
+
+// Split one sale's demand for a batched recipe between the batch bin and the
+// raw ingredients underneath it.
+//
+// THE RULE: take it from the tub if the tub has it, otherwise take the
+// ingredients. This is what makes Produce Batch optional rather than mandatory,
+// and it is arithmetically safe in both directions — an empty tub means nobody
+// ever declared that production, which means its raw materials never left the
+// shelf, so taking them now is the only entry that ISN'T double-counting.
+//
+// Before this, a `batched` recipe always deducted the tub whether or not the tub
+// existed. Whoever forgot to press Produce Batch got a bin running further and
+// further negative while their ingredients never moved at all — food cost
+// reading better than reality, silently, which is the failure this whole file
+// is written to avoid.
+//
+// Mutates ctx.batchRemaining: the amount taken here must not be available to the
+// next sale in the same import.
+function takeFromBatch(
+  recipeId: string, want: number, wantUnit: string, ctx: ExplodeCtx
+): { fromBin: number; shortfall: number; unit: string } {
+  const bin = ctx.batchRemaining.get(recipeId)
+
+  // No bin at all — nothing was ever produced into it. Everything falls through.
+  if (!bin) return { fromBin: 0, shortfall: want, unit: wantUnit }
+
+  const unit = bin.unit || wantUnit
+  const conv = convertQty(want, wantUnit || unit, unit, null)
+  if (conv.error) {
+    // The two can't be compared, so they can't be split. Fall back to the
+    // behaviour that predates this function — the whole line on the tub — rather
+    // than guessing a split. Deducting raw materials on a bad comparison would
+    // be the double-count this is meant to prevent.
+    return { fromBin: want, shortfall: 0, unit: wantUnit }
+  }
+
+  const need    = conv.qty as number
+  const avail   = Math.max(0, Number(bin.qty) || 0)
+  const fromBin = Math.min(avail, need)
+  bin.qty = round6(avail - fromBin)
+
+  return { fromBin: round6(fromBin), shortfall: round6(need - fromBin), unit }
+}
+
+function round6(n: number) {
+  return Math.round((Number(n) || 0) * 1e6) / 1e6
+}
 
 function explodeRecipe(
   recipeId: string, amount: number, amountUnit: string,
@@ -3226,7 +3308,7 @@ function explodeSale(
   target: { type: string; id: string },
   soldQty: number, qtyPerSale: number, ctx: ExplodeCtx
 ): ExplodeOut {
-  const out: ExplodeOut = { deductions: [], errors: [], notes: [] }
+  const out: ExplodeOut = { deductions: [], errors: [], notes: [], batchSplit: [] }
   const units = (Number(soldQty) || 0) * (Number(qtyPerSale) || 1)
   if (!(units > 0)) return out
 
@@ -3245,12 +3327,32 @@ function explodeSale(
           out.notes.push(`${line.ref_name} is set to never come off stock.`)
         } else if (mode === 'batched') {
           // THE ANTI-DOUBLE-COUNT BRANCH. This recipe is produced ahead into a
-          // batch bin, so the sale consumes that bin and stops. Produce Batch is
-          // what turns raw ingredients into it. Exploding here as well would
-          // count every tomato twice.
-          out.deductions.push({
-            item_id: line.ref_id, item_type: 'batch',
-            item_name: line.ref_name, qty: lineQty, unit: line.unit || '',
+          // batch bin, so the sale consumes that bin first. Produce Batch is what
+          // turns raw ingredients into it, and exploding a covered portion here
+          // as well would count every tomato twice.
+          //
+          // Whatever the bin CANNOT cover was never declared as produced, so its
+          // raw materials are still on the shelf and have to come off now. See
+          // takeFromBatch.
+          const take = takeFromBatch(line.ref_id, lineQty, line.unit || '', ctx)
+
+          if (take.fromBin > 0) {
+            out.deductions.push({
+              item_id: line.ref_id, item_type: 'batch',
+              item_name: line.ref_name, qty: take.fromBin, unit: take.unit,
+            })
+          }
+          if (take.shortfall > 0) {
+            explodeRecipe(line.ref_id, take.shortfall, take.unit, ctx, 1, out)
+          }
+          // Recorded on every batched line, covered or not — see the note on
+          // ExplodeOut. Reported, never silent: to anyone watching, a batch bin
+          // and its ingredients both moving looks exactly like double-counting,
+          // and a commissary needs the shortfall as the signal that production
+          // went unrecorded.
+          out.batchSplit.push({
+            item_name: line.ref_name, from_bin: take.fromBin,
+            from_raw: take.shortfall, unit: take.unit,
           })
         } else {
           explodeRecipe(line.ref_id, lineQty, line.unit || '', ctx, 1, out)
@@ -3276,13 +3378,57 @@ function explodeSale(
   return out
 }
 
-// Load every recipe, recipe line and finished-product line for one org, keyed
-// for explodeSale. One read for the whole import rather than per sale line.
+// What a counted thing is MADE OF, in raw materials, all the way down.
+//
+// Deliberately NOT explodeSale. That one answers "where should this stock come
+// from", so it respects production_mode and takes a batched recipe out of its
+// bin instead of exploding it. This answers "what is physically inside this",
+// which has exactly one answer however the kitchen chose to make it — a tub of
+// sauce on the shelf is worth its tomatoes whether or not anyone ever pressed
+// Produce Batch.
+//
+// Used to value stock-take counts. Counting a packed product AND the batch it
+// was made from is not double counting: they are two different things sitting on
+// two different shelves, and both are stock on hand.
+function explodeToRawMaterials(
+  itemType: string, itemId: string, qty: number, unit: string, ctx: ExplodeCtx
+): Deduction[] {
+  const out: ExplodeOut = { deductions: [], errors: [], notes: [], batchSplit: [] }
+  if (!(qty > 0)) return []
+
+  if (itemType === 'batch') {
+    explodeRecipe(itemId, qty, unit || '', ctx, 1, out)
+  } else if (itemType === 'finished_product') {
+    // qty is a count of units, as it is for a sale.
+    for (const line of (ctx.fpItems.get(itemId) || [])) {
+      const lineQty = (Number(line.quantity) || 0) * qty
+      if (!(lineQty > 0)) continue
+      if (line.item_type === 'recipe') {
+        explodeRecipe(line.ref_id, lineQty, line.unit || '', ctx, 1, out)
+      } else {
+        out.deductions.push({
+          item_id: line.ref_id, item_type: 'raw_material',
+          item_name: line.ref_name, qty: lineQty, unit: line.unit || '',
+        })
+      }
+    }
+  }
+
+  // A recipe or product that has since been deleted simply contributes nothing;
+  // explodeRecipe records that in out.errors, which a valuation has no way to
+  // show. Undervaluing one line beats failing a whole P&L.
+  return out.deductions.filter(d => d.item_type === 'raw_material')
+}
+
+// Load every recipe, recipe line, finished-product line and inventory bin for
+// one org, keyed for explodeSale. One read for the whole import rather than per
+// sale line.
 async function buildExplodeCtx(db: D1Database, org: string | null): Promise<ExplodeCtx> {
-  const [recipeRows, recipeItemRows, fpItemRows] = await Promise.all([
+  const [recipeRows, recipeItemRows, fpItemRows, invRowsRes] = await Promise.all([
     db.prepare(`SELECT id, name, servings, yield_unit, production_mode FROM recipes WHERE org_id IS ?`).bind(org).all(),
     db.prepare(`SELECT recipe_id, product_id, product_name, quantity, unit FROM recipe_items WHERE org_id IS ?`).bind(org).all(),
     db.prepare(`SELECT finished_product_id, item_type, ref_id, ref_name, quantity, unit FROM finished_product_items WHERE org_id IS ?`).bind(org).all(),
+    db.prepare(`SELECT id, item_id, item_type, item_name, quantity, unit, category FROM inventory WHERE org_id IS ?`).bind(org).all(),
   ])
 
   const recipes = new Map<string, any>()
@@ -3300,7 +3446,16 @@ async function buildExplodeCtx(db: D1Database, org: string | null): Promise<Expl
     fpItems.get(fi.finished_product_id)!.push(fi)
   }
 
-  return { recipes, recipeItems, fpItems }
+  // Opening balance of every batch bin, which takeFromBatch then spends down as
+  // the import is planned. First match wins, as findInvRow does.
+  const invRows = (invRowsRes.results || []) as any[]
+  const batchRemaining = new Map<string, { qty: number; unit: string }>()
+  for (const r of invRows) {
+    if (r.item_type !== 'batch' || batchRemaining.has(r.item_id)) continue
+    batchRemaining.set(r.item_id, { qty: Number(r.quantity) || 0, unit: r.unit || '' })
+  }
+
+  return { recipes, recipeItems, fpItems, batchRemaining, invRows }
 }
 
 // ─── Product combine helpers (shared by Merge and Group) ──────
@@ -4633,15 +4788,21 @@ app.get('/api/pnl', async (c) => {
   // purchases into the cost of what was actually consumed.
   //   opening = value of the latest submitted stock take BEFORE the period start
   //   closing = value of the latest submitted stock take WITHIN/at the period end
-  // A snapshot is valued from raw-material counts × each product's cost per unit
+  // A snapshot is valued from counted quantities × each product's cost per unit
   // as of that take's date (falling back to the latest known cost), with the
   // count converted into the unit that cost is quoted in — see valueTake.
-  // Batches and finished goods are not valued here (raw materials only), so any
-  // value held as prep or packed stock is invisible to COGS. That error largely
-  // cancels between the two takes: the distortion is only the CHANGE in prepped
-  // stock across the period, not its level. If either bracketing take is
-  // missing, `cogs.available` is false and the frontend stays on the purchases
-  // basis.
+  // Counted prep (a batch) and packed stock (a finished product) are valued by
+  // what went INTO them, via explodeToRawMaterials, because nobody ever invoiced
+  // a tub of sauce. They used to be counted and then priced at zero. If either
+  // bracketing take is missing, `cogs.available` is false and the frontend stays
+  // on the purchases basis.
+  //
+  // This is computed at READ time and nothing is stored, so the change re-values
+  // every historical period the moment it ships. Accepted deliberately (2026-08-03,
+  // user's call): every account carrying stock takes today is a test account, and
+  // a cutoff date would be permanent complexity guarding history that does not
+  // exist. If real customers ever need their reported months frozen, the answer
+  // is to store the valuation at submit time, not to special-case a date here.
   const periodStart = `${from}-01`                             // first day of first month
   const [ty, tm] = to.split('-').map(Number)
   const periodEnd = `${to}-${String(new Date(Date.UTC(ty, tm, 0)).getUTCDate()).padStart(2, '0')}`  // last day of last month
@@ -4667,6 +4828,7 @@ app.get('/api/pnl', async (c) => {
     catType: Map<string, string>
     entries: Map<string, { cost_per_unit: number; pack_unit: string; purchase_date: string; created_at: string }[]>
     avgWeight: Map<string, number | null>
+    prodCat: Map<string, string>
   }> | null = null
   const pricingCtx = () => (_pricing ??= (async () => {
     const [catRows, entryRows, prodRows] = await Promise.all([
@@ -4675,8 +4837,8 @@ app.get('/api/pnl', async (c) => {
         `SELECT generic_product_id, cost_per_unit, pack_unit, purchase_date, created_at
            FROM product_entries WHERE org_id IS ? AND voided_at IS NULL`
       ).bind(org).all<{ generic_product_id: string; cost_per_unit: number; pack_unit: string; purchase_date: string; created_at: string }>(),
-      c.env.DB.prepare(`SELECT id, avg_weight_per_unit FROM generic_products WHERE org_id IS ?`)
-        .bind(org).all<{ id: string; avg_weight_per_unit: number | null }>(),
+      c.env.DB.prepare(`SELECT id, avg_weight_per_unit, category FROM generic_products WHERE org_id IS ?`)
+        .bind(org).all<{ id: string; avg_weight_per_unit: number | null; category: string | null }>(),
     ])
 
     const catType = new Map<string, string>()
@@ -4694,11 +4856,21 @@ app.get('/api/pnl', async (c) => {
     }
 
     const avgWeight = new Map<string, number | null>()
+    // Raw materials reached by exploding a batch or a packed product arrive with
+    // no category of their own — a stock_take_items row carries one, a recipe
+    // line does not — so food/beverage has to come from the product itself.
+    const prodCat = new Map<string, string>()
     for (const p of (prodRows.results ?? [])) {
       avgWeight.set(p.id, p.avg_weight_per_unit != null ? Number(p.avg_weight_per_unit) : null)
+      prodCat.set(p.id, String(p.category || ''))
     }
-    return { catType, entries, avgWeight }
+    return { catType, entries, avgWeight, prodCat }
   })())
+
+  // Recipes and finished-product BOMs, for valuing counted prep. Lazy and
+  // memoized like pricingCtx — a P&L with no prep counted never reads them.
+  let _explode: Promise<ExplodeCtx> | null = null
+  const explodeCtx = () => (_explode ??= buildExplodeCtx(c.env.DB, org))
 
   // Value one stock take's raw-material counts, grouped into food/beverage.
   // asOfDate prices each product at its most recent purchase on/before that date.
@@ -4712,45 +4884,70 @@ app.get('/api/pnl', async (c) => {
   // Inventory page has always converted here (invConvertUnitCost); this valuation
   // did not, so the two disagreed about the same shelf.
   const valueTake = async (takeId: string, asOfDate: string) => {
-    const { catType, entries, avgWeight } = await pricingCtx()
+    const { catType, entries, avgWeight, prodCat } = await pricingCtx()
 
     const rows = await c.env.DB.prepare(
-      `SELECT item_id, category, unit, counted_qty
+      `SELECT item_id, item_type, category, unit, counted_qty
          FROM stock_take_items
-        WHERE stock_take_id = ? AND item_type = 'raw_material'
-          AND counted_qty IS NOT NULL AND org_id IS ?`
-    ).bind(takeId, org).all<{ item_id: string; category: string; unit: string; counted_qty: number }>()
+        WHERE stock_take_id = ? AND counted_qty IS NOT NULL AND org_id IS ?`
+    ).bind(takeId, org).all<{ item_id: string; item_type: string; category: string; unit: string; counted_qty: number }>()
 
     let f = 0, b = 0
-    for (const r of (rows.results ?? [])) {
-      const qty = Number(r.counted_qty) || 0
-      if (!qty) continue
 
-      const list = entries.get(r.item_id) || []
+    // Price one raw-material quantity into the food/beverage totals. Shared by
+    // the counted raw materials and by the raw materials found inside counted
+    // prep, so both are valued by identical rules.
+    const priceInto = (productId: string, qty: number, unit: string, category: string) => {
+      if (!(qty > 0)) return
+
+      const list = entries.get(productId) || []
       // Same precedence the SQL used: newest purchase on or before the take's
       // date, else the newest known purchase at all.
       const dated = list.find(e => e.purchase_date && e.purchase_date <= asOfDate)
       const entry = dated || list[0]
-      if (!entry) continue
+      if (!entry) return
 
       const rate = Number(entry.cost_per_unit) || 0
-      if (!(rate > 0)) continue
+      if (!(rate > 0)) return
 
-      const binUnit = String(r.unit || '').trim()
+      const binUnit = String(unit || '').trim()
       const packUnit = String(entry.pack_unit || '').trim()
       // A pair that cannot be bridged (a 'case' price against a kg count) keeps
       // the unconverted figure rather than dropping to zero — no worse than
       // before, and zeroing it would understate closing stock and overstate COGS.
       const converted = (binUnit && packUnit)
-        ? convertUnitCost(rate, packUnit, binUnit, avgWeight.get(r.item_id) ?? null)
+        ? convertUnitCost(rate, packUnit, binUnit, avgWeight.get(productId) ?? null)
         : null
       const val = qty * (converted ?? rate)
 
-      const type = catType.get(String(r.category || '').trim().toLowerCase()) || 'food'
+      const type = catType.get(String(category || '').trim().toLowerCase()) || 'food'
       if (type === 'beverage') b += val
       else if (type === 'supplies') { /* supplies aren't part of COGS */ }
       else f += val
     }
+
+    const counted = (rows.results ?? []).filter(r => (Number(r.counted_qty) || 0) > 0)
+
+    // Prep and packed stock are valued by what went INTO them, because nobody
+    // ever invoiced a tub of sauce. Before this they were counted and then
+    // priced at zero, so every kilo of prep in the walk-in was invisible to
+    // closing stock and inflated COGS by its whole value.
+    const hasPrep = counted.some(r => r.item_type !== 'raw_material')
+    const ctx = hasPrep ? await explodeCtx() : null
+
+    for (const r of counted) {
+      const qty = Number(r.counted_qty) || 0
+
+      if (r.item_type === 'raw_material') {
+        priceInto(r.item_id, qty, r.unit, r.category)
+        continue
+      }
+
+      for (const d of explodeToRawMaterials(r.item_type, r.item_id, qty, r.unit, ctx!)) {
+        priceInto(d.item_id, d.qty, d.unit, prodCat.get(d.item_id) || '')
+      }
+    }
+
     return { food: f, beverage: b }
   }
 

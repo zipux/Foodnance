@@ -164,4 +164,62 @@ const pnl2 = await call(u, 'GET', `/api/pnl?from=${period}&to=${period}`);
 t.check('kg-invoiced, kg-counted salt adds its plain $20',
   t.near(pnl2.data?.cogs?.closing_food, 201.88, 0.5), `${pnl2.data?.cogs?.closing_food}`);
 
+// ── prep and packed stock are worth what went into them ─────────
+// Nobody ever invoices a tub of sauce, so the price lookup found nothing for it
+// and it was counted and then valued at ZERO. Every kilo of prep in the walk-in
+// was missing from closing stock, which inflates COGS by its whole value.
+//
+// Now a counted batch or finished product is exploded to its raw materials and
+// those are priced — the same rules, the same conversion, one helper.
+t.section('counted prep is valued by what went into it');
+
+const basil = (await call(u, 'POST', '/api/tables/generic_products',
+  { name: 'CV Basil', category: 'Produce', base_unit: 'kg' })).data.id;
+await call(u, 'POST', '/api/tables/product_entries', {
+  generic_product_id: basil, generic_product_name: 'CV Basil',
+  purchase_date: '2020-01-01', pack_qty: 12, pack_unit: 'kg', qty_ordered: 1,
+  cost: 24, cost_per_unit: 2,     // $2/kg
+});
+
+// 6 kg of pesto from 12 kg of basil: 1 kg of pesto holds $4 of basil.
+const pesto = (await call(u, 'POST', '/api/tables/recipes',
+  { name: 'CV Pesto', servings: 6, yield_unit: 'kg', total_cost: 0, production_mode: 'batched' })).data.id;
+await call(u, 'POST', '/api/tables/recipe_items',
+  { recipe_id: pesto, product_id: basil, product_name: 'CV Basil', quantity: 12, unit: 'kg', line_cost: 0 });
+await call(u, 'POST', '/api/tables/inventory',
+  { item_id: pesto, item_type: 'batch', item_name: 'CV Pesto', category: 'Batch', quantity: 3, unit: 'kg' });
+
+// A jar holds 0.5 kg of pesto, so $2 of basil each.
+const jarFp = (await call(u, 'POST', '/api/tables/finished_products',
+  { name: 'CV Jar', selling_price: 9, total_cost: 0 })).data.id;
+await call(u, 'POST', '/api/tables/finished_product_items',
+  { finished_product_id: jarFp, item_type: 'recipe', ref_id: pesto, ref_name: 'CV Pesto',
+    quantity: 0.5, unit: 'kg', line_cost: 0 });
+await call(u, 'POST', '/api/tables/inventory',
+  { item_id: jarFp, item_type: 'finished_product', item_name: 'CV Jar',
+    category: 'Finished Product', quantity: 4, unit: 'Each' });
+
+// Same potato and salt as before, plus 3 kg of pesto and 4 jars.
+//   potato $181.88 + salt $20.00                        = $201.88
+//   pesto  3 kg x 2 kg basil x $2                        = $12.00
+//   jars   4 x 0.5 kg pesto x 2 kg basil x $2            =  $8.00
+const prepId = await countAndSubmit({ [potato]: 50, [salt]: 10, [pesto]: 3, [jarFp]: 4 });
+t.check('take with prep and packed stock submitted', !!prepId, `${prepId}`);
+
+const pnl3 = await call(u, 'GET', `/api/pnl?from=${period}&to=${period}`);
+const closing3 = pnl3.data?.cogs?.closing_food;
+
+t.check('the tub of pesto is worth its basil, not nothing',
+  t.near(closing3, 221.88, 0.5), `${closing3}`);
+t.check('which is exactly $20 more than the same count without prep',
+  t.near(closing3 - 201.88, 20, 0.5), `${closing3} - 201.88`);
+t.check('and it is NOT the old zero',
+  !t.near(closing3, 201.88, 0.5), `${closing3}`);
+
+// The count sheet lists a packed product AND the batch it was made from. Both
+// are real stock on two different shelves, so both are valued — that is not
+// double counting, and the arithmetic above only balances if both landed.
+t.check('the packed jars are valued too, on top of the batch',
+  t.near(closing3 - 201.88 - 12, 8, 0.5), `${closing3}`);
+
 t.done();

@@ -124,6 +124,32 @@ Usage is counted from **`ai_parse_log`** (one row per API call, written server-s
 
 Client side, `publicUser()` returns `plan` + `features`, and `applyPlanGating()` in `public/static/utils.js` hides nav links and swaps a gated page's `.container` for an upgrade panel (`PLAN_GATED_PAGES` — keep in step with `featureForPath`). This is presentation only: `public/_routes.json` sends only `/api/*` to the worker, so the static pages themselves cannot be gated server-side. The server's guarantee is that Pro **actions** are refused, not that Pro **pages** are unreachable. True COGS is gated inside `/api/pnl`, which returns `cogs.reason = 'upgrade_required'` so the UI can offer an upgrade instead of "go do a stock take" they can't do.
 
+### Account type gating (restaurant / commissary)
+`organizations.account_type` reaches the browser as `window.__accountType`
+(alongside `__accountPlan`) and `applyBatchWorkflowGating()` in
+`public/static/utils.js` hides the controls it makes no sense to offer:
+
+|                    | How is this made? | Produce Batch | Pack Run |
+|--------------------|-------------------|---------------|----------|
+| restaurant · Essential | hidden        | hidden        | hidden   |
+| restaurant · Pro       | hidden        | **shown**     | hidden   |
+| commissary · any       | shown         | shown         | shown    |
+
+The dropdown goes for **every** restaurant because Produce Batch now records the
+answer itself and a stale answer self-corrects — see the fall-through note under
+POS sales import. That is what makes hiding it safe; doing it before the
+fall-through existed would have stranded every recipe migration `0043`
+backfilled to `batched`. Produce Batch survives on Pro because it is the only way
+to see prep mid-week and forgetting it now costs nothing; on Essential nothing
+would ever draw the bin down. A commissary keeps everything — pressing those
+buttons by hand *is* their stock workflow, and the dropdown is their only way to
+set a recipe back to `on_demand`.
+
+Unknown account type shows everything: the session bootstrap is async, and
+showing a control that is then hidden is recoverable where the reverse is not.
+Presentation only, with the same limit as plan gating. `tests/account-type-gating.test.mjs`
+pins the whole matrix.
+
 ### Product categories
 Categories are stored as **free-text** on `generic_products.category`. The managed master list is the **`categories` table** (migration `0018`, same shape as `units`: `id`/`name`/`sort_order`, integer PK). It's edited through the **Manage Categories** modal (`public/static/utils.js` — mirrors Manage Units) and picked in the product form; users can also add one inline via the "+ New category…" option. Deleting a category from the master list only removes it from the picker — products keep their label (the DELETE is usage-checked, `?force=true` to override; see `DELETE /api/categories/:id`).
 
@@ -173,6 +199,25 @@ It is read where a finished product's line references a recipe: `on_demand`
 `batch` bin instead and leaves Produce Batch to refill it. Doing both would count
 the same flour twice. Migration `0043` backfills `batched` for any recipe already
 holding batch stock.
+
+**A `batched` line falls through to raw materials when the bin can't cover it**
+(`takeFromBatch` in `src/index.ts`). Press Produce Batch and the ingredients
+leave at prep time and the sale draws the bin down; skip it and the bin is empty,
+so the sale takes the ingredients instead. Either way **every ingredient is
+charged exactly once**, which is what makes Produce Batch optional rather than
+mandatory — the old always-deduct-the-bin behaviour meant a kitchen that forgot
+the button never moved its ingredients at all, and food cost read better than
+reality, silently.
+
+Three things this depends on. `ctx.batchRemaining` is a **running balance** that
+`takeFromBatch` spends down — a per-sale re-read of the same opening figure would
+let a 6 kg tub satisfy ten 1 kg sales. `planPosDepletion` therefore iterates
+**oldest sale first**, or file order decides which day a tub ran dry. And when
+the two units can't be bridged the whole line stays on the bin (the pre-existing
+behaviour) rather than guessing a split — a bad comparison must never manufacture
+a raw-material deduction. The split is surfaced as `fell_through` on
+`/preview` and `/commit`, and `sales.js` explains it, because a bin **and** its
+ingredients both moving looks exactly like the double-count it isn't.
 
 **Idempotency is three layers**: `pos_imports.content_hash` (same file re-uploaded
 → 409, overridable with `force`), the partial unique index on
@@ -264,15 +309,30 @@ and closing takes (it scales with stock on hand), unlike the prepped-stock gap
 below. A pair that can't be bridged keeps the unconverted figure rather than
 dropping to zero, which would understate closing stock and overstate COGS.
 
-**Only `raw_material` lines are valued.** Batch and finished-product counts are
-collected (the count sheet snapshots every inventory type) but priced at zero —
-the price lookup matches against `product_entries`, and a recipe has no
-invoices. So prep and packed stock are invisible to COGS. That error *does*
-largely cancel: the distortion is `prep_closing − prep_opening`, i.e. only the
-change in prepped stock across the period. Fixing it properly means exploding
-counted batch/FP lines to raw materials via `buildExplodeCtx`/`explodeRecipe`
-(reusing the POS backflush machinery rather than porting the browser's cost
-index) — not done yet.
+**Counted prep is valued by what went into it.** Batch and finished-product
+counts used to be collected and then priced at zero — the price lookup matches
+against `product_entries`, and nobody ever invoiced a tub of sauce — so prep and
+packed stock were invisible to COGS. `explodeToRawMaterials()` now breaks those
+lines down and `priceInto()` values the result by the same rules as a counted raw
+material.
+
+`explodeToRawMaterials` is deliberately **not** `explodeSale`. That one answers
+*where should stock come from*, so it honours `production_mode` and takes a
+batched recipe out of its bin; this answers *what is physically inside this*,
+which has one answer however the kitchen made it. Counting a packed product AND
+the batch behind it is not double counting — two shelves, two real things.
+
+Valuation is computed at **read time and never stored**, so this re-valued every
+historical period the moment it landed. Accepted deliberately (2026-08-03): every
+account holding stock takes was a test account. If real customers ever need
+reported months frozen, store the valuation at submit time — do not add a cutoff
+date to `valueTake`.
+
+Still open (**Job B**): a restaurant that never presses Produce Batch has no
+batch bin, so the count sheet — built from existing `inventory` rows — never
+offers the prep to be counted at all. Its raw materials then read as a phantom
+shortfall equal to whatever is in the tub. Fixing that needs the count sheet to
+list prep with no stock balance.
 
 ### Data model (two-level product design)
 `generic_products` (the abstract item) + `product_entries` (per-supplier purchase records with FIFO pricing) is the central pattern. `recipes`/`recipe_items` cost from products; `finished_products`/`finished_product_items` cost from recipes; producing/packing deducts `inventory` and writes `stock_log`. Stock takes (`stock_takes`/`stock_take_items`) reconcile counted vs system stock.

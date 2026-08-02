@@ -1115,9 +1115,9 @@ async function openRecipeDetail(id) {
     <div class="detail-info-grid">
       ${recipe.description ? `<div class="detail-info-item"><span>Description</span><span>${esc(recipe.description)}</span></div>` : ''}
       <div class="detail-info-item"><span>Yield</span><span>${recipe.servings ? recipe.servings + ' ' + esc(yieldUnit) : '—'}</span></div>
-      <div class="detail-info-item"><span>How it's made</span><span>${
+      ${batchWorkflowHidden() ? '' : `<div class="detail-info-item"><span>How it's made</span><span>${
         recipe.production_mode === 'batched' ? 'Made ahead in batches' : 'Made to order'
-      }</span></div>
+      }</span></div>`}
     </div>
 
     <div class="detail-section-title">Ingredients</div>
@@ -1449,6 +1449,23 @@ async function confirmProduceBatch() {
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing…';
 
   try {
+    // 0. Pressing this button IS the declaration that the recipe is made ahead,
+    //    so record it rather than asking. It closes the last way left to
+    //    double-count: a recipe on 'on_demand' that gets produced anyway takes
+    //    its ingredients here AND again on every sale, while the bin it filled
+    //    is never drawn down.
+    //
+    //    Deliberately BEFORE the stock moves. If this succeeds and production
+    //    then fails, the recipe is 'batched' with an empty bin — which sales now
+    //    handle by falling through to raw materials, so it costs nothing. The
+    //    other order would leave the double-count standing on a failure.
+    let flipped = false;
+    if ((pbRecipeData.production_mode || 'on_demand') !== 'batched') {
+      await apiPatch(`tables/${RECIPES_TABLE}/${pbRecipeId}`, { production_mode: 'batched' });
+      pbRecipeData.production_mode = 'batched';   // a reference into allRecipes
+      flipped = true;
+    }
+
     // 1. Deduct each ingredient from Raw Materials inventory
     for (const it of pbItems) {
       const prod      = allProducts.find(p => p.id === it.product_id);
@@ -1476,7 +1493,14 @@ async function confirmProduceBatch() {
       reason,
     });
 
-    showToast(`Batch recorded: ${batchQty} ${batchUnit} of ${pbRecipeData.name}`, 'success');
+    // Say it out loud the once. Changing how a recipe is costed without telling
+    // anyone would be worse than asking.
+    showToast(
+      flipped
+        ? `Batch recorded: ${batchQty} ${batchUnit} of ${pbRecipeData.name} — now tracked as made ahead, so sales draw down this batch first`
+        : `Batch recorded: ${batchQty} ${batchUnit} of ${pbRecipeData.name}`,
+      'success'
+    );
     closeModal('produceBatchModal');
 
     // Reload live prices so subsequent opens / recipe detail reflects new inventory levels

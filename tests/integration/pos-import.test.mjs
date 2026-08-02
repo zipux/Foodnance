@@ -299,6 +299,119 @@ t.check('an uncommitted draft contributes nothing',
   `${pnlGhost.data.sales.by_month['2026-07'].imported_net}`);
 await call(u, 'DELETE', `/api/pos-imports/${ghost.data.import_id}`);
 
+// ── the tub runs dry ────────────────────────────────────────────
+// Produce Batch is optional, not mandatory. A sale takes prep from the batch
+// bin if the bin has it, and takes the raw ingredients underneath when it does
+// not — because an empty bin means that production was never declared, so those
+// ingredients never came off the shelf and have to come off now.
+//
+// Uses /preview throughout, which writes nothing, so the stock and P&L figures
+// asserted above stay exactly as the commits left them.
+t.section('an empty batch bin falls through to raw ingredients');
+
+const basil = await mkProduct('Basil', 10);
+const pesto = await call(u, 'POST', '/api/tables/recipes',
+  { name: 'Pesto', servings: 6, yield_unit: 'kg', total_cost: 0, production_mode: 'batched' });
+const pestoId = pesto.data.id;
+// 6 kg of pesto from 12 kg of basil, so 1 kg of pesto is worth 2 kg of basil.
+await call(u, 'POST', '/api/tables/recipe_items',
+  { recipe_id: pestoId, product_id: basil, product_name: 'Basil', quantity: 12, unit: 'kg', line_cost: 0 });
+// Deliberately NO inventory row: nobody ever pressed Produce Batch.
+
+const pasta = await call(u, 'POST', '/api/tables/finished_products',
+  { name: 'Pesto Pasta', selling_price: 14, total_cost: 0 });
+const pastaId = pasta.data.id;
+await call(u, 'POST', '/api/tables/finished_product_items',
+  { finished_product_id: pastaId, item_type: 'recipe', ref_id: pestoId,
+    ref_name: 'Pesto', quantity: 0.2, unit: 'kg', line_cost: 0 });
+
+// 5 days x 2 plates x 0.2 kg = 2 kg of pesto, i.e. 4 kg of basil.
+const pestoKey = 'pesto pasta|';
+const pestoParsed = {
+  ...JSON.parse(JSON.stringify(parsed)),
+  items: [{ ...parsed.items[0], pos_item_key: pestoKey, pos_item_name: 'Pesto Pasta', price_point: '', qty: 10 }],
+  lines: [],
+};
+for (let i = 0; i < 5; i++) {
+  pestoParsed.lines.push({
+    ...parsed.lines[0],
+    pos_item_key: pestoKey, pos_item_name: 'Pesto Pasta',
+    external_ref: `PESTO-${STAMP}-${i}`, sold_date: `2026-07-2${i + 1}`,
+    qty: 2, gross_sales: 28, discounts: 0, net_sales: 28, tax: 0,
+  });
+}
+
+const pestoDraft = await call(u, 'POST', '/api/pos-imports',
+  { parsed: pestoParsed, content_hash: 'pesto-' + STAMP });
+t.check('pesto draft created and matched', pestoDraft.status === 200
+  && pestoDraft.data.items[0]?.target_id === pastaId,
+  `${pestoDraft.status} ${pestoDraft.data.items?.[0]?.target_id}`);
+
+const pestoPreview = (items) => call(u, 'POST',
+  `/api/pos-imports/${pestoDraft.data.import_id}/preview`, { items });
+const totalFor = (p, type, id) => (p.data.movements || [])
+  .filter(m => m.item_type === type && m.item_id === id)
+  .reduce((s, m) => s + Number(m.qty), 0);
+
+const dry = await pestoPreview(pestoDraft.data.items);
+t.check('with no batch bin, the basil comes off instead',
+  t.near(totalFor(dry, 'raw_material', basil), 4), `${totalFor(dry, 'raw_material', basil)}`);
+t.check('and nothing is deducted from a bin that does not exist',
+  t.near(totalFor(dry, 'batch', pestoId), 0), `${totalFor(dry, 'batch', pestoId)}`);
+t.check('the fall-through is reported, not silent',
+  (dry.data.fell_through || []).some(f => f.item_name === 'Pesto' && t.near(f.from_raw, 2)),
+  JSON.stringify(dry.data.fell_through));
+
+// Now give it a tub holding less than the week needs. 1.2 kg of the 2 kg comes
+// out of the tub; the remaining 0.8 kg is worth 1.6 kg of basil.
+await call(u, 'POST', '/api/tables/inventory',
+  { item_id: pestoId, item_type: 'batch', item_name: 'Pesto', category: 'Batch', quantity: 1.2, unit: 'kg' });
+
+const partial = await pestoPreview(pestoDraft.data.items);
+t.check('a partly-stocked tub gives up exactly what it holds',
+  t.near(totalFor(partial, 'batch', pestoId), 1.2), `${totalFor(partial, 'batch', pestoId)}`);
+t.check('and only the shortfall reaches the basil',
+  t.near(totalFor(partial, 'raw_material', basil), 1.6), `${totalFor(partial, 'raw_material', basil)}`);
+t.check('the split is reported with both halves',
+  (partial.data.fell_through || []).some(f =>
+    f.item_name === 'Pesto' && t.near(f.from_bin, 1.2) && t.near(f.from_raw, 0.8)),
+  JSON.stringify(partial.data.fell_through));
+
+// The regression this guards: five sale lines each reading the same opening
+// balance would take 0.4 kg five times over from a tub holding 1.2 kg. The
+// balance has to run down across the import, not reset per line.
+t.check('the bin is spent down across lines, not re-read per line',
+  totalFor(partial, 'batch', pestoId) < 2, `${totalFor(partial, 'batch', pestoId)}`);
+
+// A tub with more than enough must behave exactly as it always did — bin only,
+// no raw materials, nothing reported.
+const pestoBin = (await call(u, 'GET', '/api/tables/inventory?page=1&limit=200'))
+  .data.data.find(r => r.item_id === pestoId && r.item_type === 'batch');
+await call(u, 'PATCH', `/api/tables/inventory/${pestoBin.id}`, { quantity: 50 });
+
+const covered = await pestoPreview(pestoDraft.data.items);
+t.check('a full tub covers the lot, as before this change',
+  t.near(totalFor(covered, 'batch', pestoId), 2), `${totalFor(covered, 'batch', pestoId)}`);
+t.check('and the basil is not touched at all',
+  t.near(totalFor(covered, 'raw_material', basil), 0), `${totalFor(covered, 'raw_material', basil)}`);
+t.check('with nothing reported, because nothing fell through',
+  (covered.data.fell_through || []).length === 0, JSON.stringify(covered.data.fell_through));
+
+// Why the auto-flip in confirmProduceBatch has to exist. A recipe left on
+// 'on_demand' explodes straight to raw materials and never looks at the bin —
+// correct on its own, but if someone produced a batch anyway, those same
+// ingredients already came off when the batch was made. The bin then sits
+// untouched forever while the ingredients are charged twice. Pressing Produce
+// Batch now sets the recipe to 'batched', which is what stops this arising.
+await call(u, 'PATCH', `/api/tables/recipes/${pestoId}`, { production_mode: 'on_demand' });
+const onDemand = await pestoPreview(pestoDraft.data.items);
+t.check('on_demand ignores a stocked bin entirely — the reason the flip exists',
+  t.near(totalFor(onDemand, 'batch', pestoId), 0)
+  && t.near(totalFor(onDemand, 'raw_material', basil), 4),
+  `bin=${totalFor(onDemand, 'batch', pestoId)} basil=${totalFor(onDemand, 'raw_material', basil)}`);
+
+await call(u, 'DELETE', `/api/pos-imports/${pestoDraft.data.import_id}`);
+
 // ── isolation ───────────────────────────────────────────────────
 t.section('another business cannot touch it');
 const other = { name: `POS IT B ${STAMP}`, email: `pos-it-b-${STAMP}@test.local`, password: 'pos-it-b-password-1' };
