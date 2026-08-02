@@ -32,11 +32,20 @@ schema is at **0043**. Everything from 0024 on — org scoping, plans, suspensio
 the invoice cap, POS sales import — was applied **by hand and never recorded**
 (verified against live D1 on 2026-07-31).
 
-So that command would try to replay 0024–0043. That set now contains
-**`0042_sales_monthly_per_org.sql`, which does `DROP TABLE sales_monthly`** after
-copying rows out. Replaying it against a database that already has the new shape
-**destroys live revenue data**. Before 0042 the un-recorded migrations were all
-additive and a stray replay merely errored; that is no longer true.
+So that command would try to replay 0024–0043.
+
+**Traced properly on 2026-08-02 — the danger is real but not what it looks like.**
+The run halts on the first error, and `0025_expense_invoices.sql` adds columns
+that already exist (SQLite has no `ADD COLUMN IF NOT EXISTS`), so it dies well
+before `0042_sales_monthly_per_org.sql` and its `DROP TABLE sales_monthly`. That
+protection is **accidental, not designed** — the realistic failure is someone
+hitting the error and clearing failures one by one until the run "works", walking
+into 0042 on the way. And 0042 would not lose the rows even then: it
+`INSERT ... SELECT`s them into the rebuild table, and the new shape is a superset
+so the SELECT still resolves. What it silently drops is **`revenue_source`**,
+which is missing from the INSERT column list — every row reverts to `'auto'`, so
+any month whose revenue was typed in by hand flips to the imported figure in the
+P&L. Corruption, not loss, and the quiet kind.
 
 **Apply to production one file at a time instead:**
 ```bash
@@ -46,13 +55,16 @@ And **back up any table a migration rebuilds before running it** — 0042 was
 applied this way: the three `sales_monthly` rows were dumped to JSON first and
 verified after.
 
-**The fix, when there's time** (~15 min, not yet done): build a pristine schema by
-applying `0001`→`0043` to a throwaway SQLite file, diff production against it
-(read-only), fix whatever gaps turn up, and *only then* insert `d1_migrations`
-rows for 0024–0043. Recording them without the diff would permanently hide any
-partially-applied migration — which is exactly what had happened locally, where
-0033 had its column but not its index and 0035 was half-applied. The local
-database has since been repaired and `npm run db:migrate:local` works normally.
+**The fix, when there's time** (~15 min, deferred by the user on 2026-08-02):
+build a pristine schema by applying `0001`→`0043` to a throwaway SQLite file,
+diff production against it (read-only), fix whatever gaps turn up, and *only
+then* insert `d1_migrations` rows for 0024–0043. **The diff is the point, not the
+replay protection**: twenty migrations were hand-applied to production and nobody
+has ever confirmed they landed completely. Recording them without the diff would
+permanently hide a partially-applied migration — exactly what had happened
+locally, where 0033 had its column but not its index and 0035 was half-applied.
+Neither was noticed for weeks. The local database has since been repaired and
+`npm run db:migrate:local` works normally.
 
 There **is** a test suite now (it predates this note being written, which said there wasn't one):
 
