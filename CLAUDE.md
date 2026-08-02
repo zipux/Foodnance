@@ -219,5 +219,28 @@ is the **line total**, so unit price is `cost ÷ (pack_qty × qty_ordered)`;
 bridged is **uncostable (null)**, never `0` — a silent zero reads as a free
 ingredient and understates every margin above it.
 
+### Stock-take valuation (true COGS)
+`valueTake()` inside `/api/pnl` prices a submitted stock take. Two things about
+it are easy to get wrong:
+
+**The count and the price are in different units.** `stock_take_items.counted_qty`
+is in the *bin's* unit; `product_entries.cost_per_unit` is per the *pack* unit
+the product was invoiced in. They must be reconciled with `convertUnitCost()`
+before multiplying — potatoes invoiced at $1.65/lb and counted as 50 kg are
+worth $181.88, not $82.50. This error does **not** cancel between the opening
+and closing takes (it scales with stock on hand), unlike the prepped-stock gap
+below. A pair that can't be bridged keeps the unconverted figure rather than
+dropping to zero, which would understate closing stock and overstate COGS.
+
+**Only `raw_material` lines are valued.** Batch and finished-product counts are
+collected (the count sheet snapshots every inventory type) but priced at zero —
+the price lookup matches against `product_entries`, and a recipe has no
+invoices. So prep and packed stock are invisible to COGS. That error *does*
+largely cancel: the distortion is `prep_closing − prep_opening`, i.e. only the
+change in prepped stock across the period. Fixing it properly means exploding
+counted batch/FP lines to raw materials via `buildExplodeCtx`/`explodeRecipe`
+(reusing the POS backflush machinery rather than porting the browser's cost
+index) — not done yet.
+
 ### Data model (two-level product design)
 `generic_products` (the abstract item) + `product_entries` (per-supplier purchase records with FIFO pricing) is the central pattern. `recipes`/`recipe_items` cost from products; `finished_products`/`finished_product_items` cost from recipes; producing/packing deducts `inventory` and writes `stock_log`. Stock takes (`stock_takes`/`stock_take_items`) reconcile counted vs system stock.
