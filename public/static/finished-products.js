@@ -36,6 +36,12 @@ function rebuildFpCostIndex() {
     finishedProducts: allFp,
     fpItems:          allFpItems_fp,
   });
+  // Same race as recipes.js: loadFinishedProducts (one fetch) beats
+  // loadFpCatalogues (six), so the first render comes off a half-built index
+  // and prints $0. Repaint once the index is complete.
+  if (allFp.length && document.getElementById('fpListContainer')) {
+    renderFpList(document.getElementById('fpSearch')?.value.trim() || '');
+  }
 }
 
 // Live cost of one saved finished product, with the stored column as a last

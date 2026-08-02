@@ -18,6 +18,15 @@ let rCostIndex     = { product: new Map(), recipe: new Map(), finished: new Map(
 
 function rebuildRecipeCostIndex() {
   rCostIndex = buildLiveCostIndex({ ..._rCatalogue, recipes: allRecipes });
+  // The catalogue and the recipe list load CONCURRENTLY, and the list wins the
+  // race — one fetch against four. Its first render therefore comes off a
+  // half-built index and prints $0 for everything. Repaint here so whichever
+  // loader finishes second redraws with the completed index. Without this the
+  // list stays at $0 while the detail modal, which recalculates on open, shows
+  // the right number — the two disagreeing is what gives the bug away.
+  if (allRecipes.length && document.getElementById('recipeListContainer')) {
+    renderRecipeList(document.getElementById('recipeSearch')?.value.trim() || '');
+  }
 }
 // Live total for a saved recipe; the stored column is a last resort only while
 // the catalogue is still loading.
