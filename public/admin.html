@@ -56,6 +56,7 @@
     }
     .card h2 { font-size: 1.05rem; font-weight: 700; margin-bottom: .25rem; }
     .card .lede { font-size: .85rem; color: var(--text-muted); margin-bottom: 1.1rem; }
+    .field .hint { display: block; margin-top: .35rem; font-size: .78rem; color: var(--text-muted); }
 
     label { display: block; font-size: .8rem; font-weight: 600; margin-bottom: .3rem; }
     .field { margin-bottom: .9rem; }
@@ -234,6 +235,10 @@
                 <option value="restaurant">Restaurant</option>
                 <option value="commissary">Commissary</option>
               </select>
+              <!-- The plan follows from this, so there is no plan field above:
+                   a restaurant starts on Essential and is moved from the table
+                   below; a commissary is created on Production and stays. -->
+              <small class="hint" id="accountTypePlanHint"></small>
             </div>
             <button type="submit" class="btn btn-primary" id="createBtn">
               <i class="fas fa-plus"></i> Create account
@@ -362,6 +367,18 @@
       $('ownerPassword').value = randomPassword();
     });
 
+    // Which plan the account will be created on. The server decides this from
+    // the account type (a commissary is created on Production); this only says
+    // so out loud, so the choice isn't a surprise discovered in the table below.
+    function syncPlanHint() {
+      const commissary = $('accountType').value === 'commissary';
+      $('accountTypePlanHint').textContent = commissary
+        ? 'Created on Production — the full feature set, plus batch and pack. No plan choice.'
+        : 'Created on Essential. Move them to Pro in the table below.';
+    }
+    $('accountType').addEventListener('change', syncPlanHint);
+    syncPlanHint();
+
     $('orgForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const btn = $('createBtn');
@@ -393,6 +410,7 @@
         $('handoffPw').textContent    = payload.owner_password;
         $('handoff').style.display    = 'block';
         $('orgForm').reset();
+        syncPlanHint();   // reset() puts the type back to Restaurant
         loadOrgs();
       } catch (_) {
         msg('Could not reach the server. Check your connection and try again.', 'bad');
@@ -692,7 +710,7 @@
       const value = (override === null || override === undefined) ? '' : String(override);
       const title = effective === 0
         ? 'Unlimited. Blank follows the plan; 0 means unlimited.'
-        : `${effective} AI invoice reads per calendar month. Blank follows the plan (${plan} = ${planDefault || 'unlimited'}); 0 means unlimited.`;
+        : `${effective} AI invoice reads per calendar month. Blank follows the plan (${o.plan_label || plan} = ${planDefault || 'unlimited'}); 0 means unlimited.`;
 
       // Kept deliberately terse — "this month" on every row pushed the column
       // wide enough to wrap the action buttons and doubled every row's height.
@@ -748,14 +766,25 @@
       }
     }
 
-    // Plan tier. Nothing is gated on this yet — it records what the customer was
-    // sold so the tier is already on file when Essential/Pro gating ships.
+    // Plan tier — this is the live gate, not a note about what was sold.
+    //
+    // A commissary has no plan choice: it is sold Production, which is the Pro
+    // entitlement under a different name. Showing a two-option picker there
+    // would offer a move the server refuses (see the plan endpoint), so show the
+    // name and nothing to press. The label itself comes from the API so there is
+    // one definition of it.
     function planPicker(o) {
       const plan = (o.plan || 'essential').toLowerCase();
+      const label = o.plan_label || (plan === 'pro' ? 'Pro' : 'Essential');
+
+      if ((o.account_type || '').toLowerCase() === 'commissary') {
+        return `<span class="pill pro" title="A commissary is sold one tier. Production is the Pro feature set, plus the batch and pack workflow.">${esc(label)}</span>`;
+      }
+
       return `<select class="planpick ${plan === 'pro' ? 'pro' : ''}"
                       data-plan-for="${esc(o.id)}" data-name="${esc(o.name)}"
                       data-current="${plan}"
-                      title="Which plan they're on. Nothing is gated on this yet.">
+                      title="Which plan they're on. This is enforced on every request.">
         <option value="essential"${plan === 'essential' ? ' selected' : ''}>Essential</option>
         <option value="pro"${plan === 'pro' ? ' selected' : ''}>Pro</option>
       </select>`;

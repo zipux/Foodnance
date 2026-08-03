@@ -1021,8 +1021,13 @@ app.get('/api/admin/organizations', async (c) => {
       ORDER BY o.created_at DESC`,
   ).bind(fromTs, toTs, monthStart()).all()
 
+  // plan_label is resolved here, not in admin.html, so the name a commissary is
+  // sold under has exactly one definition. The raw `plan` still goes out beside
+  // it — the picker needs the entitlement to decide what it may offer.
+  const rows = (results || []).map((o: any) => ({ ...o, plan_label: planLabel(o.plan, o.account_type) }))
+
   return c.json({
-    data: results || [],
+    data: rows,
     range: { from, to },
     plan_caps: PLAN_INVOICE_CAPS,
   })
@@ -1054,11 +1059,18 @@ app.post('/api/admin/organizations', async (c) => {
   const salt = randomHex(16)
   const hash = await hashPassword(password, salt)
 
+  // A commissary is sold one tier — Production — which is the Pro feature set.
+  // Set it here rather than leaving the column default: an Essential commissary
+  // is a broken account, not a cheaper one. Its whole workflow is Produce Batch
+  // and Pack Run drawing bins down, and those write inventory that only Pro can
+  // then count, adjust or reconcile. See planLabel().
+  const plan = accountType === 'commissary' ? 'pro' : 'essential'
+
   // All inserts in one batch so a failure can't leave an organization with
   // no owner (D1 runs a batch as a transaction).
   await c.env.DB.batch([
-    c.env.DB.prepare(`INSERT INTO organizations (id, name, account_type) VALUES (?, ?, ?)`)
-      .bind(orgId, name, accountType),
+    c.env.DB.prepare(`INSERT INTO organizations (id, name, account_type, plan) VALUES (?, ?, ?, ?)`)
+      .bind(orgId, name, accountType, plan),
     c.env.DB.prepare(
       `INSERT INTO users (id, org_id, email, password_hash, password_salt, password_iter, role, name)
        VALUES (?, ?, ?, ?, ?, ?, 'owner', ?)`,
@@ -1078,7 +1090,9 @@ app.post('/api/admin/organizations', async (c) => {
         .bind(cat.name, i + 1, cat.type, orgId)),
   ])
 
-  return c.json({ ok: true, organization: { id: orgId, name, account_type: accountType },
+  return c.json({ ok: true,
+                  organization: { id: orgId, name, account_type: accountType, plan,
+                                  plan_label: planLabel(plan, accountType) },
                   owner: { id: userId, email } })
 })
 
@@ -1090,11 +1104,30 @@ app.post('/api/admin/organizations', async (c) => {
 // ── Set an organization's plan tier ──
 // POST /api/admin/organizations/:id/plan   Body: { plan: 'essential' | 'pro' }
 //
-// Records what the customer was sold. Nothing is gated on this yet — the
-// Essential/Pro boundaries are agreed but unbuilt — so this only writes the
-// label. Keeping it current from day one means gating can read the tier when it
-// ships instead of needing a backfill from memory about who bought what.
+// Records what the customer was sold, and it IS the gate — planFeatures() below
+// reads this column on every /api/* request.
 const PLANS = ['essential', 'pro']
+
+// ─── Plan NAME vs plan ENTITLEMENT ────────────────────────────
+// A commissary is sold a single tier called "Production". It is the Pro feature
+// set exactly — what makes it a different product is account_type, which is
+// what shows Produce Batch, Pack Run and the "How is this made?" dropdown (see
+// applyBatchWorkflowGating in public/static/utils.js).
+//
+// So it is deliberately NOT a third value in `plan`. Every plan comparison in
+// this file and in utils.js is binary against 'pro' or 'essential', and a third
+// value would fail differently in each: planFeatures() would hand back an EMPTY
+// feature set (loud — they lose every Pro page), while PLAN_INVOICE_CAPS[...] ??
+// 0 resolves an unknown plan to 0 = UNCAPPED (silent, and it costs us money per
+// parse). Naming is a naming problem; keep it out of the entitlement.
+//
+// The invariant that makes the label honest: a commissary is always on 'pro'.
+// Enforced at creation and on the plan endpoint, and backfilled by 0044.
+function planLabel(plan: string | null | undefined, accountType: string | null | undefined): string {
+  const p = (plan || 'essential').toLowerCase()
+  if ((accountType || '').toLowerCase() === 'commissary') return 'Production'
+  return p === 'pro' ? 'Pro' : 'Essential'
+}
 
 // ─── Plan feature gating ──────────────────────────────────────
 // Essential = know your costs (everything that runs off invoices). Pro = control
@@ -1196,12 +1229,23 @@ app.post('/api/admin/organizations/:id/plan', async (c) => {
     return c.json({ error: `Plan must be one of: ${PLANS.join(', ')}.` }, 400)
   }
 
-  const org = await c.env.DB.prepare('SELECT id, name FROM organizations WHERE id = ?')
-    .bind(id).first<{ id: string; name: string }>()
+  const org = await c.env.DB.prepare('SELECT id, name, account_type FROM organizations WHERE id = ?')
+    .bind(id).first<{ id: string; name: string; account_type: string }>()
   if (!org) return c.json({ error: 'Restaurant not found.' }, 404)
 
+  // The one plan move that is never valid. A commissary on Essential keeps its
+  // Produce Batch and Pack Run buttons — they are gated on account_type, not on
+  // plan — so it would go on writing inventory it can no longer count or adjust,
+  // and nobody would see a refusal until the first stock take. Refuse it here
+  // instead, where there is a person to read the reason.
+  if (org.account_type === 'commissary' && plan !== 'pro') {
+    return c.json({ error: 'A commissary is on Production, which is the full feature set. ' +
+                           'Change the account type first if this is really a downgrade.' }, 400)
+  }
+
   await c.env.DB.prepare(`UPDATE organizations SET plan = ? WHERE id = ?`).bind(plan, id).run()
-  return c.json({ ok: true, organization: { id: org.id, name: org.name }, plan })
+  return c.json({ ok: true, organization: { id: org.id, name: org.name }, plan,
+                  plan_label: planLabel(plan, org.account_type) })
 })
 
 // ── Override an organization's monthly invoice-parse cap ──────
