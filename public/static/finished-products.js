@@ -107,6 +107,26 @@ document.addEventListener('DOMContentLoaded', async () => {
   addFpProductLine();
 });
 
+// Re-read the bills of materials. Same defect as recipes.js: fpCostIndex is
+// derived from allRecipeItems_fp + allFpItems_fp, which are otherwise only
+// filled by loadFpCatalogues() at page load. Saving a finished product writes
+// its finished_product_items rows server-side but leaves those arrays alone,
+// so the rebuilt index sees a product with no components and shows $0 until
+// the page is reloaded. Both are re-read because a finished product's cost
+// reaches raw materials THROUGH its recipes.
+//
+// Previous items are kept on failure — an empty array would zero every card.
+async function refreshFpItems() {
+  try {
+    const [rid, fid] = await Promise.all([
+      apiGet(`tables/recipe_items?page=1&limit=1000`),
+      apiGet(`tables/${FP_ITEMS_TABLE}?page=1&limit=1000`),
+    ]);
+    allRecipeItems_fp = rid.data || [];
+    allFpItems_fp     = fid.data || [];
+  } catch (_) { /* keep the last good items */ }
+}
+
 // ── Load catalogues ────────────────────────────────────────────
 async function loadFpCatalogues() {
   try {
@@ -900,6 +920,7 @@ async function saveFp() {
     }
 
     clearFpForm();
+    await refreshFpItems();   // the lines just written ARE this product's cost
     await loadFinishedProducts();
   } catch (e) {
     showToast('Save failed: ' + e.message, 'error');
@@ -1172,6 +1193,7 @@ async function deleteFp(id) {
     await apiDelete(`tables/${FP_TABLE}/${id}`);
     closeModal('fpDetailModal');
     showToast('Finished product deleted.', 'warning');
+    await refreshFpItems();   // its lines are gone too
     await loadFinishedProducts();
     if (document.getElementById('editFpId').value === id) clearFpForm();
   } catch (e) {

@@ -30,6 +30,26 @@ function rebuildRecipeCostIndex() {
     renderRecipeList(document.getElementById('recipeSearch')?.value.trim() || '');
   }
 }
+// Re-read the bills of materials.
+//
+// rebuildRecipeCostIndex() derives every recipe's cost from
+// _rCatalogue.recipeItems, and that array is otherwise only filled by
+// loadProductCatalogue() at page load. Saving a recipe writes its recipe_items
+// rows on the server but leaves the array untouched, so the rebuilt index sees
+// a recipe with NO ingredients and prints $0 — which is why the number only
+// appeared after a reload. Anything that changes recipe_items has to call this
+// before loadRecipes().
+//
+// On failure the previous items are kept rather than cleared: a stale cost is
+// wrong by however much the edit changed, while an empty array would reprice
+// every recipe on the page to $0.
+async function refreshRecipeItems() {
+  try {
+    const rid = await apiGet(`tables/${RECIPE_ITEMS_TABLE}?page=1&limit=1000`);
+    _rCatalogue = { ..._rCatalogue, recipeItems: rid.data || [] };
+  } catch (_) { /* keep the last good items */ }
+}
+
 // Live total for a saved recipe; the stored column is a last resort only while
 // the catalogue is still loading.
 function recipeLiveCost(r) {
@@ -967,6 +987,7 @@ async function saveRecipe() {
     }
 
     clearRecipeForm();
+    await refreshRecipeItems();   // the lines just written ARE this recipe's cost
     await loadRecipes();
   } catch (e) {
     showToast('Save failed: ' + e.message, 'error');
@@ -1308,6 +1329,7 @@ async function deleteRecipe(id) {
     await apiDelete(`tables/${RECIPES_TABLE}/${id}`);
     closeModal('recipeDetailModal');
     showToast('Recipe deleted.', 'warning');
+    await refreshRecipeItems();   // its lines are gone too
     await loadRecipes();
     if (document.getElementById('editRecipeId').value === id) clearRecipeForm();
   } catch (e) {
