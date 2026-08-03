@@ -2,11 +2,11 @@
 //
 // Four combinations, and each cell is a decision someone argued about:
 //
-//                     How is this made?   Produce Batch   Pack Run
-//   restaurant  Ess          hidden          hidden        hidden
-//   restaurant  Pro          hidden          SHOWN         hidden
-//   commissary  Ess          shown           shown         shown
-//   commissary  Pro          shown           shown         shown
+//                     How is this made?   Produce Batch   Pack Run   Pack Sizes + Reorder Level
+//   restaurant  Ess          hidden          hidden        hidden          hidden
+//   restaurant  Pro          hidden          SHOWN         hidden          shown
+//   commissary  Ess          shown           shown         shown           SHOWN
+//   commissary  Pro          shown           shown         shown           shown
 //
 // The dropdown goes for every restaurant because Produce Batch now records the
 // answer itself and a stale answer self-corrects (takeFromBatch falls through to
@@ -14,6 +14,13 @@
 // is the only way to see prep during the week; on Essential nothing would ever
 // draw the bin down. A commissary keeps everything — pressing those buttons by
 // hand IS their stock workflow.
+//
+// The last column is different in kind: it is not about the stock workflow but
+// about which PAGES the plan opens. Pack Sizes only feeds the count sheet and
+// the adjust-stock modal, and Reorder Level only feeds the Low Stock pill —
+// all on /stock-take and /inventory, both Pro. The commissary column is left
+// SHOWN on purpose (deferred 2026-08-04), even though the same argument would
+// hide it: that call has not been made yet, so the test pins today's answer.
 //
 // This is presentation only. _routes.json sends just /api/* to the worker, so a
 // static page cannot be gated server-side, and none of this is a security
@@ -23,7 +30,8 @@ import { loadBrowserModule } from './helpers/browser-module.mjs';
 
 const t = suite('account-type-gating');
 
-const IDS = ['recipeProductionModeGroup', 'produceBatchBtn', 'packRunBtn'];
+const IDS = ['recipeProductionModeGroup', 'produceBatchBtn', 'packRunBtn',
+             'packLevelsSection', 'lowStockSection'];
 
 // Fresh fake page per case: every id present, so "hidden" can only come from
 // the code under test and never from a missing element.
@@ -58,12 +66,25 @@ t.check('Pro: Produce Batch KEPT — it is how prep is visible mid-week',
 t.check('Pro: Pack Run hidden — a restaurant does not pack',
   restPro.packRunBtn === true);
 
+t.section('the product form drops fields whose only screens are Pro');
+t.check('Essential: Pack Sizes hidden — nothing on this plan counts cases',
+  restEss.packLevelsSection === true);
+t.check('Essential: Low-stock Alert hidden — /inventory is the upgrade panel',
+  restEss.lowStockSection === true);
+// Not merely "not gated": on Pro these fields are live, and a stock take is
+// where a wrong pack level costs real money.
+t.check('Pro: Pack Sizes shown — the count sheet reads them',
+  restPro.packLevelsSection === false);
+t.check('Pro: Low-stock Alert shown', restPro.lowStockSection === false);
+
 t.section('a commissary keeps its whole workflow');
 for (const plan of ['essential', 'pro']) {
   const c = run('commissary', plan);
   t.check(`${plan}: dropdown shown`,      c.recipeProductionModeGroup === false);
   t.check(`${plan}: Produce Batch shown`, c.produceBatchBtn === false);
   t.check(`${plan}: Pack Run shown`,      c.packRunBtn === false);
+  t.check(`${plan}: Pack Sizes shown`,    c.packLevelsSection === false);
+  t.check(`${plan}: Low-stock Alert shown`, c.lowStockSection === false);
 }
 
 // The session bootstrap is async, so every page renders for a moment before the

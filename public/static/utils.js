@@ -225,15 +225,44 @@ function batchWorkflowHidden() {
       && String(window.__accountPlan || '').toLowerCase() === 'essential';
 }
 
+// Two sections of the product form configure screens an Essential account can
+// never open, so on an Essential restaurant they are pure noise:
+//   - Pack Sizes (case/bag/loose) is read only by pkConfigFrom → pkBoxesHtml,
+//     called from the adjust-stock modal (inventory.js) and the count sheet
+//     (stock-take.js). Both pages are Pro — see PLAN_GATED_PAGES.
+//   - Reorder Level is read only by _reorderInfo in inventory.js, which draws
+//     the Low Stock pill and chip. Its own help text promises a warning "on the
+//     Inventory page", which on Essential is the upgrade panel.
+//
+// Deliberately a SEPARATE predicate from batchWorkflowHidden() even though the
+// two currently agree. That one is about whether a bin ever gets drawn down;
+// this one is about which pages the plan opens. The commissary side of this is
+// still undecided, and coupling them would move it by accident.
+//
+// NOT extended to Essential commissary yet — deferred by the user 2026-08-04.
+// The same reasoning applies there (both pages are equally shut), so expect
+// this to become a plain plan check rather than gaining a second branch.
+function stockDetailFieldsHidden() {
+  return restaurantAccount()
+      && String(window.__accountPlan || '').toLowerCase() === 'essential';
+}
+
 // Presentation only, like applyPlanGating — _routes.json sends just /api/* to
 // the worker, so static pages cannot be gated server-side. Nothing here is a
 // security boundary; it removes controls that would do nothing useful.
 // Every id is static markup and no controller touches their display, so setting
 // it once holds for the life of the page.
+//
+// Hiding is all this does: the inputs stay in the DOM carrying whatever
+// openEditProduct() loaded, so saveProduct() round-trips their values
+// unchanged. Skipping them on save instead would silently wipe pack levels and
+// reorder levels on every Essential save — and only show up as damage later,
+// when that account upgraded to Pro and opened a count sheet.
 function applyBatchWorkflowGating() {
   const hide = (id) => { const el = document.getElementById(id); if (el) el.style.display = 'none'; };
   if (restaurantAccount()) { hide('recipeProductionModeGroup'); hide('packRunBtn'); }
   if (batchWorkflowHidden()) hide('produceBatchBtn');
+  if (stockDetailFieldsHidden()) { hide('packLevelsSection'); hide('lowStockSection'); }
 }
 
 // Small "signed in as … / Sign out" chip, injected into the nav of whichever
