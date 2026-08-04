@@ -426,12 +426,16 @@ function render() {
   // Uncategorised purchases land in food (both here and in the SQL), so a
   // half-categorised invoice run reads as a scary food-cost percentage with
   // nothing on screen explaining it. Only worth saying when it's material.
+  // "Uncategorised" includes the 'Other' bucket, which is where invoice import
+  // puts anything it couldn't identify — see PLACEHOLDER_CATEGORIES in
+  // src/index.ts. A mop counted as food is the case this exists to catch.
   const uncat = parseFloat(pnlCosts.food_uncategorized) || 0;
   const uncatNote = (!useCogs && uncat > 0 && foodBought > 0 && uncat / foodBought >= 0.05)
     ? `<div class="pnl-sub" style="color:#b45309;padding:.1rem .25rem .5rem">
          <i class="fas fa-circle-info"></i> <strong>${fmtMoney(uncat)}</strong> of this
-         has no category yet, so it counts as food. Categorising it may move cost
-         into drinks or supplies.
+         isn't categorised yet (it's in <em>Other</em> or blank), so it counts as food.
+         Categorising it may move some cost into drinks or supplies.
+         <a href="/products.html">Fix categories &rarr;</a>
        </div>`
     : '';
 

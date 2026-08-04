@@ -4801,10 +4801,22 @@ app.get('/api/pnl', async (c) => {
   // The type totals are unchanged: they are these rows summed.
   let food = 0, beverage = 0, supplies = 0
   const suppliesByCat = new Map<string, number>()
-  // How much food cost came from lines with no category at all. Unmatched
-  // categories default to 'food' (below and in the SQL), so a half-categorised
-  // invoice run shows up as an alarming food-cost percentage with nothing on
-  // screen explaining why.
+  // How much food cost is not really classified. Unmatched categories default to
+  // 'food' (below and in the SQL), so a half-categorised invoice run shows up as
+  // an alarming food-cost percentage with nothing on screen explaining why.
+  //
+  // Blank is NOT the only case, and it is not even the common one: inferCategory
+  // returns 'Other' for every invoice line its keyword rules can't identify, so
+  // 'Other' is where unrecognised items actually collect — a mop and a box of
+  // gloves land there and are then counted as food. Counting blank alone made
+  // the note miss exactly the population it exists to describe. 'Ingredients' is
+  // the retired legacy value. Same placeholder set as the invoice import path
+  // treats as "not really answered".
+  //
+  // Note this only widens what is REPORTED. Where the money lands is unchanged —
+  // 'Other' still counts as food. Re-bucketing it would silently restate every
+  // month a customer has already read.
+  const PLACEHOLDER_CATEGORIES = new Set(['', 'other', 'ingredients'])
   let foodUncategorized = 0
   for (const r of (typeRows.results ?? [])) {
     const amt = r.amount ?? 0
@@ -4816,7 +4828,7 @@ app.get('/api/pnl', async (c) => {
       suppliesByCat.set(key, (suppliesByCat.get(key) ?? 0) + amt)
     } else {
       food += amt
-      if (!cat) foodUncategorized += amt
+      if (PLACEHOLDER_CATEGORIES.has(cat.toLowerCase())) foodUncategorized += amt
     }
   }
 
