@@ -153,8 +153,23 @@
     // Real sign-in. The server replies with a signed HttpOnly session cookie,
     // which the browser then sends on every /api/* request automatically —
     // there is nothing to store here, and no token JavaScript can read.
-    const AFTER_LOGIN       = '/home';    // Price Movers, first tab in the app
-    const AFTER_LOGIN_ADMIN = '/admin';   // super-admin goes to the admin screen
+    const AFTER_LOGIN        = '/home';           // Price Movers, first tab in the app
+    const AFTER_LOGIN_ADMIN  = '/admin';          // super-admin goes to the admin screen
+    const AFTER_LOGIN_MOBILE = '/upload-invoice'; // on a phone, the only job is photographing a delivery note
+
+    // A phone is a capture device, not a reporting one: someone signing in on
+    // one is standing at a delivery, not reading Price Movers. Land them on the
+    // camera. Requires BOTH a small screen and a touch pointer, so a desktop
+    // window dragged narrow is not mistaken for a phone. If matchMedia or the
+    // pointer feature is missing, this is false and everyone gets /home — the
+    // wrong guess costs a tap on the navbar, so it fails toward the old
+    // behaviour. Note /upload-invoice is deliberately NOT plan-gated, so this
+    // is safe to send an Essential account to.
+    function isHandheld() {
+      try {
+        return window.matchMedia('(max-width: 900px) and (pointer: coarse)').matches;
+      } catch (_) { return false; }
+    }
 
     // If the session expired mid-task, utils.js sends the user here with
     // ?next=/wherever — return them there instead of dumping them on /home.
@@ -163,7 +178,10 @@
     function destinationFor(user) {
       const next = new URLSearchParams(location.search).get('next') || '';
       if (next.startsWith('/') && !next.startsWith('//')) return next;
-      return (user && user.is_super_admin) ? AFTER_LOGIN_ADMIN : AFTER_LOGIN;
+      // Super-admin first: they have no org, so the upload screen has nothing
+      // to file an invoice against until they pick an account to view as.
+      if (user && user.is_super_admin) return AFTER_LOGIN_ADMIN;
+      return isHandheld() ? AFTER_LOGIN_MOBILE : AFTER_LOGIN;
     }
 
     const form    = document.getElementById('loginForm');
