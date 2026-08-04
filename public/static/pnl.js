@@ -14,7 +14,9 @@ let pnlTo         = '';     // 'YYYY-MM' — last month of the period (inclusive
 // cost of goods sold). Sticky per browser; falls back to purchases when the
 // bracketing stock takes for the period don't exist.
 let pnlBasis      = (localStorage.getItem('pnlBasis') === 'cogs') ? 'cogs' : 'purchases';
-let pnlCosts      = { food_cost: 0, beverage_cost: 0, supplies_cost: 0, invoice_fees: 0 };
+let pnlCosts      = { food_cost: 0, beverage_cost: 0, supplies_cost: 0, invoice_fees: 0,
+                      supplies_breakdown: [], food_uncategorized: 0,
+                      pending_invoices: { count: 0, amount: 0 } };
 let pnlSalesRows  = [];     // sales_monthly rows inside the period
 let pnlOverheads  = [];     // operating_expenses rows inside the period (one-offs)
 let pnlRecurring  = [];     // recurring_expenses rows (fixed monthly costs — every month)
@@ -386,6 +388,53 @@ function render() {
        </div>`
     : '';
 
+  // Invoices dated in this period that are still in review. Their costs are NOT
+  // in any figure on this page, so the profit shown is flattering. Say so before
+  // the customer reads the number, not in a footnote under it.
+  const pending = pnlCosts.pending_invoices || { count: 0, amount: 0 };
+  const pendingCount = Number(pending.count) || 0;
+  const pendingNote = pendingCount
+    ? `<div class="pnl-warn">
+         <i class="fas fa-triangle-exclamation"></i>
+         <span><strong>${pendingCount} invoice${pendingCount === 1 ? '' : 's'}</strong>
+         dated in ${periodWord} ${pendingCount === 1 ? 'is' : 'are'} still in review, so
+         ${pendingCount === 1 ? 'its' : 'their'} cost is not counted here yet${
+           pending.amount > 0 ? ` (about <strong>${fmtMoney(pending.amount)}</strong>)` : ''}.
+         Your real profit is lower than the figure below.
+         <a href="/invoices.html">Finish them &rarr;</a></span>
+       </div>`
+    : '';
+
+  // Supplies is six built-in categories in a trench coat — packaging,
+  // disposables, cleaning chemicals, linen & uniforms, smallwares, office. The
+  // old label named two of them, so customers asked where their chemicals were
+  // and were at risk of adding them again by hand as a one-off. Show the split.
+  const suppliesBreakdown = Array.isArray(pnlCosts.supplies_breakdown) ? pnlCosts.supplies_breakdown : [];
+  const suppliesRow = `
+    ${costRow('Supplies &amp; non-food',
+              suppliesBreakdown.length === 1
+                ? `From invoices — ${esc(suppliesBreakdown[0].category)}`
+                : 'From invoices — packaging, cleaning, linen, smallwares and other non-food',
+              supplies)}
+    ${suppliesBreakdown.length > 1 ? suppliesBreakdown.map(r => `
+      <div class="pnl-row pnl-row-sub">
+        <div class="pnl-label">${esc(r.category)}</div>
+        <div class="pnl-amount">${fmtMoney(r.amount)}</div>
+        <div class="pnl-pct">${(parseFloat(r.amount) || 0) ? pct(parseFloat(r.amount) || 0) : '—'}</div>
+      </div>`).join('') : ''}`;
+
+  // Uncategorised purchases land in food (both here and in the SQL), so a
+  // half-categorised invoice run reads as a scary food-cost percentage with
+  // nothing on screen explaining it. Only worth saying when it's material.
+  const uncat = parseFloat(pnlCosts.food_uncategorized) || 0;
+  const uncatNote = (!useCogs && uncat > 0 && foodBought > 0 && uncat / foodBought >= 0.05)
+    ? `<div class="pnl-sub" style="color:#b45309;padding:.1rem .25rem .5rem">
+         <i class="fas fa-circle-info"></i> <strong>${fmtMoney(uncat)}</strong> of this
+         has no category yet, so it counts as food. Categorising it may move cost
+         into drinks or supplies.
+       </div>`
+    : '';
+
   // ── Cost-basis toggle (Purchases vs stock-take-adjusted True COGS) ──
   const niceDate = ymd => {
     const [y, m, d] = String(ymd || '').split('-').map(Number);
@@ -442,16 +491,18 @@ function render() {
       ${salesCell}
     </div>
     ${missingSalesNote}
+    ${pendingNote}
 
     ${basisHtml}
 
     <div class="pnl-section-head">${cogsHeading}</div>
     ${costRow('Food (ingredients)', cogsSub(foodBought, cogsData.opening_food, cogsData.closing_food), food)}
+    ${uncatNote}
     ${costRow('Drinks (beverage)', cogsSub(bevBought, cogsData.opening_beverage, cogsData.closing_beverage), beverage)}
     ${totalRow('Gross profit', gross, gross >= 0 ? 'good' : 'bad')}
 
     <div class="pnl-section-head">Running costs</div>
-    ${costRow('Packaging &amp; supplies', 'From invoices', supplies)}
+    ${suppliesRow}
     ${fees ? costRow('Delivery &amp; surcharges', 'From invoices', fees) : ''}
     ${expenseInv.map(r => costRow(esc(r.category), 'From an uploaded bill', parseFloat(r.amount) || 0)).join('')}
 

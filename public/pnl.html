@@ -97,6 +97,22 @@
     }
     .pnl-label { font-size: .95rem; color: var(--text); }
     .pnl-sub   { font-size: .78rem; color: var(--text-muted); margin-top: .1rem; }
+    /* Indented breakdown under a rolled-up line (e.g. what's inside Supplies) */
+    .pnl-row-sub {
+      padding: .3rem .25rem .3rem 1.4rem; border-bottom: 1px dashed #f1f5f9;
+    }
+    .pnl-row-sub .pnl-label,
+    .pnl-row-sub .pnl-amount { font-size: .82rem; color: var(--text-muted); font-weight: 500; }
+    /* Amber caution banner — used where a MISSING cost makes the P&L flattering,
+       so it has to read louder than a .pnl-sub footnote. */
+    .pnl-warn {
+      display: flex; gap: .55rem; align-items: flex-start;
+      background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
+      border-radius: 10px; padding: .6rem .75rem; margin: .5rem .25rem;
+      font-size: .82rem; line-height: 1.45;
+    }
+    .pnl-warn i { margin-top: .15rem; }
+    .pnl-warn a { color: #92400e; font-weight: 600; white-space: nowrap; }
     .pnl-amount {
       font-family: ui-monospace, monospace; font-weight: 600;
       font-size: .95rem; color: var(--text); text-align: right; white-space: nowrap;
@@ -261,6 +277,6 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="/static/utils.js?v=20260804-1"></script>
-  <script src="/static/pnl.js?v=20260731-1"></script>
+  <script src="/static/pnl.js?v=20260804-2"></script>
 </body>
 </html>

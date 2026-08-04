@@ -4788,17 +4788,36 @@ app.get('/api/pnl', async (c) => {
             AND c.org_id IS ? LIMIT 1),
         'food'
       ) AS type,
+      TRIM(line_cats.category) AS category,
       SUM(COALESCE(amt, 0)) AS amount
     FROM line_cats
-    GROUP BY type
-  `).bind(org, org, org, from, to, org, org, org).all<{ type: string; amount: number }>()
+    GROUP BY type, category
+  `).bind(org, org, org, from, to, org, org, org).all<{ type: string; category: string; amount: number }>()
 
+  // Grouped by category as well as type so the statement can break the supplies
+  // line down. Six built-in categories roll into it — packaging, disposables,
+  // cleaning chemicals, linen, smallwares, office — and a single line labelled
+  // for two of them reads as though the other four are missing from the P&L.
+  // The type totals are unchanged: they are these rows summed.
   let food = 0, beverage = 0, supplies = 0
+  const suppliesByCat = new Map<string, number>()
+  // How much food cost came from lines with no category at all. Unmatched
+  // categories default to 'food' (below and in the SQL), so a half-categorised
+  // invoice run shows up as an alarming food-cost percentage with nothing on
+  // screen explaining why.
+  let foodUncategorized = 0
   for (const r of (typeRows.results ?? [])) {
     const amt = r.amount ?? 0
+    const cat = String(r.category || '').trim()
     if (r.type === 'beverage') beverage += amt
-    else if (r.type === 'supplies') supplies += amt
-    else food += amt
+    else if (r.type === 'supplies') {
+      supplies += amt
+      const key = cat || 'Uncategorized'
+      suppliesByCat.set(key, (suppliesByCat.get(key) ?? 0) + amt)
+    } else {
+      food += amt
+      if (!cat) foodUncategorized += amt
+    }
   }
 
   // Invoice-level surcharges that are real running costs (delivery + fuel).
@@ -4823,6 +4842,20 @@ app.get('/api/pnl', async (c) => {
     GROUP BY category
     ORDER BY amount DESC
   `).bind(from, to, org).all<{ category: string; amount: number }>()
+
+  // Invoices dated in the period that are NOT yet Closed. Every cost query above
+  // filters status='Closed', so these are silently absent from the statement —
+  // and their absence makes the P&L look BETTER than reality (costs missing,
+  // profit overstated). That is the wrong direction to be quiet about, so the
+  // count comes back and the page says so. Voided invoices are genuinely
+  // excluded and are not counted here.
+  const pendingRow = await c.env.DB.prepare(`
+    SELECT COUNT(*) AS n, SUM(COALESCE(total, 0)) AS amount
+    FROM invoices
+    WHERE status <> 'Closed' AND voided_at IS NULL
+      AND substr(invoice_date, 1, 7) BETWEEN ? AND ?
+      AND org_id IS ?
+  `).bind(from, to, org).first<{ n: number; amount: number }>()
 
   const round2 = (n: number) => Math.round((n || 0) * 100) / 100
 
@@ -5086,6 +5119,17 @@ app.get('/api/pnl', async (c) => {
     food_cost:     round2(food),
     beverage_cost: round2(beverage),
     supplies_cost: round2(supplies),
+    // Biggest first — the breakdown is there to answer "what IS this?", and the
+    // largest contributor answers it fastest.
+    supplies_breakdown: [...suppliesByCat.entries()]
+      .map(([category, amount]) => ({ category, amount: round2(amount) }))
+      .filter(r => r.amount !== 0)
+      .sort((a, b) => b.amount - a.amount),
+    food_uncategorized: round2(foodUncategorized),
+    pending_invoices: {
+      count:  Number(pendingRow?.n ?? 0),
+      amount: round2(pendingRow?.amount ?? 0),
+    },
     invoice_fees:  round2(feeRow?.fees ?? 0),
     expense_invoices: (expRows.results ?? []).map(r => ({
       category: r.category ?? 'Other',
