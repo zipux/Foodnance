@@ -234,6 +234,10 @@ function batchWorkflowHidden() {
 //     the Low Stock pill and chip. Its own help text promises a warning "on the
 //     Inventory page", which on Essential is the upgrade panel.
 //
+// Also suppresses the "Add to Inventory?" prompt after saving a supplier entry
+// (openEntryInvPrompt in products.js) — same reason, one step further on: it
+// writes a bin that only those two Pro screens could ever show or correct.
+//
 // Deliberately a SEPARATE predicate from batchWorkflowHidden() even though the
 // two currently agree. That one is about whether a bin ever gets drawn down;
 // this one is about which pages the plan opens. The commissary side of this is
@@ -243,6 +247,29 @@ function batchWorkflowHidden() {
 // The same reasoning applies there (both pages are equally shut), so expect
 // this to become a plain plan check rather than gaining a second branch.
 function stockDetailFieldsHidden() {
+  return restaurantAccount()
+      && String(window.__accountPlan || '').toLowerCase() === 'essential';
+}
+
+// Three fields of the SUPPLIER ENTRY form (and their two columns in the entries
+// table) are warehouse paperwork a restaurant on Essential never does:
+//   - SKU is a vendor's own catalogue number. Useful when you reorder against a
+//     price list; a restaurant orders by name, over the phone or an app.
+//   - Expiry / Best Before drives date rotation, which needs someone counting
+//     stock to act on it. On Essential nothing counts — /stock-take and
+//     /inventory are both the upgrade panel.
+//   - Invoice Ref (and its Attach / View buttons) reconciles an entry back to a
+//     paper invoice. The whole invoice, file included, already lives on
+//     /invoices, which is NOT gated — so this is a second, worse copy of it.
+//
+// A THIRD predicate rather than a reuse of the two above, on the same grounds
+// the second one was split from the first: batchWorkflowHidden() is about
+// whether a bin ever gets drawn down, stockDetailFieldsHidden() about which
+// pages the plan opens, and this one about paperwork the business model does
+// not involve. They agree today and will not always — the commissary answer
+// here is obvious (a commissary buys against SKUs and rotates by date, so it
+// keeps all three) where for stockDetailFieldsHidden it is still undecided.
+function purchaseAdminFieldsHidden() {
   return restaurantAccount()
       && String(window.__accountPlan || '').toLowerCase() === 'essential';
 }
@@ -263,6 +290,13 @@ function applyBatchWorkflowGating() {
   if (restaurantAccount()) { hide('recipeProductionModeGroup'); hide('packRunBtn'); }
   if (batchWorkflowHidden()) hide('produceBatchBtn');
   if (stockDetailFieldsHidden()) { hide('packLevelsSection'); hide('lowStockSection'); }
+  // The matching Expiry and Invoice COLUMNS are hidden in renderEntriesTable()
+  // instead, not here: that table's body is rebuilt on every render, so header
+  // and cells have to be decided by one call at one moment or a modal opened
+  // during the async bootstrap ends up with a header the rows do not fill.
+  if (purchaseAdminFieldsHidden()) {
+    hide('entrySkuGroup'); hide('entryExpiryGroup'); hide('entryInvoiceGroup');
+  }
 }
 
 // Small "signed in as … / Sign out" chip, injected into the nav of whichever
@@ -660,6 +694,44 @@ function fmtDateTime(iso) {
 function fmt(n) {
   const num = parseFloat(n);
   return isNaN(num) ? '$0.00' : '$' + num.toFixed(2);
+}
+
+// A PRICE per gram or per millilitre is a fraction of a cent, so fmt() rounds it
+// to "$0.00" — which reads as "this ingredient is free" and makes a working page
+// look broken. Pizza Dough really costs $3.21 but its per-gram price displayed
+// as $0.00.
+//
+// So per-unit prices are quoted in a unit big enough to hold real money: grams
+// priced per kg, millilitres per litre. Only the PRICE label moves — the recipe
+// yield and the quantity the user typed are left in the unit they chose.
+//
+// Deliberately unconditional rather than "only when it would round to zero".
+// A threshold would quote Pizza Dough per kg and Carbonara Sauce (dearer, so
+// above the cut-off) per gram, in adjacent rows of the same list — two prices
+// a hundredfold apart in a column that looks like it holds one kind of number.
+// Consistent units beat a tighter fit to the original unit.
+const _PRICE_UNIT_SCALE = {
+  g:  { unit: 'kg', per: 1000 },
+  ml: { unit: 'L',  per: 1000 },
+};
+function scalePriceUnit(costPerUnit, unit) {
+  const raw = String(unit || '').trim();
+  const up  = _PRICE_UNIT_SCALE[raw.toLowerCase()];
+  const v   = parseFloat(costPerUnit);
+  if (!up || isNaN(v)) return { cost: v, unit: raw };
+  return { cost: v * up.per, unit: up.unit };
+}
+
+// "$1.28 / kg" from a cost of $0.0012848 per g. Use anywhere a per-unit PRICE is
+// shown; never for a line total, which is already money.
+function fmtUnitCost(costPerUnit, unit) {
+  const s = scalePriceUnit(costPerUnit, unit);
+  return `${fmt(s.cost)} / ${s.unit}`;
+}
+
+// The matching label, so "Cost per g" doesn't sit above a per-kg figure.
+function priceUnitLabel(unit) {
+  return scalePriceUnit(0, unit).unit || String(unit || '').trim();
 }
 
 // Escape HTML to prevent XSS.

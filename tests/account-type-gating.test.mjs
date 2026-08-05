@@ -2,11 +2,11 @@
 //
 // Four combinations, and each cell is a decision someone argued about:
 //
-//                     How is this made?   Produce Batch   Pack Run   Pack Sizes + Reorder Level
-//   restaurant  Ess          hidden          hidden        hidden          hidden
-//   restaurant  Pro          hidden          SHOWN         hidden          shown
-//   commissary  Ess          shown           shown         shown           SHOWN
-//   commissary  Pro          shown           shown         shown           shown
+//                     How is this made?   Produce Batch   Pack Run   Pack Sizes + Reorder Level   SKU/Expiry/Invoice Ref
+//   restaurant  Ess          hidden          hidden        hidden          hidden                       hidden
+//   restaurant  Pro          hidden          SHOWN         hidden          shown                        shown
+//   commissary  Ess          shown           shown         shown           SHOWN                        shown
+//   commissary  Pro          shown           shown         shown           shown                        shown
 //
 // The dropdown goes for every restaurant because Produce Batch now records the
 // answer itself and a stale answer self-corrects (takeFromBatch falls through to
@@ -22,6 +22,13 @@
 // SHOWN on purpose (deferred 2026-08-04), even though the same argument would
 // hide it: that call has not been made yet, so the test pins today's answer.
 //
+// The last column is different again: not gating at all, but paperwork the
+// business model does not involve. A restaurant orders by name rather than by
+// the vendor's SKU, has nothing on Essential that could act on a best-before
+// date, and reaches every invoice — file included — on /invoices, which is not
+// gated. Commissary keeps all three for the opposite reason: buying against a
+// price list and rotating by date is exactly what it does.
+//
 // This is presentation only. _routes.json sends just /api/* to the worker, so a
 // static page cannot be gated server-side, and none of this is a security
 // boundary — it removes controls that would do nothing useful.
@@ -31,7 +38,8 @@ import { loadBrowserModule } from './helpers/browser-module.mjs';
 const t = suite('account-type-gating');
 
 const IDS = ['recipeProductionModeGroup', 'produceBatchBtn', 'packRunBtn',
-             'packLevelsSection', 'lowStockSection'];
+             'packLevelsSection', 'lowStockSection',
+             'entrySkuGroup', 'entryExpiryGroup', 'entryInvoiceGroup'];
 
 // Fresh fake page per case: every id present, so "hidden" can only come from
 // the code under test and never from a missing element.
@@ -51,6 +59,23 @@ function run(accountType, plan) {
   );
   applyBatchWorkflowGating();
   return Object.fromEntries(IDS.map(id => [id, els[id].style.display === 'none']));
+}
+
+// The Add-to-Inventory prompt asks the predicate directly rather than having an
+// element hidden for it, so expose it on its own for that case.
+function stockDetailFieldsHidden(accountType, plan) {
+  const win = { addEventListener() {}, __accountType: accountType, __accountPlan: plan };
+  const m = loadBrowserModule(
+    ['utils.js'], ['stockDetailFieldsHidden'],
+    {
+      window: win,
+      document: {
+        addEventListener() {}, querySelector: () => null, querySelectorAll: () => [],
+        body: {}, getElementById: () => null,
+      },
+    },
+  );
+  return m.stockDetailFieldsHidden();
 }
 
 t.section('a restaurant is never asked how a recipe is made');
@@ -77,6 +102,31 @@ t.check('Pro: Pack Sizes shown — the count sheet reads them',
   restPro.packLevelsSection === false);
 t.check('Pro: Low-stock Alert shown', restPro.lowStockSection === false);
 
+t.section('the supplier entry form drops warehouse paperwork');
+t.check('Essential: SKU hidden — a restaurant orders by name, not by catalogue number',
+  restEss.entrySkuGroup === true);
+t.check('Essential: Expiry hidden — nothing on this plan counts stock to rotate it',
+  restEss.entryExpiryGroup === true);
+t.check('Essential: Invoice Ref hidden — /invoices holds the whole invoice, ungated',
+  restEss.entryInvoiceGroup === true);
+// Pro restaurants do count stock (/stock-take, /inventory), so a best-before
+// date and a way back to the source invoice both do real work again.
+t.check('Pro: SKU shown',         restPro.entrySkuGroup === false);
+t.check('Pro: Expiry shown',      restPro.entryExpiryGroup === false);
+t.check('Pro: Invoice Ref shown', restPro.entryInvoiceGroup === false);
+
+// The "Add to Inventory?" prompt after saving a supplier entry rides on the
+// same predicate: it writes a bin only /inventory and /stock-take could show or
+// correct, and on Essential both are the upgrade panel. Not "record it
+// silently" — nothing on an Essential restaurant draws stock DOWN, so the bin
+// could only grow, and an upgrade would start with a count needing reconciling.
+t.section('the Add-to-Inventory prompt follows the same rule');
+t.check('Essential restaurant: suppressed', stockDetailFieldsHidden('restaurant', 'essential') === true);
+t.check('Pro restaurant: offered',          stockDetailFieldsHidden('restaurant', 'pro') === false);
+t.check('commissary Essential: offered',    stockDetailFieldsHidden('commissary', 'essential') === false);
+t.check('commissary Pro: offered',          stockDetailFieldsHidden('commissary', 'pro') === false);
+t.check('unknown account: offered',         stockDetailFieldsHidden(undefined, undefined) === false);
+
 t.section('a commissary keeps its whole workflow');
 for (const plan of ['essential', 'pro']) {
   const c = run('commissary', plan);
@@ -85,6 +135,10 @@ for (const plan of ['essential', 'pro']) {
   t.check(`${plan}: Pack Run shown`,      c.packRunBtn === false);
   t.check(`${plan}: Pack Sizes shown`,    c.packLevelsSection === false);
   t.check(`${plan}: Low-stock Alert shown`, c.lowStockSection === false);
+  // Buying against a price list and rotating by date IS the commissary job.
+  t.check(`${plan}: SKU shown`,         c.entrySkuGroup === false);
+  t.check(`${plan}: Expiry shown`,      c.entryExpiryGroup === false);
+  t.check(`${plan}: Invoice Ref shown`, c.entryInvoiceGroup === false);
 }
 
 // The session bootstrap is async, so every page renders for a moment before the

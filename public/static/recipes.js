@@ -498,7 +498,7 @@ function _updateIngCostDisplay(idx) {
     el.innerHTML = `<span style="color:#dc2626" title="Set an Average Weight per Unit on this product to use it by ${esc(unit)}"><i class="fas fa-triangle-exclamation"></i> set avg. weight</span>`;
     return;
   }
-  el.textContent = `${fmt(r.unit_cost * factor)} / ${unit}`;
+  el.textContent = fmtUnitCost(r.unit_cost * factor, unit);
 }
 
 function onQtyChange(idx) {
@@ -871,8 +871,11 @@ function recalcCosts() {
   const total = costs.reduce((t, c) => t + (isUncostable(c) ? 0 : c), 0);
   const warn  = costs.some(isUncostable) ? ' ⚠' : '';   // total excludes uncostable lines
   document.getElementById('totalCostDisplay').textContent       = fmt(total) + warn;
-  document.getElementById('costPerServingDisplay').textContent  = fmt(total / yieldQty) + warn;
-  document.getElementById('costPerUnitLabel').textContent       = `Cost per ${yieldUnit}`;
+  // Quoted per kg / per L when the yield is in g / ml — a per-gram price rounds
+  // to $0.00 and reads as free. The yield itself stays in the unit typed above.
+  const perUnit = scalePriceUnit(total / yieldQty, yieldUnit);
+  document.getElementById('costPerServingDisplay').textContent  = fmt(perUnit.cost) + warn;
+  document.getElementById('costPerUnitLabel').textContent       = `Cost per ${perUnit.unit}`;
 }
 
 // Calculate the cost for one ingredient row, handling sub-unit conversion
@@ -1086,7 +1089,7 @@ function renderRecipeList(query) {
       </div>
       <div style="text-align:right">
         <div class="recipe-card-cost">${fmt(cost)}${warn}</div>
-        ${r.servings ? `<div class="recipe-card-meta">${fmt(cost / r.servings)} / ${esc(r.yield_unit || 'kg')}</div>` : ''}
+        ${r.servings ? `<div class="recipe-card-meta">${esc(fmtUnitCost(cost / r.servings, r.yield_unit || 'kg'))}</div>` : ''}
       </div>
     </div>`;
   }).join('');

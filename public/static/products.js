@@ -353,6 +353,16 @@ async function openAddProductModal() {
   document.getElementById('eSku').value          = '';
   document.getElementById('ePackQty').value      = '';
   document.getElementById('eQtyOrdered').value   = '';
+  // The pack UNIT has to be reset too — openAddEntryForm already does this, and
+  // this form skipping it is why adding products one after another made each new
+  // one inherit the previous one's unit. When the inherited unit could not
+  // convert to the one actually picked (each -> L), onPackUnitChange stopped on a
+  // "cannot convert" prompt about a product with no entries at all, and the
+  // stocking unit never followed the pick — so the row saved under the PREVIOUS
+  // product's unit. Five of twenty products landed wrong that way.
+  setSelectValueCI(document.getElementById('ePackUnit'), 'kg');
+  document.getElementById('ePackUnit').dataset.prevUnit =
+    document.getElementById('ePackUnit').value || 'kg';
   document.getElementById('eCost').value         = '';
   document.getElementById('ePurchaseDate').value = '';
   document.getElementById('eExpiry').value       = '';
@@ -640,6 +650,16 @@ function renderEntriesTable(genericId) {
   }
   scroll.classList.remove('hidden');
 
+  // Expiry and Invoice are warehouse paperwork an Essential restaurant does not
+  // do — see purchaseAdminFieldsHidden(). Decided HERE rather than once at
+  // bootstrap so the header and the rows are always produced by the same call:
+  // the plan arrives asynchronously, and a header hidden out of step with its
+  // cells shifts every column after it.
+  const hidePurchaseAdmin = typeof purchaseAdminFieldsHidden === 'function'
+    && purchaseAdminFieldsHidden();
+  const colTh = (id) => { const el = document.getElementById(id); if (el) el.style.display = hidePurchaseAdmin ? 'none' : ''; };
+  colTh('entriesExpiryCol'); colTh('entriesInvoiceCol');
+
   // latestCpu = most recent entry (first in newest-first order)
   const latestCpu = allSorted[0]
     ? ((allSorted[0].cost_per_unit != null && allSorted[0].cost_per_unit > 0)
@@ -666,6 +686,7 @@ function renderEntriesTable(genericId) {
         <td>${fmt(e.cost)}</td>
         <td><strong>${fmt(cpu)} / ${esc(entryPackUnit(e))}</strong></td>
         <td style="font-size:.8rem">${fmtDate(e.purchase_date)}</td>
+        ${hidePurchaseAdmin ? '' : `
         <td style="font-size:.8rem">${e.expiry_date ? daysBadge(daysLeft) : '—'}</td>
         <td style="font-size:.8rem">
           ${e.invoice_id
@@ -676,7 +697,7 @@ function renderEntriesTable(genericId) {
                 onclick="viewEntryInvoiceFile('${esc(e.invoice_file_key)}','${esc(e.invoice_file_name||e.invoice_ref||'Invoice')}')"
                 title="View attached invoice"><i class="fas fa-eye"></i></button>`
             : ''}
-        </td>
+        </td>`}
         <td style="font-weight:600;font-size:.82rem;${varClass}">${varText}</td>
         <td style="white-space:nowrap">
           <button class="btn btn-primary btn-icon" onclick="openEditEntryForm('${esc(e.id)}')" title="Edit"><i class="fas fa-pen"></i></button>
@@ -1067,7 +1088,34 @@ async function onPackUnitChange() {
   // Track the new unit so subsequent changes have the right baseline
   select.dataset.prevUnit = newUnit;
 
-  if (newUnit === prevUnit) { updateEntryCostPerUnit(); return; }
+  if (newUnit === prevUnit) { updateEntryCostPerUnit(); updateStockUnitVisibility(); return; }
+
+  // What, if anything, is there to convert? Two separate things used to be
+  // conflated here:
+  //   - the pack size sitting in the form, which is only a real quantity in
+  //     prevUnit once the entry has been SAVED in that unit;
+  //   - the sibling entries, which must all share one unit.
+  //
+  // On a brand-new entry the number in the box was never expressed in prevUnit.
+  // It is a bare figure typed before the user reached the unit picker, so the
+  // form's default unit must not be allowed to reinterpret it: typing 5 and then
+  // choosing lb turned the pack size into 11.023113 lb, and a 5 lb bag at $18.00
+  // into $1.63/lb instead of $3.60/lb — under half, in every recipe above it.
+  //
+  // Converting is still right when EDITING a saved entry (35 lb really is
+  // 15.876 kg), which is why this is scoped rather than removed.
+  const isSavedEntry = !!String(document.getElementById('editEntryId').value || '').trim();
+  const hasSiblings  = !!currentGenericId
+    && allEntries.some(e => e.generic_product_id === currentGenericId);
+
+  // Nothing to convert at all: new entry, new product. Just relabel — and let
+  // the stocking unit follow the pick, which the "cannot convert" prompt below
+  // used to block by returning before updateStockUnitVisibility() ever ran.
+  if (!isSavedEntry && !hasSiblings) {
+    updateEntryCostPerUnit();
+    updateStockUnitVisibility();
+    return;
+  }
 
   // Look up avg_weight_per_unit for the current product (Each <-> weight only)
   let avgWeight = null;
@@ -1120,7 +1168,10 @@ async function onPackUnitChange() {
 
   // Convertible: rewrite the pack size in the new unit. eCost (invoice line total)
   // stays fixed, so the derived per-unit price recomputes correctly.
-  if (hasQty) {
+  // Saved entries only — see isSavedEntry above. A new entry on an EXISTING
+  // product reaches here (its siblings do need converting) but its own typed
+  // pack size must still be left exactly as entered.
+  if (hasQty && isSavedEntry) {
     const converted = Math.round(probe.qty * 1e6) / 1e6;
     packQtyEl.value = Number.isInteger(converted) ? converted : parseFloat(converted.toFixed(6));
   }
@@ -1409,6 +1460,18 @@ function entryPackUnit(e) { return entryPackFacts(e).pack_unit; }
 // ── Add-to-Inventory prompt (shown after saving a new supplier entry) ──
 function openEntryInvPrompt({ genericId, itemName, packQty, packUnit, category, invoiceRef }) {
   if (!document.getElementById('entryInvModal')) return; // guard
+
+  // Not on a plan whose stock screens are all shut. /inventory and /stock-take
+  // are the upgrade panel there, so the bin this writes can never be seen,
+  // adjusted or counted — the same reason Pack Sizes and Reorder Level are
+  // hidden from the form above (stockDetailFieldsHidden).
+  //
+  // Hidden rather than "record it silently for later", which was the tempting
+  // alternative: on an Essential restaurant NOTHING draws stock down — no sales
+  // import, no stock take, and Produce Batch is hidden too — so a bin here could
+  // only ever grow. On upgrade the customer would inherit a wildly overstated
+  // count and have to reconcile it, which is worse than starting from empty.
+  if (typeof stockDetailFieldsHidden === 'function' && stockDetailFieldsHidden()) return;
 
   _pendingEntryInv = { genericId, itemName, packUnit, category, invoiceRef };
 

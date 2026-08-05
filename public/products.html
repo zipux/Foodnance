@@ -113,7 +113,7 @@
                 <label>Vendor Item Name</label>
                 <input type="text" id="eVendorName" placeholder="e.g. Rossi Parmesan Grated" />
               </div>
-              <div class="form-group">
+              <div class="form-group" id="entrySkuGroup">
                 <label>SKU</label>
                 <input type="text" id="eSku" placeholder="e.g. GP-1KG" />
               </div>
@@ -146,11 +146,11 @@
                 <label>Purchase Date</label>
                 <input type="date" id="ePurchaseDate" />
               </div>
-              <div class="form-group">
+              <div class="form-group" id="entryExpiryGroup">
                 <label>Expiry / Best Before</label>
                 <input type="date" id="eExpiry" />
               </div>
-              <div class="form-group" style="grid-column:1/-1">
+              <div class="form-group" style="grid-column:1/-1" id="entryInvoiceGroup">
                 <label>Invoice Ref</label>
                 <div style="display:flex;gap:.5rem;align-items:center">
                   <input type="text" id="eInvoiceRef" placeholder="—" style="flex:1;background:#f1f5f9;cursor:default" readonly />
@@ -192,7 +192,9 @@
                 <thead>
                   <tr>
                     <th>Vendor</th><th>Vendor Item</th><th>Pack Size</th><th>Cost</th>
-                    <th>Cost/Unit</th><th>Purchase Date</th><th>Expiry</th><th>Invoice</th><th>Variance</th><th></th>
+                    <th>Cost/Unit</th><th>Purchase Date</th>
+                    <th id="entriesExpiryCol">Expiry</th><th id="entriesInvoiceCol">Invoice</th>
+                    <th>Variance</th><th></th>
                   </tr>
                 </thead>
                 <tbody id="entriesBody"></tbody>
@@ -517,10 +519,10 @@
     </div>
   </div>
 
-  <script src="/static/utils.js?v=20260804-1"></script>
+  <script src="/static/utils.js?v=20260805-4"></script>
   <script src="/static/inventory.js?v=20260803-3"></script>
   <script src="/static/suppliers.js?v=20260714-1"></script>
-  <script src="/static/products.js?v=20260803-3"></script>
+  <script src="/static/products.js?v=20260805-2"></script>
 
   <!-- ── Inline invoice-file viewer modal (shared, lightweight) ── -->
   <div class="modal-overlay hidden" id="entryFileViewModal">

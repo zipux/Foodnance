@@ -43,6 +43,12 @@ function rebuildFpCostIndex() {
   if (allFp.length && document.getElementById('fpListContainer')) {
     renderFpList(document.getElementById('fpSearch')?.value.trim() || '');
   }
+  // A form open while the index was still building is holding the stored-column
+  // fallback from onFpRecipeChange. Re-read those rows, or the very race this
+  // function exists to fix just moves from the list to the form.
+  if (Array.isArray(fpRecipeRows)) {
+    fpRecipeRows.forEach((r, i) => { if (r && r.ref_id) onFpRecipeChange(i); });
+  }
 }
 
 // Live cost of one saved finished product, with the stored column as a last
@@ -381,13 +387,27 @@ function onFpRecipeChange(idx) {
   const hidden    = document.getElementById(`fpr-sel-${idx}`);
   const refId     = hidden ? hidden.value : '';
   const r         = allRecipes_fp.find(x => x.id === refId) || null;
-  const totalCost = parseFloat(r?.total_cost || 0);
-  const yieldQty  = parseFloat(r?.servings   || 1);
-  const yieldUnit = r?.yield_unit || 'kg';
+
+  // recipes.total_cost is a LAST-SAVED value, not the truth — it freezes at the
+  // recipe's last Save and goes stale the moment an ingredient price moves. The
+  // saved list has always costed from the live index, so reading the column here
+  // made one screen contradict itself: the card said $1.92 while this form said
+  // $1.84, the gap being a flour rise the column had never seen. Worse, Save
+  // then wrote the stale figure back.
+  //
+  // Same source as the list now. The stored column survives only as a fallback
+  // for a recipe not in the index yet — the index is rebuilt on dm:plan-known,
+  // which can land after the form is first drawn (see rebuildFpCostIndex).
+  const live      = fpCostIndex.recipe.get(refId) || null;
+  const totalCost = live ? live.total_cost : parseFloat(r?.total_cost || 0);
+  const yieldQty  = parseFloat((live ? live.servings : r?.servings) || 1);
+  const yieldUnit = (live ? live.yield_unit : r?.yield_unit) || 'kg';
 
   fpRecipeRows[idx].ref_id              = refId;
   fpRecipeRows[idx].ref_name            = r?.name || '';
-  fpRecipeRows[idx].cost_per_yield_unit = yieldQty > 0 ? totalCost / yieldQty : totalCost;
+  fpRecipeRows[idx].cost_per_yield_unit = live
+    ? live.cost_per_yield_unit
+    : (yieldQty > 0 ? totalCost / yieldQty : totalCost);
   fpRecipeRows[idx].yield_unit          = yieldUnit;
 
   // Auto-set unit to recipe's yield unit — unless user already manually locked it
@@ -417,7 +437,7 @@ function _updateFpRecipeCostDisplay(idx) {
     el.innerHTML = `<span style="color:#dc2626" title="Can't convert ${esc(r.yield_unit || 'kg')} to ${esc(unit)}"><i class="fas fa-triangle-exclamation"></i> can't convert</span>`;
     return;
   }
-  el.textContent = `${fmt((r.cost_per_yield_unit || 0) * factor)} / ${unit}`;
+  el.textContent = fmtUnitCost((r.cost_per_yield_unit || 0) * factor, unit);
 }
 
 function onFpRecipeQtyChange(idx) {
@@ -608,7 +628,7 @@ function _updateFpProductCostDisplay(idx) {
     el.innerHTML = `<span style="color:#dc2626" title="${tip}"><i class="fas fa-triangle-exclamation"></i> ${label}</span>`;
     return;
   }
-  el.textContent = `${fmt(rate)} / ${unit}`;
+  el.textContent = fmtUnitCost(rate, unit);
 }
 
 // Dollar cost of one product line: sub-unit path first, else avg-weight-aware
