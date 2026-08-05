@@ -1340,7 +1340,7 @@ app.post('/api/admin/organizations/:id/archive', async (c) => {
 const PURGE_TABLES = [
   'categories', 'certification_types', 'finished_product_items', 'finished_products',
   'generic_products', 'inventory', 'invoice_lines', 'invoices', 'item_placements',
-  'operating_expenses',
+  'labor_periods', 'operating_expenses',
   // Child before parent: pos_sale_lines.import_id references pos_imports(id).
   // The rest of this list is alphabetical and happens to satisfy that already
   // (recipe_items before recipes, stock_take_items before stock_takes); this
@@ -1453,7 +1453,8 @@ const ALLOWED_TABLES = [
   'staff', 'certification_types', 'staff_certifications',
   'product_mappings', 'units', 'categories', 'product_aliases',
   'stock_takes', 'stock_take_items',
-  'sales_monthly', 'operating_expenses', 'recurring_expenses', 'spread_expenses'
+  'sales_monthly', 'operating_expenses', 'recurring_expenses', 'spread_expenses',
+  'labor_periods',
   // No pos_* table is here, deliberately. Their rows carry money that feeds the
   // P&L and quantities that move stock, and every one of them is derived from an
   // uploaded file rather than typed. Generic POST/PATCH would let a client

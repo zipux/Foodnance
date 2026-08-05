@@ -21,13 +21,14 @@ import { suite } from './helpers/assert.mjs';
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'index.ts');
 
-// The 27 tables carrying customer data. Auth tables (organizations, users,
+// The tables carrying customer data. Auth tables (organizations, users,
 // invites) are deliberately absent: they are scoped by their own rules, not
 // by org_id on the row.
 const TENANT_TABLES = new Set([
   'ai_cap_blocks', 'ai_parse_log',
   'categories', 'certification_types', 'finished_product_items', 'finished_products',
   'generic_products', 'inventory', 'invoice_lines', 'invoices', 'item_placements',
+  'labor_periods',
   'operating_expenses', 'pos_imports', 'pos_item_map', 'pos_sale_lines',
   'product_aliases', 'product_entries', 'product_mappings',
   'recipe_items', 'recipes', 'recurring_expenses', 'sales_monthly', 'spread_expenses',

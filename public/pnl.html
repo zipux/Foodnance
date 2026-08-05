@@ -274,9 +274,51 @@
     </div>
   </div>
 
+  <!-- Labour: one pay period. Dates matter — payroll runs straddle month ends
+       (20 Aug – 5 Sep), and the total is prorated by days into each month. -->
+  <div class="modal-overlay hidden" id="laborModal">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header">
+        <h3 id="laborModalTitle"><i class="fas fa-users"></i> Add pay period</h3>
+        <button class="modal-close" id="closeLaborModal"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="laborId" />
+        <div class="form-group">
+          <label>Total staff cost ($) *</label>
+          <input type="number" id="laborTotal" step="0.01" min="0" placeholder="e.g. 18400.00" />
+          <div style="margin-top:.3rem;font-size:.8rem;color:var(--text-muted)">
+            Everyone — kitchen and front of house. Use your <strong>full</strong> cost:
+            gross wages plus payroll taxes and benefits, not just what lands in
+            their bank accounts.
+          </div>
+        </div>
+        <div class="form-grid" style="margin-top:.75rem">
+          <div class="form-group">
+            <label>Pay period from *</label>
+            <input type="date" id="laborStart" />
+          </div>
+          <div class="form-group">
+            <label>Pay period to *</label>
+            <input type="date" id="laborEnd" />
+          </div>
+        </div>
+        <div class="form-group" style="margin-top:.75rem">
+          <label>Label (optional)</label>
+          <input type="text" id="laborName" placeholder="e.g. Fortnight 2 — defaults to the dates" />
+        </div>
+        <div id="laborPreview" style="margin-top:.9rem;font-size:.85rem;color:var(--text-muted)"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelLaborModal">Cancel</button>
+        <button class="btn btn-success" id="saveLaborBtn"><i class="fas fa-save"></i> Save</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast hidden"></div>
 
   <script src="/static/utils.js?v=20260804-1"></script>
-  <script src="/static/pnl.js?v=20260805-1"></script>
+  <script src="/static/pnl.js?v=20260805-2"></script>
 </body>
 </html>

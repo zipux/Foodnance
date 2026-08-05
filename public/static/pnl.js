@@ -21,6 +21,7 @@ let pnlSalesRows  = [];     // sales_monthly rows inside the period
 let pnlOverheads  = [];     // operating_expenses rows inside the period (one-offs)
 let pnlRecurring  = [];     // recurring_expenses rows (fixed monthly costs — every month)
 let pnlSpread     = [];     // spread_expenses rows (a bill split across the months it covers)
+let pnlLabor      = [];     // labor_periods rows (staff cost, prorated across the months a pay period covers)
 let pnlAllSales   = [];     // all sales_monthly rows (cache)
 let pnlAllOh      = [];     // all operating_expenses rows (cache — for copy-last-month)
 
@@ -138,6 +139,16 @@ document.addEventListener('DOMContentLoaded', () => {
   ['spreadTotal', 'spreadStart', 'spreadEnd'].forEach(id =>
     document.getElementById(id).addEventListener('input', updateSpreadPreview));
 
+  // Labour (pay period) modal
+  document.getElementById('closeLaborModal').addEventListener('click', () => closeModal('laborModal'));
+  document.getElementById('cancelLaborModal').addEventListener('click', () => closeModal('laborModal'));
+  document.getElementById('laborModal').addEventListener('click', e => {
+    if (e.target === document.getElementById('laborModal')) closeModal('laborModal');
+  });
+  document.getElementById('saveLaborBtn').addEventListener('click', pnlSaveLabor);
+  ['laborTotal', 'laborStart', 'laborEnd'].forEach(id =>
+    document.getElementById(id).addEventListener('input', updateLaborPreview));
+
   const start = pnlPresetRange('this-month');
   pnlSetRange(start.from, start.to);   // loads
 });
@@ -147,12 +158,13 @@ async function loadPnl() {
   const body = document.getElementById('pnlBody');
   body.innerHTML = `<div style="text-align:center;color:var(--text-muted);padding:2rem 1rem"><i class="fas fa-spinner fa-spin"></i> Loading…</div>`;
   try {
-    const [costs, salesData, ohData, recData, spData] = await Promise.all([
+    const [costs, salesData, ohData, recData, spData, labData] = await Promise.all([
       apiGet(`pnl?from=${pnlFrom}&to=${pnlTo}`),
       apiGet(`tables/sales_monthly?page=1&limit=500`),
       apiGet(`tables/operating_expenses?page=1&limit=1000`),
       apiGet(`tables/recurring_expenses?page=1&limit=500`),
       apiGet(`tables/spread_expenses?page=1&limit=500`),
+      apiGet(`tables/labor_periods?page=1&limit=500`),
     ]);
     const inPeriod = r => r.period >= pnlFrom && r.period <= pnlTo;
     pnlCosts     = costs || pnlCosts;
@@ -166,6 +178,9 @@ async function loadPnl() {
       .sort((a, b) => (a.created_at || '') < (b.created_at || '') ? -1 : 1);
     pnlSpread    = (spData.data || [])
       .sort((a, b) => (a.created_at || '') < (b.created_at || '') ? -1 : 1);
+    // Oldest pay period first — they read as a sequence, not a pile.
+    pnlLabor     = (labData.data || [])
+      .sort((a, b) => (a.start_date || '') < (b.start_date || '') ? -1 : 1);
     render();
   } catch (e) {
     body.innerHTML = `<div style="text-align:center;color:#b91c1c;padding:2rem 1rem"><i class="fas fa-exclamation-triangle"></i> Failed to load P&amp;L: ${esc(e.message)}</div>`;
@@ -272,10 +287,21 @@ function render() {
   const expenseInv = pnlCosts.expense_invoices || [];
   const expenseInvTotal = expenseInv.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
 
+  // Labour: each pay period's fair share of this period, prorated by days —
+  // the same treatment as a spread bill, because payroll runs (20 Aug – 5 Sep)
+  // straddle month ends just like a quarterly invoice does.
+  const laborThisPeriod = pnlLabor
+    .map(r => ({ row: r, ...spreadAllocationRange(r, pnlFrom, pnlTo) }))
+    .filter(x => x.allocated > 0.0049);
+  const laborTotal = laborThisPeriod.reduce((s, x) => s + x.allocated, 0);
+
   const cogsTotal = food + beverage;
   const gross   = sales - cogsTotal;
-  const running = supplies + fees + expenseInvTotal + fixedTotal + spreadTotal + ohTotal;
+  // Labour is subtracted here, ONCE. Prime cost below re-uses the same figure to
+  // display a subtotal; it is not a second deduction.
+  const running = supplies + fees + expenseInvTotal + fixedTotal + spreadTotal + ohTotal + laborTotal;
   const net     = gross - running;
+  const prime   = cogsTotal + laborTotal;
   const hasSales = sales > 0;
 
   const pct = n => hasSales ? Math.round((n / sales) * 100) + '%' : '—';
@@ -333,6 +359,77 @@ function render() {
         <button class="pnl-oh-del" title="Remove" onclick="event.stopPropagation();pnlDeleteSpread('${esc(r.id)}')"><i class="fas fa-times"></i></button>
       </div>`;
   }).join('');
+
+  // Pay-period rows (click to edit) — same presentation as a spread cost.
+  const laborRowsHtml = laborThisPeriod.map(x => {
+    const r = x.row;
+    const partial = x.overlapDays < x.totalDays;
+    return `
+      <div class="pnl-row" style="cursor:pointer" onclick="pnlEditLabor('${esc(r.id)}')" title="Edit">
+        <div>
+          <div class="pnl-label">${esc(r.name || 'Pay period')}</div>
+          <div class="pnl-sub">${esc(spreadRangeLabel(r))}${
+            partial ? ` · ${fmtMoney(x.allocated)} of ${fmtMoney(r.total_amount)} · ${x.overlapDays}/${x.totalDays} days` : ''}</div>
+        </div>
+        <div class="pnl-amount">${fmtMoney(x.allocated)}</div>
+        <button class="pnl-oh-del" title="Remove" onclick="event.stopPropagation();pnlDeleteLabor('${esc(r.id)}')"><i class="fas fa-times"></i></button>
+      </div>`;
+  }).join('');
+
+  // Someone who was already typing payroll into a plain expense line will double
+  // count the moment they use this section. Amber once both exist (their profit
+  // is wrong right now); grey when only the old row does, where it is a
+  // suggestion rather than a fault.
+  const WAGEISH = /\b(wage|wages|payroll|salar\w*|labou?r|staff\s*cost)\b/i;
+  const wageishRows = [...pnlRecurring, ...pnlOverheads, ...pnlSpread]
+    .filter(r => WAGEISH.test(String(r.name || '')));
+  const wageishNames = wageishRows.map(r => esc(r.name)).join('</strong>, <strong>');
+  const laborDoubleNote = wageishRows.length
+    ? (laborTotal > 0
+      ? `<div class="pnl-sub" style="color:#b45309;padding:.35rem .25rem">
+           <i class="fas fa-triangle-exclamation"></i> You also have
+           ${wageishRows.length === 1 ? 'a cost line' : 'cost lines'} called
+           <strong>${wageishNames}</strong>. Staff cost is being counted twice —
+           remove ${wageishRows.length === 1 ? 'it' : 'them'} from the lists below,
+           or delete the pay periods here.
+         </div>`
+      : `<div class="pnl-sub" style="color:#6b7280;padding:.35rem .25rem">
+           <i class="fas fa-circle-info"></i> You track staff cost as
+           <strong>${wageishNames}</strong> further down. Moving it up here (by pay
+           period) is what makes prime cost work — but remove the old
+           ${wageishRows.length === 1 ? 'line' : 'lines'} when you do, or it will be
+           counted twice.
+         </div>`)
+    : '';
+
+  // Prime cost: food + drinks + labour, the figure restaurants actually steer
+  // by. A memo line, placed after net profit so everything inside it has already
+  // been shown. With no labour recorded it would be COGS wearing a different
+  // name, and a "prime cost" that quietly excludes staff is worse than none —
+  // so an empty labour section gets a prompt instead of a total.
+  const primePct  = hasSales ? (prime / sales) * 100 : null;
+  const primeVerdict = primePct == null
+    ? 'Enter net sales above to see it as a percentage.'
+    : primePct > 65
+    ? 'Above the 60–65% of sales most restaurants aim for.'
+    : primePct >= 60
+    ? 'Inside the 60–65% of sales most restaurants aim for.'
+    : 'Below 60% of sales — comfortable.';
+  const primeRow = laborTotal > 0
+    ? `<div class="pnl-row" style="align-items:flex-start;border-bottom:none;padding-top:.6rem">
+         <div>
+           <div class="pnl-label"><strong>Prime cost</strong>
+             <span style="font-weight:400;color:var(--text-muted)">— memo, already counted above</span></div>
+           <div class="pnl-sub">Food + drinks + labour. ${primeVerdict}</div>
+         </div>
+         <div class="pnl-amount">${fmtMoney(prime)}</div>
+         <div class="pnl-pct"${primePct != null && primePct > 65 ? ' style="color:#b45309;font-weight:600"' : ''}>${pct(prime)}</div>
+       </div>`
+    : `<div class="pnl-sub" style="padding:.6rem .25rem .1rem">
+         <i class="fas fa-circle-info"></i> Add your staff cost above to see
+         <strong>prime cost</strong> — food + drinks + labour, the number most
+         restaurants steer by.
+       </div>`;
 
   const lastMonth = prevMonthStr(pnlFrom);
   const lastMonthHasOh = pnlAllOh.some(r => r.period === lastMonth);
@@ -524,6 +621,14 @@ function render() {
     ${totalRow('Gross profit', gross, gross >= 0 ? 'good' : 'bad')}
 
     <div class="pnl-section-head">Running costs</div>
+
+    <div class="pnl-sub" style="margin:.15rem .25rem .1rem;font-weight:600;color:var(--text)">Labour <span style="font-weight:400;color:var(--text-muted)">— staff cost per pay period, FOH and BOH, split across the months it covers</span></div>
+    <div>${laborRowsHtml || '<div class="pnl-sub" style="padding:.25rem">No pay period covers this period yet.</div>'}</div>
+    ${laborDoubleNote}
+    <div class="pnl-oh-actions">
+      <button class="btn btn-secondary btn-sm" onclick="pnlAddLabor()"><i class="fas fa-users"></i> Add pay period</button>
+    </div>
+
     ${suppliesRow}
     ${fees ? costRow('Delivery &amp; surcharges', 'From invoices', fees) : ''}
     ${expenseInv.map(r => costRow(esc(r.category), 'From an uploaded bill', parseFloat(r.amount) || 0)).join('')}
@@ -556,6 +661,7 @@ function render() {
     </div>
 
     ${totalRow('Net profit — what you keep', net, net >= 0 ? 'good' : 'bad')}
+    ${primeRow}
 
     <div class="pnl-plain">${plain}</div>
     <div class="pnl-note">
@@ -777,6 +883,89 @@ async function pnlDeleteSpread(id) {
   try {
     await apiDelete(`tables/spread_expenses/${id}`);
     pnlSpread = pnlSpread.filter(x => x.id !== id);
+    render();
+  } catch (e) {
+    showToast('Delete failed: ' + e.message, 'error');
+  }
+}
+
+// ── Labour (staff cost for one pay period) ──
+// Stored and prorated exactly like a spread cost, so the modal mirrors that one.
+// The dates are the point: payroll runs rarely line up with calendar months, and
+// a fortnight ending 5 Sep belongs partly to August.
+function pnlAddLabor() {
+  document.getElementById('laborModalTitle').innerHTML = '<i class="fas fa-users"></i> Add pay period';
+  document.getElementById('laborId').value    = '';
+  document.getElementById('laborName').value  = '';
+  document.getElementById('laborTotal').value = '';
+  document.getElementById('laborStart').value = '';
+  document.getElementById('laborEnd').value   = '';
+  updateLaborPreview();
+  openModal('laborModal');
+}
+
+function pnlEditLabor(id) {
+  const r = pnlLabor.find(x => x.id === id);
+  if (!r) return;
+  document.getElementById('laborModalTitle').innerHTML = '<i class="fas fa-users"></i> Edit pay period';
+  document.getElementById('laborId').value    = r.id;
+  document.getElementById('laborName').value  = r.name || '';
+  document.getElementById('laborTotal').value = r.total_amount != null ? r.total_amount : '';
+  document.getElementById('laborStart').value = r.start_date || '';
+  document.getElementById('laborEnd').value   = r.end_date || '';
+  updateLaborPreview();
+  openModal('laborModal');
+}
+
+// Live "this period's share" hint — the whole reason the dates exist, so it is
+// worth showing before they save rather than after.
+function updateLaborPreview() {
+  const el    = document.getElementById('laborPreview');
+  const total = parseFloat(document.getElementById('laborTotal').value);
+  const start = document.getElementById('laborStart').value;
+  const end   = document.getElementById('laborEnd').value;
+  if (isNaN(total) || !start || !end || _dayNum(end) < _dayNum(start)) { el.textContent = ''; return; }
+  const a = spreadAllocationRange({ total_amount: total, start_date: start, end_date: end }, pnlFrom, pnlTo);
+  const label = periodLabel(pnlFrom, pnlTo);
+  el.innerHTML = a.allocated > 0
+    ? `<i class="fas fa-scale-balanced"></i> ${label} share: <strong>${fmtMoney(a.allocated)}</strong> (${a.overlapDays} of ${a.totalDays} days)`
+    : `<i class="fas fa-circle-info"></i> This pay period doesn't touch ${label} — it'll show in the months it does.`;
+}
+
+async function pnlSaveLabor() {
+  const id    = document.getElementById('laborId').value;
+  const name  = document.getElementById('laborName').value.trim();
+  const total = parseFloat(document.getElementById('laborTotal').value);
+  const start = document.getElementById('laborStart').value;
+  const end   = document.getElementById('laborEnd').value;
+  if (isNaN(total) || total < 0)     { showToast('Enter a valid staff cost.', 'error'); return; }
+  if (!start || !end)                { showToast('Enter the pay period start and end dates.', 'error'); return; }
+  if (_dayNum(end) < _dayNum(start)) { showToast('End date must be on or after the start date.', 'error'); return; }
+
+  // Unnamed is fine — the row falls back to "Pay period" and prints the dates
+  // underneath, so auto-filling the range into the name only says it twice.
+  const payload = { name, total_amount: total, start_date: start, end_date: end };
+  const btn = document.getElementById('saveLaborBtn');
+  btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
+  try {
+    if (id) await apiPatch(`tables/labor_periods/${id}`, payload);
+    else    await apiPost(`tables/labor_periods`, payload);
+    showToast('Staff cost saved.', 'success');
+    closeModal('laborModal');
+    await loadPnl();
+  } catch (e) {
+    showToast('Save failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false; btn.innerHTML = '<i class="fas fa-save"></i> Save';
+  }
+}
+
+async function pnlDeleteLabor(id) {
+  const r = pnlLabor.find(x => x.id === id);
+  if (!confirm(`Remove "${r ? (r.name || 'this pay period') : 'this pay period'}"? It will be removed from every month it covered.`)) return;
+  try {
+    await apiDelete(`tables/labor_periods/${id}`);
+    pnlLabor = pnlLabor.filter(x => x.id !== id);
     render();
   } catch (e) {
     showToast('Delete failed: ' + e.message, 'error');

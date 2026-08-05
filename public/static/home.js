@@ -961,24 +961,31 @@ async function loadPnlTile() {
   }
 
   try {
-    const [costs, salesData, ohData, recData, spData] = await Promise.all([
+    const [costs, salesData, ohData, recData, spData, labData] = await Promise.all([
       apiGet(`pnl?month=${month}`),
       apiGet(`tables/sales_monthly?page=1&limit=500`),
       apiGet(`tables/operating_expenses?page=1&limit=1000`),
       apiGet(`tables/recurring_expenses?page=1&limit=500`),
       apiGet(`tables/spread_expenses?page=1&limit=500`),
+      apiGet(`tables/labor_periods?page=1&limit=500`),
     ]);
     // This month's fair share of each multi-month "spread" bill (prorated by days).
     const dayNum = ymd => { const [y, m, d] = String(ymd || '').split('-').map(Number); return (y && m && d) ? Math.floor(Date.UTC(y, m - 1, d) / 86400000) : NaN; };
     const [yy, mm] = month.split('-').map(Number);
     const mStart = Math.floor(Date.UTC(yy, mm - 1, 1) / 86400000);
     const mEnd   = Math.floor(Date.UTC(yy, mm, 1) / 86400000) - 1;
-    const spreadTotal = (spData.data || []).reduce((s, r) => {
+    const monthShare = rows => (rows || []).reduce((s, r) => {
       const a = dayNum(r.start_date), b = dayNum(r.end_date);
       if (isNaN(a) || isNaN(b) || b < a) return s;
       const overlap = Math.max(0, Math.min(b, mEnd) - Math.max(a, mStart) + 1);
       return s + (parseFloat(r.total_amount) || 0) * overlap / (b - a + 1);
     }, 0);
+    const spreadTotal = monthShare(spData.data);
+    // Labour is prorated by days the same way (labor_periods, same columns), and
+    // it has to be here: this tile and the P&L page show the same month's
+    // profit, so a cost counted in one and not the other reads as a bug in
+    // whichever screen the user checked second.
+    const laborTotal = monthShare(labData.data);
 
     const salesRow = (salesData.data || []).find(r => r.period === month);
     const sales    = parseFloat(salesRow?.sales_total) || 0;
@@ -991,7 +998,8 @@ async function loadPnlTile() {
           .reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
       + (recData.data || []).filter(r => r.active == null || Number(r.active) === 1)
           .reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
-      + spreadTotal;
+      + spreadTotal
+      + laborTotal;
     const profit = sales - costTotal;
 
     const stat = (label, value, color) =>
