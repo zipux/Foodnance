@@ -298,8 +298,11 @@
             <div class="inv-detail-label">Payment Account</div>
             <div class="inv-detail-value" id="detailPayment">—</div>
           </div>
-          <div>
-            <div class="inv-detail-label">AI Parse Cost</div>
+          <!-- Operator-only: what Anthropic charged to read this invoice. Hidden
+               by default and revealed only for a super-admin (renderInvoiceDetail),
+               so it stays hidden if the session bootstrap is slow or fails. -->
+          <div id="detailAiCostBlock" style="display:none">
+            <div class="inv-detail-label">AI Parse Cost (USD)</div>
             <div class="inv-detail-value" id="detailAiCost" title="">—</div>
           </div>
         </div>
@@ -519,9 +522,9 @@
   <!-- TOAST -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/static/utils.js?v=20260804-1"></script>
+  <script src="/static/utils.js?v=20260805-1"></script>
   <script src="/static/image-preproc.js?v=20260727-1"></script>
   <script src="/static/inventory.js?v=20260803-3"></script>
-  <script src="/static/invoices.js?v=20260727-2"></script>
+  <script src="/static/invoices.js?v=20260805-1"></script>
 </body>
 </html>

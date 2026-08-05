@@ -511,7 +511,7 @@
           <div class="tablewrap"><table>
             <thead><tr>
               <th>Name</th><th>Owner</th><th>Type</th><th>Plan</th><th>Status</th>
-              <th>People</th><th style="text-align:right">AI cost</th>
+              <th>People</th><th style="text-align:right">AI cost (USD)</th>
               <th style="text-align:right">Cap</th><th>Added</th><th></th>
             </tr></thead>
             <tbody>${rows.map(o => `
@@ -566,7 +566,9 @@
           <div class="tablenote">
             <strong>AI cost</strong> is Anthropic spend on reading that customer's
             invoices, billed at the model's rate when each parse ran, for the date
-            range selected above. Every call counts — including parses the customer
+            range selected above. It is in <strong>US dollars</strong> — Anthropic
+            prices per token in USD and the figure is stored and shown unconverted,
+            so it does not match the currency of the invoices next to it. Every call counts — including parses the customer
             abandoned and invoices later voided, because both were paid for. Recipe
             parsing is not included: that endpoint doesn't record its usage yet.
             <br>

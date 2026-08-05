@@ -298,6 +298,12 @@ async function renderSessionChip() {
   // hoping we won the race — the same mistake that left recipe lists showing $0.
   window.__accountPlan = String(me.plan || '').toLowerCase();
   window.__accountType = String(me.account_type || '').toLowerCase();
+
+  // Operator-only figures (currently the per-invoice AI parse cost) key off
+  // this. Unlike the plan flags above, the safe default while the bootstrap is
+  // in flight is FALSE, not "show it": a control shown then hidden is
+  // recoverable, but a cost figure shown then hidden has already been read.
+  window.__isSuperAdmin = me.is_super_admin === true;
   window.dispatchEvent(new CustomEvent('dm:plan-known', { detail: window.__accountPlan }));
   if (me.suspended) {
     renderSuspendedBar(me.suspend_reason);

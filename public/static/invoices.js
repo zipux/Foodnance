@@ -414,6 +414,15 @@ async function openInvDetail(id) {
 
   // AI parse cost — recorded from the Anthropic API's `usage` field at parse
   // time; invoices parsed before this tracking existed show '—', not '$0.00'.
+  //
+  // Operator-only. It is our cost of running the account, not a charge to the
+  // customer, and showing it on their own invoice invites the question of why
+  // they are paying for it. The block is display:none in the HTML and only ever
+  // revealed here, so an unknown session (bootstrap still in flight, or failed)
+  // keeps it hidden. Presentation only: `ai_cost` is still returned by
+  // /api/tables/invoices, so this hides it from the screen, not from devtools.
+  const aiCostBlock = document.getElementById('detailAiCostBlock');
+  if (aiCostBlock) aiCostBlock.style.display = window.__isSuperAdmin === true ? '' : 'none';
   const aiCostEl = document.getElementById('detailAiCost');
   const aiCost = parseFloat(inv.ai_cost) || 0;
   if (aiCost > 0) {
