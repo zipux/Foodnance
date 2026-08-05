@@ -425,13 +425,31 @@ function render() {
 
   // Uncategorised purchases land in food (both here and in the SQL), so a
   // half-categorised invoice run reads as a scary food-cost percentage with
-  // nothing on screen explaining it. Only worth saying when it's material.
+  // nothing on screen explaining it.
   // "Uncategorised" includes the 'Other' bucket, which is where invoice import
   // puts anything it couldn't identify — see PLACEHOLDER_CATEGORIES in
   // src/index.ts. A mop counted as food is the case this exists to catch.
+  //
+  // The floor was 5% of food cost ("only worth saying when it's material") and
+  // that turned out to be the wrong test. Uncategorised cost is not noise that
+  // averages out — it is a wrong number sitting in a specific line, and 0.4% of
+  // a real food spend is still a mop nobody will ever find by looking. The note
+  // also doubles as the only prompt to finish categorising, so a floor high
+  // enough to stay silent is a floor that lets the backlog grow unremarked.
+  // 0.01% keeps only the guard against a rounding-dust figure that would read as
+  // a bug; in practice any real stray line shows.
+  //
+  // Two colours, because the low floor makes one colour a lie. Amber is a
+  // warning — read it as "the food-cost number above is materially wrong". A few
+  // stray dollars is not that; it is a to-do. Showing both in the same amber
+  // teaches customers to ignore the amber, which costs exactly when it matters.
+  const UNCAT_MIN_SHARE = 0.0001;
+  const UNCAT_WARN_SHARE = 0.02;
   const uncat = parseFloat(pnlCosts.food_uncategorized) || 0;
-  const uncatNote = (!useCogs && uncat > 0 && foodBought > 0 && uncat / foodBought >= 0.05)
-    ? `<div class="pnl-sub" style="color:#b45309;padding:.1rem .25rem .5rem">
+  const uncatShare = foodBought > 0 ? uncat / foodBought : 0;
+  const uncatColor = uncatShare >= UNCAT_WARN_SHARE ? '#b45309' : '#6b7280';
+  const uncatNote = (!useCogs && uncat > 0 && foodBought > 0 && uncatShare >= UNCAT_MIN_SHARE)
+    ? `<div class="pnl-sub" style="color:${uncatColor};padding:.1rem .25rem .5rem">
          <i class="fas fa-circle-info"></i> <strong>${fmtMoney(uncat)}</strong> of this
          isn't categorised yet (it's in <em>Other</em> or blank), so it counts as food.
          Categorising it may move some cost into drinks or supplies.
