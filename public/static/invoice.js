@@ -123,20 +123,46 @@ function fileCategory(file) {
   return 'other';
 }
 
-// How many pages are really inside a PDF. One supplier PDF holding three pages is
-// the commonest way an invoice arrives, and counting FILES called it "single
-// page" — then told the reviewer a page was missing when all of them were there.
-// pdfjsLib is already loaded on this page and already used by processPDFBatch.
+// Page count AND a picture of page 1, from a single parse of the PDF.
 //
-// Unreadable here is not fatal: the count is only for labelling and the
+// The count: one supplier PDF holding three pages is the commonest way an
+// invoice arrives, and counting FILES called it "single page" — then told the
+// reviewer a page was missing when all of them were there.
+//
+// The thumbnail: every PDF row used to show the same red icon, so a batch of
+// eight pages was eight identical rows and the only way to check the order was
+// to read filenames. Photos have always shown a real thumbnail; this gives PDFs
+// the same, which is the whole point of a screen you look at before committing.
+//
+// Both from one getDocument() call — pdfjsLib is already loaded here and already
+// used by processPDFBatch, but parsing the file twice for two facts would be
+// wasteful on a big scan.
+//
+// Unreadable here is not fatal: these are presentation details plus the
 // missing-page check, and Claude may still read a file pdf.js won't open. Fall
-// back to 1 and let the upload proceed rather than blocking on a preview detail.
-async function pdfPageCount(file) {
+// back to one page and no thumbnail rather than blocking the upload.
+const PDF_THUMB_H = 88;   // px; matches the .file-thumb box
+
+async function inspectPdf(file) {
   try {
-    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
-    return pdf.numPages > 0 ? pdf.numPages : 1;
+    const pdf   = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+    const pages = pdf.numPages > 0 ? pdf.numPages : 1;
+    let thumbUrl = null;
+    try {
+      const page  = await pdf.getPage(1);
+      const base  = page.getViewport({ scale: 1 });
+      const vp    = page.getViewport({ scale: PDF_THUMB_H / base.height });
+      const canvas = document.createElement('canvas');
+      canvas.width  = Math.max(1, Math.ceil(vp.width));
+      canvas.height = Math.max(1, Math.ceil(vp.height));
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+      thumbUrl = canvas.toDataURL('image/png');
+    } catch (_) {
+      // A page that won't render still has a usable count.
+    }
+    return { pageCount: pages, thumbUrl };
   } catch (_) {
-    return 1;
+    return { pageCount: 1, thumbUrl: null };
   }
 }
 
@@ -182,12 +208,44 @@ async function addFilesToStage(files) {
   document.getElementById('typeMismatchWarn').style.display = 'none';
 
   const skipped = [];
+  const added   = [];
   for (const file of supported) {
     if (stagedFiles.some(sf => sameFile(sf.file, file))) { skipped.push(file.name); continue; }
     const id = 'sf-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
-    const thumbUrl  = newType === 'img' ? await makeImageThumb(file) : null;
-    const pageCount = newType === 'pdf' ? await pdfPageCount(file) : 1;
-    stagedFiles.push({ file, id, thumbUrl, type: newType, pageCount });
+    const entry = { file, id, thumbUrl: null, type: newType, pageCount: 1,
+                    qualityIssue: '', checking: newType === 'img' };
+    stagedFiles.push(entry);
+    added.push(entry);
+  }
+
+  // Draw the rows first so the files appear immediately, then inspect them —
+  // a big photo takes a moment and a screen that does nothing looks broken.
+  renderStagedList();
+
+  for (const entry of added) {
+    if (entry.type === 'img') {
+      entry.thumbUrl = await makeImageThumb(entry.file);
+      // The quality check used to run only on submit, so the bar said "ready"
+      // for photos that were about to be refused. Same check, same thresholds,
+      // just run now — and it no longer refuses, it reports. The enhanced file
+      // is kept, so submit has nothing left to do.
+      try {
+        const r = await preprocessImage(entry.file, { enforceQuality: false });
+        if (r.rejected) {
+          entry.qualityIssue = r.reason;          // undecodable — genuinely unusable
+        } else {
+          entry.file = r.file;
+          entry.qualityIssue = r.qualityIssue || '';
+          entry.processed = true;
+        }
+      } catch (_) {
+        // Never let a preview check stop a file being uploaded.
+      }
+    } else {
+      ({ pageCount: entry.pageCount, thumbUrl: entry.thumbUrl } = await inspectPdf(entry.file));
+    }
+    entry.checking = false;
+    renderStagedList();
   }
 
   if (skipped.length) {
@@ -266,7 +324,9 @@ function renderStagedList() {
 
     const thumbHtml = sf.thumbUrl
       ? `<img src="${sf.thumbUrl}" class="file-thumb" alt="thumb" />`
-      : `<div class="file-thumb pdf-thumb"><i class="fas fa-file-pdf"></i></div>`;
+      : sf.checking
+        ? `<div class="file-thumb pdf-thumb"><i class="fas fa-spinner fa-spin" style="color:var(--text-muted)"></i></div>`
+        : `<div class="file-thumb pdf-thumb"><i class="fas fa-${sf.type === 'pdf' ? 'file-pdf' : 'image'}"></i></div>`;
 
     // Under 1 KB showed as "0 KB", which reads like the file failed to load.
     const sizeLabel = sf.file.size < 1024
@@ -286,7 +346,13 @@ function renderStagedList() {
       ${thumbHtml}
       <div class="file-info">
         <div class="file-name" title="${esc(sf.file.name)}">${esc(sf.file.name || 'photo.jpg')}</div>
-        <div class="file-meta">${sizeLabel}${pages > 1 ? ` · ${pages} pages` : ''}</div>
+        <div class="file-meta">${sf.checking ? 'Checking quality…' : sizeLabel + (pages > 1 ? ` · ${pages} pages` : '')}</div>
+        ${sf.qualityIssue ? `
+        <div style="margin-top:.3rem;font-size:.78rem;color:#92400e;line-height:1.45">
+          <i class="fas fa-triangle-exclamation" style="color:#f59e0b"></i>
+          ${esc(sf.qualityIssue)}
+          <span style="color:#a16207"> You can still upload it — Claude may read it fine.</span>
+        </div>` : ''}
       </div>
       <span class="page-label">${pageLabel}</span>
       <button class="remove-btn" data-id="${sf.id}" title="Remove this file">
@@ -334,10 +400,37 @@ function renderStagedList() {
   const count = stagedFiles.length;
   const pageTotal = totalStagedPages();
   const noun  = batchType === 'pdf' ? (count === 1 ? 'PDF' : 'PDFs') : (count === 1 ? 'image' : 'images');
-  document.getElementById('submitInfoText').textContent =
-    `${count} ${noun} ready — ${pageTotal === 1
-      ? 'single page'
-      : pageTotal + ' pages will be merged into one invoice'}`;
+  const flagged = stagedFiles.filter(sf => sf.qualityIssue).length;
+  const busy    = stagedFiles.some(sf => sf.checking);
+  const info    = document.getElementById('submitInfoText');
+
+  // Don't say "ready" over a page the checker has just objected to — that green
+  // tick over a photo about to be refused is what made the old flow feel like a
+  // trap. The objection is per row; this is the count.
+  const icon = document.getElementById('submitInfoIcon');
+  if (icon) {
+    icon.className = busy ? 'fas fa-spinner fa-spin'
+                   : flagged ? 'fas fa-triangle-exclamation'
+                   : 'fas fa-check-circle';
+    icon.style.color = flagged ? '#f59e0b' : '';
+  }
+  // The whole bar, not just the icon: a green panel reading "may be too low
+  // quality" is the same mixed signal in a larger typeface.
+  submitBar.style.background  = flagged ? '#fffbeb' : '';
+  submitBar.style.borderColor = flagged ? '#fde68a' : '';
+
+  if (busy) {
+    info.textContent = 'Checking pages…';
+  } else if (flagged) {
+    info.innerHTML = `<span style="color:#92400e">${flagged === 1
+      ? '1 page may be too low quality to read'
+      : flagged + ' pages may be too low quality to read'} — see below. You can remove ${flagged === 1 ? 'it' : 'them'}, or upload anyway.</span>`;
+  } else {
+    info.textContent =
+      `${count} ${noun} ready — ${pageTotal === 1
+        ? 'single page'
+        : pageTotal + ' pages will be merged into one invoice'}`;
+  }
   submitBar.style.display = 'flex';
 }
 
@@ -345,38 +438,52 @@ function renderStagedList() {
 // the shared /static/image-preproc.js so the invoice-detail "add page" path can
 // reuse it. PREPROC and preprocessImage() come from there.
 
+// Images are checked and enhanced as they are STAGED now, so by the time this
+// runs there is usually nothing left to do. It stays for the odd file that was
+// added before that path existed, or whose check threw.
+//
+// It no longer refuses anything. A quality threshold is a proxy for what Claude
+// can read, and a poor one: a 100 dpi A4 scan fails on resolution while scoring
+// 41,715 for sharpness against a minimum of 80. Blocking that costs the customer
+// the ability to file the invoice; letting it through costs one parse. The
+// objection is shown against the row instead, before this point is reached.
+//
+// The one thing still fatal is a file the browser cannot decode at all — there
+// is nothing to enhance and nothing worth sending.
 async function runPreprocessingPipeline() {
-  const imgIndices = stagedFiles
+  const pending = stagedFiles
     .map((sf, i) => ({ sf, i }))
-    .filter(({ sf }) => sf.type === 'img');
-  if (!imgIndices.length) return true;
+    .filter(({ sf }) => sf.type === 'img' && !sf.processed);
+  if (!pending.length) return true;
 
-  const total = imgIndices.length;
-  const rejections = [];
+  const total = pending.length;
+  const undecodable = [];
 
   for (let j = 0; j < total; j++) {
-    const { sf, i } = imgIndices[j];
+    const { sf, i } = pending[j];
     showProgress(
       Math.round((j / total) * 25),
       `Checking image quality: page ${j + 1}/${total}…`
     );
 
-    const result = await preprocessImage(sf.file);
+    const result = await preprocessImage(sf.file, { enforceQuality: false });
 
     if (result.rejected) {
-      rejections.push({ pageNum: j + 1, fileName: sf.file.name, reason: result.reason });
+      undecodable.push({ pageNum: i + 1, fileName: sf.file.name, reason: result.reason });
       continue;
     }
 
-    stagedFiles[i].file = result.file;
+    stagedFiles[i].file         = result.file;
+    stagedFiles[i].processed    = true;
+    stagedFiles[i].qualityIssue = result.qualityIssue || '';
 
     const reader = new FileReader();
     reader.onload = e => { stagedFiles[i].thumbUrl = e.target.result; };
     reader.readAsDataURL(result.file);
   }
 
-  if (rejections.length) {
-    showQualityBlocker(rejections);
+  if (undecodable.length) {
+    showQualityBlocker(undecodable);
     return false;
   }
   return true;
@@ -404,9 +511,9 @@ function showQualityBlocker(rejections) {
       <i class="fas fa-exclamation-circle" style="font-size:1.3rem;margin-top:.1rem;flex-shrink:0"></i>
       <div>
         <strong style="display:block;font-size:1rem;margin-bottom:.5rem">
-          ${rejections.length === 1 ? '1 page' : rejections.length + ' pages'} failed the image quality check
+          ${rejections.length === 1 ? '1 file' : rejections.length + ' files'} could not be opened
         </strong>
-        <p style="margin:0 0 .6rem">This image is too low quality. Please re-scan or re-photograph the invoice.</p>
+        <p style="margin:0 0 .6rem">The file isn't a readable image, so there is nothing to send. Please replace it.</p>
         <ul style="margin:.4rem 0;padding-left:1.2rem">${list}</ul>
         <p style="margin:.6rem 0 0;font-size:.85rem;color:#b91c1c">
           Remove the affected file(s) from the list above and replace them, then submit again.

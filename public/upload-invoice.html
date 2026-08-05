@@ -321,7 +321,10 @@
           <!-- ── Submit bar ───────────────────────────────── -->
           <div id="submitBar">
             <div class="submit-info">
-              <i class="fas fa-check-circle"></i>
+              <!-- Icon is swapped by renderStagedList: a green tick must not sit
+                   beside a quality warning, which is the contradiction the old
+                   flow showed right before refusing the upload. -->
+              <i class="fas fa-check-circle" id="submitInfoIcon"></i>
               <span id="submitInfoText">Ready to upload</span>
             </div>
             <div class="submit-actions">
@@ -421,7 +424,7 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="/static/utils.js?v=20260805-4"></script>
-  <script src="/static/image-preproc.js?v=20260727-1"></script>
-  <script src="/static/invoice.js?v=20260806-1"></script>
+  <script src="/static/image-preproc.js?v=20260806-1"></script>
+  <script src="/static/invoice.js?v=20260806-5"></script>
 </body>
 </html>

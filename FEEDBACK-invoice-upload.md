@@ -121,7 +121,9 @@ counter is exactly when two invoices get shuffled together.
 
 ## Smaller things
 
-**You're told a page is "ready" when it will be rejected.** I staged four photos and the bar
+**You're told a page is "ready" when it will be rejected. — FIXED, and the block is gone too**
+
+I staged four photos and the bar
 said "✓ 4 images ready". All four would have been rejected on submit — three as too blurry,
 one as too low resolution. The rejection messages themselves are excellent and tell you
 exactly what to do:
@@ -134,13 +136,12 @@ browser, so it could run as each photo is added and mark the bad ones in the lis
 away. Nothing is wasted today — the check happens before any upload — it's just a slower way
 to find out.
 
-**PDF pages all look identical.** Every PDF row shows the same generic red icon, so with 8
-pages staged you're relying entirely on filenames to confirm the order. Photos show real
-thumbnails and are much easier to check. Rendering page 1 of each PDF as its thumbnail would
-make the order verifiable at a glance — which is the point of the screen.
+**PDF pages all look identical. — FIXED** Every PDF row showed the same generic red icon, so
+with 8 pages staged you were relying entirely on filenames to confirm the order. Page 1 of
+each PDF is now rendered as its thumbnail, reusing the same read that counts the pages.
 
-**Small files show "0 KB".** A 167-byte file displays as `0 KB`, which reads like something
-went wrong. Worth showing bytes below 1 KB.
+**Small files show "0 KB". — FIXED** A 167-byte file displayed as `0 KB`, which reads like
+something went wrong. Now shows bytes below 1 KB.
 
 ---
 
@@ -293,10 +294,68 @@ directly.
 
 ---
 
-## What I'd do next
+---
 
-The smaller items, of which running the image quality check at staging time is the most
-useful — you currently get a green "ready" for photos that will be rejected.
+## What was fixed — the smaller items, and the quality gate
+
+**PDF thumbnails.** Page 1 of each PDF is now rendered into its row, from the same read that
+already counts the pages. You can see at a glance that it's a page, and roughly where the
+content sits. Honest limit: at 44px it's a rough check, not something you can read.
+
+**"0 KB".** Files under 1 KB now show their size in bytes.
+
+**The quality check no longer blocks — and it runs as you add each photo.**
+
+This started as a question about whether stopping an image *before* the AI sees it is safe.
+It isn't, quite. Measured on a clean A4 page scanned at 100 dpi — an ordinary scanner default:
+
+| | Value | Threshold | |
+|---|---|---|---|
+| Sharpness | **41,715** | minimum 80 | 500× over |
+| Brightness | 225 | 30–245 | fine |
+| Short side | **827px** | minimum 900 | **refused** |
+
+A perfectly legible scan, refused, with no way past it — the only advice being "re-scan at a
+higher resolution", which doesn't help when that's simply what the scanner does.
+
+The trade is lopsided. Letting a poor image through costs one parse, about 15 cents. Wrongly
+blocking a good one costs the customer the ability to file the invoice at all, every time.
+
+So the judgement is **unchanged** — same three thresholds, same wording — and only the
+consequence moved:
+
+- the check now runs **as each photo is added**, not after pressing the button
+- a failure is an amber note on that row with the same specific reason, plus *"You can still
+  upload it — Claude may read it fine"*
+- the bar stops claiming "ready" — it turns amber and says how many pages are in question, and
+  that you can remove them or upload anyway
+- **Upload & Save stays available**
+
+Two details that mattered more than they look. A flagged image still gets resized, deskewed
+and compressed — the old code bailed out before all of that, so "upload anyway" would have
+sent an oversized original and could then have failed for *size* instead. And a file the
+browser cannot decode at all is still refused outright: that isn't a threshold judgement,
+there's simply no image to enhance or send.
+
+**Worth knowing what this does not buy you.** Claude has no way to refuse an image. Its
+response has no field for "I couldn't read this" — faced with an unreadable page it returns a
+mostly blank invoice, which then trips the totals check and the "needs review" flags. And the
+three thresholds only measure the *image*: a page with the bottom cut off, a thumb over the
+totals, or a photo taken at an angle is sharp, bright and high-resolution, and sails through.
+Those produce a confidently *wrong* invoice rather than a blank one, and what catches them is
+the totals check downstream — not this gate.
+
+### How it was checked
+
+`tests/image-quality-gate.test.mjs` — 33 checks, pinning that the four thresholds and all
+eight customer-facing phrases are byte-for-byte unchanged, that `enforceQuality` still
+defaults to refusing so no other caller loosens silently, that resize/deskew/compress all sit
+*after* the guard so a flagged image is still processed, and that an undecodable file stays
+fatal. Suite: 24 files, all passing.
+
+In the browser: the 100 dpi scan now warns instead of blocking and is still compressed; a
+second flagged page warns independently; a good photo stays clean; removing the flagged page
+returns the bar to green. Nothing was uploaded and the account still has zero invoices.
 
 ---
 

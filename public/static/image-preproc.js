@@ -189,11 +189,28 @@ function canvasToFile(canvas, name, quality) {
   });
 }
 
-async function preprocessImage(file) {
+/**
+ * @param {File} file
+ * @param {{enforceQuality?: boolean}} opts
+ *   enforceQuality (default true) — refuse the image outright when it fails a
+ *   quality threshold. With false, the same judgement is returned as
+ *   `qualityIssue` and the enhancement still runs, so the caller can warn and
+ *   let the user proceed.
+ *
+ * The three thresholds measure the IMAGE — resolution, brightness, sharpness —
+ * and they are only a proxy for what Claude can actually read. A 100 dpi A4 scan
+ * fails on resolution at 827px while scoring 41,715 for sharpness against a
+ * minimum of 80: perfectly legible, refused. Blocking that costs a customer the
+ * ability to file the invoice at all; letting it through costs one parse. Hence
+ * the option — the thresholds and their wording are unchanged.
+ */
+async function preprocessImage(file, { enforceQuality = true } = {}) {
   let img;
   try {
     img = await loadImageFromFile(file);
   } catch (_) {
+    // Not a threshold judgement — the file is not a usable image at all, so
+    // there is nothing to enhance and nothing to send. Always refused.
     return { file, rejected: true, reason: 'Cannot decode image — it may be corrupted.', warnings: [], metrics: {} };
   }
 
@@ -208,25 +225,21 @@ async function preprocessImage(file) {
   const blur   = laplacianVariance(gray, origW, origH);
   const metrics = { width: origW, height: origH, brightness: Math.round(bright), blurVariance: Math.round(blur) };
 
+  // Identical thresholds and identical wording to before — only what happens
+  // next is now the caller's choice.
+  let qualityIssue = '';
   if (shortSide < PREPROC.MIN_SHORT_SIDE_PX) {
-    return { file, rejected: true, reason:
-      `Resolution too low (${origW}×${origH}px — shortest side ${shortSide}px, minimum ${PREPROC.MIN_SHORT_SIDE_PX}px). Please re-scan or re-photograph at a higher resolution.`,
-      warnings: [], metrics };
+    qualityIssue = `Resolution too low (${origW}×${origH}px — shortest side ${shortSide}px, minimum ${PREPROC.MIN_SHORT_SIDE_PX}px). Please re-scan or re-photograph at a higher resolution.`;
+  } else if (bright < PREPROC.MIN_AVG_BRIGHTNESS) {
+    qualityIssue = `Image is too dark (brightness ${Math.round(bright)}/255, minimum ${PREPROC.MIN_AVG_BRIGHTNESS}). Please re-photograph with better lighting.`;
+  } else if (bright > PREPROC.MAX_AVG_BRIGHTNESS) {
+    qualityIssue = `Image is overexposed (brightness ${Math.round(bright)}/255, maximum ${PREPROC.MAX_AVG_BRIGHTNESS}). Please reduce glare and re-photograph.`;
+  } else if (blur < PREPROC.MIN_BLUR_VARIANCE) {
+    qualityIssue = `Image is too blurry (sharpness score ${Math.round(blur)}, minimum ${PREPROC.MIN_BLUR_VARIANCE}). Hold steady and ensure text is in focus.`;
   }
-  if (bright < PREPROC.MIN_AVG_BRIGHTNESS) {
-    return { file, rejected: true, reason:
-      `Image is too dark (brightness ${Math.round(bright)}/255, minimum ${PREPROC.MIN_AVG_BRIGHTNESS}). Please re-photograph with better lighting.`,
-      warnings: [], metrics };
-  }
-  if (bright > PREPROC.MAX_AVG_BRIGHTNESS) {
-    return { file, rejected: true, reason:
-      `Image is overexposed (brightness ${Math.round(bright)}/255, maximum ${PREPROC.MAX_AVG_BRIGHTNESS}). Please reduce glare and re-photograph.`,
-      warnings: [], metrics };
-  }
-  if (blur < PREPROC.MIN_BLUR_VARIANCE) {
-    return { file, rejected: true, reason:
-      `Image is too blurry (sharpness score ${Math.round(blur)}, minimum ${PREPROC.MIN_BLUR_VARIANCE}). Hold steady and ensure text is in focus.`,
-      warnings: [], metrics };
+
+  if (qualityIssue && enforceQuality) {
+    return { file, rejected: true, reason: qualityIssue, warnings: [], metrics };
   }
 
   const warnings = [];
@@ -258,5 +271,9 @@ async function preprocessImage(file) {
     warnings.push(`Compressed file is still ${(outFile.size / 1024 / 1024).toFixed(1)} MB — may be rejected (30 MB max per file).`);
   }
 
-  return { file: outFile, rejected: false, reason: '', warnings, metrics };
+  // A flagged image that was allowed through still gets resized, deskewed and
+  // compressed here — the old early return skipped all of that, so proceeding
+  // anyway would have sent an oversized original and could have failed later for
+  // size rather than for quality.
+  return { file: outFile, rejected: false, reason: '', qualityIssue, warnings, metrics };
 }
