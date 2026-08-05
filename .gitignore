@@ -8,3 +8,6 @@ node_modules/
 # is pushed to GitHub, so these must never be committed.
 backup-*.sql
 *.d1-export.sql
+
+# Local invoice-parse test output — contains real supplier invoice data
+.parse-runs/
