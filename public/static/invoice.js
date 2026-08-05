@@ -123,6 +123,38 @@ function fileCategory(file) {
   return 'other';
 }
 
+// How many pages are really inside a PDF. One supplier PDF holding three pages is
+// the commonest way an invoice arrives, and counting FILES called it "single
+// page" — then told the reviewer a page was missing when all of them were there.
+// pdfjsLib is already loaded on this page and already used by processPDFBatch.
+//
+// Unreadable here is not fatal: the count is only for labelling and the
+// missing-page check, and Claude may still read a file pdf.js won't open. Fall
+// back to 1 and let the upload proceed rather than blocking on a preview detail.
+async function pdfPageCount(file) {
+  try {
+    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+    return pdf.numPages > 0 ? pdf.numPages : 1;
+  } catch (_) {
+    return 1;
+  }
+}
+
+// Pages across the whole batch — files for images, real page counts for PDFs.
+function totalStagedPages() {
+  return stagedFiles.reduce((n, sf) => n + (sf.pageCount || 1), 0);
+}
+
+// Same file picked twice. Easy to do when shift-selecting pages out of a folder,
+// which is exactly the multi-page workflow, and it used to sail through: Claude
+// read that page twice, so its line items were counted twice and the invoice came
+// out overstated — and the duplicate page was billed for as well.
+// Name + size + mtime, because two genuinely different pages can share a name
+// across folders and File gives us nothing else to go on.
+function sameFile(a, b) {
+  return a.name === b.name && a.size === b.size && a.lastModified === b.lastModified;
+}
+
 async function addFilesToStage(files) {
   hideSavedBanner();
 
@@ -149,10 +181,22 @@ async function addFilesToStage(files) {
   if (!batchType) batchType = newType;
   document.getElementById('typeMismatchWarn').style.display = 'none';
 
+  const skipped = [];
   for (const file of supported) {
+    if (stagedFiles.some(sf => sameFile(sf.file, file))) { skipped.push(file.name); continue; }
     const id = 'sf-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
-    const thumbUrl = newType === 'img' ? await makeImageThumb(file) : null;
-    stagedFiles.push({ file, id, thumbUrl, type: newType });
+    const thumbUrl  = newType === 'img' ? await makeImageThumb(file) : null;
+    const pageCount = newType === 'pdf' ? await pdfPageCount(file) : 1;
+    stagedFiles.push({ file, id, thumbUrl, type: newType, pageCount });
+  }
+
+  if (skipped.length) {
+    showToast(
+      skipped.length === 1
+        ? `"${skipped[0]}" is already in this batch — not added again.`
+        : `${skipped.length} files were already in this batch — not added again.`,
+      'warning',
+    );
   }
 
   renderStagedList();
@@ -224,17 +268,27 @@ function renderStagedList() {
       ? `<img src="${sf.thumbUrl}" class="file-thumb" alt="thumb" />`
       : `<div class="file-thumb pdf-thumb"><i class="fas fa-file-pdf"></i></div>`;
 
-    const sizeKb = (sf.file.size / 1024).toFixed(0);
-    const pageNum = idx + 1;
+    // Under 1 KB showed as "0 KB", which reads like the file failed to load.
+    const sizeLabel = sf.file.size < 1024
+      ? `${sf.file.size} bytes`
+      : `${(sf.file.size / 1024).toFixed(0)} KB`;
+
+    // Running page number across the batch, so a 3-page PDF followed by a
+    // 1-page one reads "Pages 1–3" then "Page 4" rather than "Page 1", "Page 2".
+    const firstPage = stagedFiles.slice(0, idx).reduce((n, s) => n + (s.pageCount || 1), 1);
+    const pages     = sf.pageCount || 1;
+    const pageLabel = pages > 1
+      ? `Pages ${firstPage}–${firstPage + pages - 1}`
+      : `Page ${firstPage}`;
 
     item.innerHTML = `
       <span class="drag-handle" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></span>
       ${thumbHtml}
       <div class="file-info">
         <div class="file-name" title="${esc(sf.file.name)}">${esc(sf.file.name || 'photo.jpg')}</div>
-        <div class="file-meta">${sizeKb} KB</div>
+        <div class="file-meta">${sizeLabel}${pages > 1 ? ` · ${pages} pages` : ''}</div>
       </div>
-      <span class="page-label">Page ${pageNum}</span>
+      <span class="page-label">${pageLabel}</span>
       <button class="remove-btn" data-id="${sf.id}" title="Remove this file">
         <i class="fas fa-times"></i>
       </button>
@@ -274,10 +328,16 @@ function renderStagedList() {
     list.appendChild(item);
   });
 
+  // Count PAGES, not files. One PDF holding three of them is three pages, and
+  // saying "single page" there both misdescribes it and feeds the missing-page
+  // check a number that makes it cry wolf.
   const count = stagedFiles.length;
+  const pageTotal = totalStagedPages();
   const noun  = batchType === 'pdf' ? (count === 1 ? 'PDF' : 'PDFs') : (count === 1 ? 'image' : 'images');
   document.getElementById('submitInfoText').textContent =
-    `${count} ${noun} ready — ${count === 1 ? 'single page' : count + ' pages will be merged into one invoice'}`;
+    `${count} ${noun} ready — ${pageTotal === 1
+      ? 'single page'
+      : pageTotal + ' pages will be merged into one invoice'}`;
   submitBar.style.display = 'flex';
 }
 
@@ -535,7 +595,11 @@ async function processPDFBatch() {
   if (currentVendor) {
     try { await applyProductMappings(currentVendor); } catch (_) {}
   }
-  runValidation(aiResult, aiResult.page_note || '', files.length);
+  // Real page count, not files.length — a 3-page PDF uploaded whole used to be
+  // called 1 page here, so an invoice reading "page 1 of 3" produced "only 1 page
+  // uploaded — possible missing page" with every page present. A warning that
+  // fires on correct input is worse than none: it teaches people to skip it.
+  runValidation(aiResult, aiResult.page_note || '', totalStagedPages());
   await collectUnknownUnitWarnings();
 
   showProgress(94, 'Checking for duplicates…');
@@ -583,7 +647,9 @@ async function processImageBatch() {
   if (currentVendor) {
     try { await applyProductMappings(currentVendor); } catch (_) {}
   }
-  runValidation(aiResult, aiResult.page_note || '', files.length);
+  // One image is one page, so this equals files.length today — via the same
+  // helper as the PDF path so the two cannot drift apart.
+  runValidation(aiResult, aiResult.page_note || '', totalStagedPages());
   await collectUnknownUnitWarnings();
 
   showProgress(94, 'Checking for duplicates…');
@@ -1108,6 +1174,34 @@ function runValidation(gptResult, ocrFullText, uploadedPageCount) {
       id: 'missing_pages',
       severity: 'warning',
       message: `${pageSrc} but only ${uploadedPageCount} page${uploadedPageCount === 1 ? '' : 's'} uploaded — possible missing page.`,
+    });
+  }
+
+  // The other direction: MORE pages uploaded than the invoice says it has.
+  //
+  // Everything in a batch is merged into one invoice, so two separate one-page
+  // dockets photographed together become a single invoice carrying both
+  // suppliers' lines, silently. The dedicated cross-page check catches this for
+  // PDFs — it reads an invoice number out of each file locally — but never for
+  // photos, which go to Claude in one call and come back with a single invoice
+  // number, so there is nothing to compare (see checkInvoiceNumberConsistency).
+  //
+  // This closes most of that gap for free: page_total is already parsed above,
+  // and photos are exactly where the model reads it best, there being no text
+  // layer to fall back on.
+  //
+  // `> 0`, not `> 1` like the check above: a ONE-page invoice with two uploads is
+  // the commonest form of this mistake and must warn.
+  //
+  // Silent when the invoice prints no page count, which many don't — a net that
+  // catches a good share, not all. Deliberately not a block: an invoice plus its
+  // attached delivery note is a legitimate reason to hold more pages than the
+  // count admits, and refusing that would be worse than asking.
+  if (totalPages > 0 && uploadedPageCount > totalPages) {
+    invoiceWarnings.push({
+      id: 'extra_pages',
+      severity: 'warning',
+      message: `${pageSrc} but ${uploadedPageCount} pages were uploaded. They are merged into ONE invoice — check these are all pages of the same invoice, not two different ones.`,
     });
   }
 }
