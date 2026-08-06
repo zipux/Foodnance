@@ -68,6 +68,21 @@ function productionPrompt() {
   return { header, jsonSchema, rules: rules + 'nothing else' };
 }
 
+// The output ceiling parse-invoice actually sends, read from src/index.ts for
+// the same reason the prompt is: a hardcoded copy drifts, and the moment it
+// does, every truncation this harness reports is measuring a limit production
+// does not have. Takes the first max_tokens after the route declaration, so
+// parse-recipe's own (deliberately different) ceiling is not picked up.
+function productionMaxTokens() {
+  const src = readFileSync(join(ROOT, 'src', 'index.ts'), 'utf8');
+  const route = src.indexOf("app.post('/api/ai/parse-invoice'");
+  if (route < 0) throw new Error('could not find the parse-invoice route in src/index.ts');
+  const m = /max_tokens:\s*(\d+)/.exec(src.slice(route));
+  if (!m) throw new Error('could not find max_tokens in the parse-invoice route');
+  return Number(m[1]);
+}
+const MAX_TOKENS = productionMaxTokens();
+
 // ── files → content blocks, exactly as the worker builds them ────
 function fileBlock(path) {
   const buf  = readFileSync(path);
@@ -86,7 +101,7 @@ function fileBlock(path) {
 async function runOnce({ key, prompt, blocks, effort, label }) {
   const body = {
     model: MODEL,
-    max_tokens: 16000,
+    max_tokens: MAX_TOKENS,
     thinking: { type: 'adaptive' },
     messages: [{ role: 'user', content: [{ type: 'text', text: prompt }, ...blocks] }],
   };
@@ -240,7 +255,7 @@ console.log('─'.repeat(78));
 // A run can come back billed-for but unusable: `stop_reason: max_tokens` means
 // the model was still writing when it hit the ceiling, so the JSON is cut off
 // mid-object and nothing can be read from it. That is a REAL production
-// outcome, not a harness problem — src/index.ts sends the same max_tokens —
+// outcome, not a harness problem — the ceiling is read from src/index.ts —
 // so report it as a result rather than crashing on the missing fields, which
 // is what this used to do and which read like a broken tool.
 for (const r of results) {

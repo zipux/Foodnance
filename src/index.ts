@@ -4397,7 +4397,24 @@ ${rules}`
       },
       body: JSON.stringify({
         model: 'claude-opus-4-8',
-        max_tokens: 16000,
+        // The ceiling covers adaptive-thinking tokens AND the JSON, so it has
+        // to clear both — and output grows far faster than the invoice does.
+        // Measured 2026-08-07: 9 line items produced 2,757 output tokens; 20
+        // line items across two pages produced 13,477–16,000+, i.e. 2.2x the
+        // content for 5.8x the output. At 16000 that 2-page invoice hit the
+        // ceiling on 2 of 15 runs, at high AND at low effort, burning ~$0.46
+        // per truncated call for nothing.
+        //
+        // 32000 is ~2.2x the largest run that completed (14,542), the same
+        // headroom multiple as the 9→20 line jump. Billing is on tokens
+        // actually generated, so the extra ceiling costs nothing when unused;
+        // it is bounded rather than set to the model's 128k maximum because a
+        // runaway generation would cost $3.20 there against $0.80 here.
+        //
+        // Do not raise this much further without switching to streaming: at
+        // the ~95 tokens/sec measured across every run, 32000 tokens is a
+        // ~5.5 minute single non-streaming request.
+        max_tokens: 32000,
         thinking: { type: 'adaptive' },
         messages: [{ role: 'user', content }],
       }),
@@ -4411,6 +4428,8 @@ ${rules}`
     const data = await response.json() as {
       content: Array<{ type: string; text?: string }>
       usage?: { input_tokens?: number; output_tokens?: number }
+      stop_reason?: string
+      stop_details?: { category?: string | null } | null
     }
     const text = (data.content || []).find(b => b.type === 'text')?.text || ''
 
@@ -4428,6 +4447,32 @@ ${rules}`
       `INSERT INTO ai_parse_log (id, org_id, kind, input_tokens, output_tokens, cost)
        VALUES (?, ?, 'invoice', ?, ?, ?)`,
     ).bind(uid(), parseOrg, inputTokens, outputTokens, cost).run()
+
+    // Why the response stopped, checked BEFORE trying to read it. A call can
+    // return HTTP 200 and still carry nothing usable, and both cases used to
+    // fall through to JSON.parse and surface as a bare "AI parsing failed",
+    // which says nothing about what went wrong or whether retrying would help.
+    //
+    // Deliberately after the spend log above: Anthropic has already billed for
+    // the call either way, so it must still count against cost and the cap.
+    if (data.stop_reason === 'max_tokens') {
+      return c.json({
+        error: 'This invoice was too long to read in one go — the response was cut off partway through. ' +
+               'Try uploading it a page at a time.',
+        truncated: true,
+        output_tokens: outputTokens,
+      }, 502)
+    }
+    if (data.stop_reason === 'refusal') {
+      // The model declined the request. Vanishingly unlikely for an invoice,
+      // but it arrives as a 200 with empty content, so without this it reads
+      // as a parser bug rather than a refusal.
+      return c.json({
+        error: 'Claude declined to read this document. If it is a genuine invoice, please get in touch.',
+        refused: true,
+        category: data.stop_details?.category || null,
+      }, 502)
+    }
 
     // Strip markdown code fences if present
     const cleaned = text
@@ -4516,7 +4561,11 @@ Return ONLY a JSON object of this exact shape (no markdown, no commentary, no co
         // truncated output failed JSON.parse below — surfacing to the user as a
         // bare "AI parsing failed" with no hint the recipe was simply too long.
         // Billing is on tokens actually used, so a higher ceiling costs nothing.
-        // 16000 matches parse-invoice and stays clear of non-streaming timeouts.
+        // Left at 16000 while parse-invoice moved to 32000: this is a different
+        // shape of job — a page of prose matched against a catalogue, not a
+        // 20-line table — and nothing has been measured here. Raise it on
+        // evidence (a real truncation, now visible thanks to the check below),
+        // not by copying the invoice number across.
         max_tokens: 16000,
         thinking: { type: 'adaptive' },
         messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
@@ -4528,7 +4577,23 @@ Return ONLY a JSON object of this exact shape (no markdown, no commentary, no co
       return c.json({ error: err?.error?.message || `Claude API error ${response.status}` }, 502)
     }
 
-    const data = await response.json() as { content: Array<{ type: string; text?: string }> }
+    const data = await response.json() as {
+      content: Array<{ type: string; text?: string }>
+      stop_reason?: string
+    }
+    // Same reasoning as parse-invoice: a 200 can still carry nothing usable,
+    // and "the recipe was too long" is a different problem from "the parser
+    // broke" — the user can act on the first and not on the second.
+    if (data.stop_reason === 'max_tokens') {
+      return c.json({
+        error: 'That recipe was too long to read in one go — the response was cut off partway through. ' +
+               'Try splitting it into two.',
+        truncated: true,
+      }, 502)
+    }
+    if (data.stop_reason === 'refusal') {
+      return c.json({ error: 'Claude declined to read that text.', refused: true }, 502)
+    }
     const raw = (data.content || []).find(b => b.type === 'text')?.text || ''
     const cleaned = raw
       .replace(/^```json\s*/i, '')
