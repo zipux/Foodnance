@@ -80,6 +80,38 @@ applied cleanly, which is the first end-to-end proof that the migration files
 produce a working schema. That makes staging the honest dress rehearsal
 production has never had; see the warning below for why that matters.
 
+### 🚨 BEFORE THE FIRST REAL CUSTOMER — delete the old deployment URLs
+
+**293 deployments exist** (the CLI only lists 25; the API pages 25-at-a-time to
+the real total). **250 of them predate authentication entirely** — they were
+built before 2026-07-27, when there was no login screen at all — and every one
+is still publicly reachable at `https://<hash>.webapp-g5y.pages.dev`, wired to
+the **current live D1 and R2**.
+
+Verified 2026-08-06 with an anonymous request, no cookie, to a deployment from
+6 April:
+
+```
+GET https://d8f782f1.webapp-g5y.pages.dev/api/tables/invoices  →  200
+{"vendor":"Fornara Distribuzione…","invoice_number":"FD-2026-08841",
+ "total":1786.66,"file_key":"uploads/…jpg"}
+```
+
+Reads are confirmed open. Writes were not tested (that code has no auth
+middleware, so assume they are too).
+
+**Deferred 2026-08-06 on the grounds that everything in production today is test
+data and is going to be wiped.** That is a fair reason to wait, and it is why
+this is a checklist item rather than an emergency. But wiping data does not
+close the URLs — it empties the room without locking it. The same 250 addresses
+will expose real customer invoices the moment real customer invoices exist.
+
+**The custom domain does NOT fix this.** Cloudflare keeps serving `pages.dev`
+alongside a custom domain (`public/robots.txt` says the same thing about the
+lack of a 301), and those old deployments run old worker code, so no guard added
+today can reach them. The only fix is deleting the deployments. Keep the ~12
+most recent as rollback targets and all `preview` ones (staging).
+
 ### ⚠️ Production migration state — read before any prod DB work
 
 **Never run `npm run db:migrate:prod`.** Production's `d1_migrations` table
