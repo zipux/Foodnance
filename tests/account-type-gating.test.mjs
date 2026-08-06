@@ -34,6 +34,11 @@
 // boundary — it removes controls that would do nothing useful.
 import { suite } from './helpers/assert.mjs';
 import { loadBrowserModule } from './helpers/browser-module.mjs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const t = suite('account-type-gating');
 
@@ -126,6 +131,56 @@ t.check('Pro restaurant: offered',          stockDetailFieldsHidden('restaurant'
 t.check('commissary Essential: offered',    stockDetailFieldsHidden('commissary', 'essential') === false);
 t.check('commissary Pro: offered',          stockDetailFieldsHidden('commissary', 'pro') === false);
 t.check('unknown account: offered',         stockDetailFieldsHidden(undefined, undefined) === false);
+
+// ── EVERY inventory prompt must consult the gate, not just one ──
+// This is the check that was missing. `stockDetailFieldsHidden` was correct all
+// along and the test above proved it — but there are TWO "Add to Inventory?"
+// prompts, and only the product-form one asked. The invoice-confirm one (the
+// far more common path) went on offering inventory to Essential restaurants for
+// days, and was reported repeatedly, because the fix had been verified against
+// the other file.
+//
+// So: find every function that opens an inventory prompt, and require each to
+// consult the gate. The list is pinned deliberately — a third prompt added
+// later fails this test until someone adds it here, which is the moment to ask
+// whether it needs gating too.
+t.section('every Add-to-Inventory prompt consults the gate');
+{
+  const staticDir = join(ROOT, 'public', 'static');
+  const openers = [];
+  for (const f of readdirSync(staticDir).filter(n => n.endsWith('.js'))) {
+    const src = readFileSync(join(staticDir, f), 'utf8');
+    // Any function that opens a modal whose id looks like an inventory prompt.
+    const re = /function\s+(\w+)\s*\([^)]*\)\s*\{/g;
+    let m;
+    while ((m = re.exec(src))) {
+      // Start counting at the body's opening brace — the LAST char of the
+      // match — not at m.index, or a destructured parameter list like
+      // `function f({ a, b })` closes the count before the body begins and the
+      // body reads as empty. That is exactly how the ungated prompt hid from an
+      // earlier version of this scan.
+      const bodyStart = m.index + m[0].length - 1;
+      let depth = 0, end = src.length;
+      for (let i = bodyStart; i < src.length; i++) {
+        if (src[i] === '{') depth++;
+        else if (src[i] === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
+      }
+      const body = src.slice(bodyStart, end);
+      if (/openModal\(\s*['"`][^'"`]*(invPrompt|entryInv)[^'"`]*['"`]/i.test(body)) {
+        openers.push({ file: f, name: m[1], gated: /stockDetailFieldsHidden\s*\(/.test(body) });
+      }
+    }
+  }
+
+  t.check('found the inventory-prompt openers', openers.length >= 2,
+    JSON.stringify(openers.map(o => `${o.file}:${o.name}`)));
+  t.check('exactly the two known ones — a new one must be added here deliberately',
+    openers.length === 2, JSON.stringify(openers.map(o => `${o.file}:${o.name}`)));
+  for (const o of openers) {
+    t.check(`${o.file} → ${o.name}() consults stockDetailFieldsHidden`, o.gated,
+      'this prompt would be shown to an Essential restaurant');
+  }
+}
 
 t.section('a commissary keeps its whole workflow');
 for (const plan of ['essential', 'pro']) {

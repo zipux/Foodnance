@@ -2063,6 +2063,22 @@ async function openInvPrompt(lines, invoiceRef, supplierId = null) {
   if (!lines || !lines.length) return;
   if (!document.getElementById('invPromptModal')) return;
 
+  // THERE ARE TWO "Add to Inventory?" PROMPTS AND THEY BOTH NEED THIS GATE.
+  // The other one is openEntryInvPrompt() in products.js, after saving a
+  // supplier entry on the product form. That one was gated on 2026-08-05; this
+  // one — the far more common path, since it fires after confirming an invoice
+  // — was missed, so an Essential restaurant kept being offered inventory it
+  // cannot open. Reported repeatedly before anyone looked at THIS function,
+  // because the fix was verified against the other file.
+  //
+  // Same reasoning as products.js: /inventory and /stock-take are the upgrade
+  // panel on this plan, so the bin this writes can never be seen, adjusted or
+  // counted. Hidden rather than "recorded quietly" because on an Essential
+  // restaurant nothing ever draws stock down — no sales import, no stock take,
+  // Produce Batch hidden — so the count could only grow, and an upgrade would
+  // inherit an overstated figure to unpick by hand.
+  if (typeof stockDetailFieldsHidden === 'function' && stockDetailFieldsHidden()) return;
+
   _invPromptRows = lines.filter(l => l.product_name);
 
   // Resolve every row up front so the modal can show where each will land,
