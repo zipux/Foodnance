@@ -237,15 +237,13 @@
           <div class="form-grid" style="grid-template-columns:1fr 1fr">
             <div class="form-group">
               <label>Stocking unit *</label>
-              <select id="pStockUnit">
-                <option value="lb">lb</option>
-                <option value="kg">kg</option>
-                <option value="g">g</option>
-                <option value="oz">oz</option>
-                <option value="l">L</option>
-                <option value="ml">ml</option>
-                <option value="each">each</option>
-              </select>
+              <!-- Options come from the units master list at runtime (see
+                   populateUnitDropdown), the same source as the Pack Size unit
+                   above. A hardcoded list here meant a unit you could buy in
+                   (case, fl oz) could not be the unit you stock in, so this
+                   picker silently kept an unrelated unit and every purchase in
+                   the real one became uncomparable. -->
+              <select id="pStockUnit"></select>
             </div>
             <div></div>
           </div>
@@ -522,7 +520,7 @@
   <script src="/static/utils.js?v=20260805-4"></script>
   <script src="/static/inventory.js?v=20260803-3"></script>
   <script src="/static/suppliers.js?v=20260714-1"></script>
-  <script src="/static/products.js?v=20260805-2"></script>
+  <script src="/static/products.js?v=20260806-1"></script>
 
   <!-- ── Inline invoice-file viewer modal (shared, lightweight) ── -->
   <div class="modal-overlay hidden" id="entryFileViewModal">

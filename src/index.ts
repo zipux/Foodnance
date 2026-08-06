@@ -3731,7 +3731,12 @@ app.get('/api/price-movers', async (c) => {
   type Group = {
     product_id: string
     product_name: string
+    // The unit every purchase is priced into for comparison. Starts as the
+    // declared stocking unit, but see the fallback below — it is a lens, not a
+    // fact about the product.
     unit: string
+    // Product-level, so the fallback can re-price each↔weight lines.
+    avg_weight: number | null
     purchases: Purchase[]
   }
 
@@ -3743,18 +3748,19 @@ app.get('/api/price-movers', async (c) => {
     // Fall back to the purchase's own unit for products predating migration
     // 0032; then everything in the group shares one unit and behaves as before.
     const stockUnit = String(r.stock_unit || '').trim() || packUnit
+    const cpu   = Number(r.cost_per_unit || 0)
+    const avgW  = r.avg_weight != null ? Number(r.avg_weight) : null
     let g = groups.get(pid)
     if (!g) {
       g = {
         product_id:   pid,
         product_name: String(r.product_name || ''),
         unit:         stockUnit,
+        avg_weight:   avgW,
         purchases:    []
       }
       groups.set(pid, g)
     }
-    const cpu   = Number(r.cost_per_unit || 0)
-    const avgW  = r.avg_weight != null ? Number(r.avg_weight) : null
     g.purchases.push({
       date:                String(r.purchase_date || ''),
       vendor:              String(r.supplier_name || ''),
@@ -3767,6 +3773,51 @@ app.get('/api/price-movers', async (c) => {
       invoice_id:          String(r.invoice_id || ''),
       vendor_item:         String(r.vendor_item_name || ''),
     })
+  }
+
+  // ── Comparison unit fallback ──────────────────────────────────
+  // The stocking unit is only the lens purchases are compared through. When it
+  // cannot express what was actually bought, comparing through it discards
+  // purchases that needed no conversion in the first place: napkins bought
+  // twice by the `case` on a product stocked in kg produced a blank chart and
+  // hid a real 12.5% rise, because case→kg has no answer.
+  //
+  // Two purchases already in the same unit are directly comparable — there is
+  // nothing to convert. So when the declared unit yields fewer than two
+  // comparable purchases, fall back to a unit at least two purchases share.
+  // Strictly a fallback: a product that already compares keeps its declared
+  // unit, so nothing that works today changes.
+  for (const g of groups.values()) {
+    const comparableIn = (unit: string) =>
+      g.purchases.reduce(
+        (n, p) => n + (convertUnitCost(p.cost_per_unit, p.pack_unit, unit, g.avg_weight) != null ? 1 : 0),
+        0
+      )
+    const declaredCount = comparableIn(g.unit)
+    if (declaredCount >= 2) continue
+
+    // How many purchases were invoiced in each unit.
+    const counts = new Map<string, number>()
+    for (const p of g.purchases) {
+      const u = p.pack_unit.trim().toLowerCase()
+      if (u) counts.set(u, (counts.get(u) || 0) + 1)
+    }
+    // Best candidate = most-purchased unit, needing at least two purchases to be
+    // a comparison at all. Scanning DESC means an equal count is broken toward
+    // the most recent unit, so the trend follows what is being bought now.
+    let best = ''
+    let bestCount = 1
+    for (const p of g.purchases) {
+      const u = p.pack_unit.trim().toLowerCase()
+      const n = counts.get(u) || 0
+      if (n > bestCount) { best = u; bestCount = n }
+    }
+    if (!best || comparableIn(best) <= declaredCount) continue
+
+    g.unit = best
+    for (const p of g.purchases) {
+      p.cost_per_stock_unit = convertUnitCost(p.cost_per_unit, p.pack_unit, best, g.avg_weight)
+    }
   }
 
   const products = Array.from(groups.values()).map(g => {

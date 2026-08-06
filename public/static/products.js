@@ -49,6 +49,11 @@ document.getElementById('saveProductBtn').addEventListener('click', saveGenericP
   document.getElementById('eQtyOrdered').addEventListener('input', updateEntryCostPerUnit);
   document.getElementById('ePackUnit').addEventListener('change',  onPackUnitChange);
 
+  // The stocking unit now shares the master units list, so it also carries the
+  // "+ Manage units" entry. Intercept that sentinel BEFORE the preview listener
+  // below, or the pack labels repaint as "__manage_units__" for a frame.
+  document.getElementById('pStockUnit').addEventListener('change', onStockUnitChange);
+
   // Stocking unit drives the pack-size labels (pack weights are in that unit)
   // and the low-stock threshold's unit, so it re-renders the preview too.
   // Pack-sizes section — live preview + reactive labels
@@ -92,6 +97,9 @@ async function loadAll() {
       .sort((a, b) => (a.sort_order - b.sort_order) || a.name.localeCompare(b.name))
       .map(c => c.name);
     populateUnitDropdown(document.getElementById('ePackUnit'));
+    // Same master list for the stocking unit, so a unit added through Manage
+    // Units is immediately pickable as both what you buy and what you stock.
+    populateUnitDropdown(document.getElementById('pStockUnit'));
     refreshCategoryDropdown();
     renderProductTable();
     renderStats();
@@ -505,7 +513,10 @@ async function saveGenericProduct() {
   // what every purchase converts into. Always stored (migration 0032): pack
   // levels stay gated on mid_lb/top_lb, so a populated base_unit does NOT turn
   // pack-level entry on. See pkConfigFrom() in utils.js.
-  const baseUnit = (document.getElementById('pStockUnit').value || 'lb').trim().toLowerCase();
+  // "__manage_units__" is the menu entry, never a real unit — fall back rather
+  // than storing it as this product's stocking unit.
+  const stockUnitSel = document.getElementById('pStockUnit').value;
+  const baseUnit = ((stockUnitSel === '__manage_units__' ? '' : stockUnitSel) || 'lb').trim().toLowerCase();
   const hasMid  = !isNaN(midLb) && midLb > 0;
   const hasTop  = !isNaN(topLb) && topLb > 0;
 
@@ -1022,6 +1033,20 @@ function updateStockUnitVisibility() {
     return;
   }
 
+  // Suppliers agree with each other but not with the declared stocking unit —
+  // e.g. napkins bought twice by the `case` on a product stocked in kg. Nothing
+  // can be priced or counted through a unit the purchases cannot reach, and
+  // while the picker stayed hidden there was no way to correct it. Show it.
+  if (units.length === 1 && sel.value && !_sameUnit(units[0], sel.value)) {
+    section.style.display = '';
+    note.style.display = '';
+    const vendors = [...usage.get(units[0])];
+    const who = vendors.length ? vendors.join(', ') : 'Your supplier';
+    note.innerHTML = `<i class="fas fa-triangle-exclamation"></i> ${esc(who)} bill${vendors.length === 1 ? 's' : ''} in ${esc(units[0])}, but this item is counted in ${esc(sel.value)} — prices can't be compared across the two. Pick the unit you count and price this item in.`;
+    updatePackPreview();
+    return;
+  }
+
   // No conflict — hide the section. For an existing product the selection is
   // already right (openEditProduct set it from the declared/inferred unit), so
   // leave it untouched to avoid a silent unit change + inventory conversion. For
@@ -1071,6 +1096,18 @@ function _convertUnitCost(cost, fromUnit, toUnit, avgWeightPerUnit) {
 // implementation across pages (see memory: unit-of-measure-cascade).
 function _convertQuantity(qty, fromUnit, toUnit, avgWeightPerUnit) {
   return invConvertQty(qty, fromUnit, toUnit, avgWeightPerUnit);
+}
+
+// "+ Manage units" is a menu entry, not a unit — put the previous choice back
+// and open the manager instead of letting it reach base_unit.
+function onStockUnitChange() {
+  const select = document.getElementById('pStockUnit');
+  if (select.value === '__manage_units__') {
+    select.value = select.dataset.prevUnit || '';
+    openManageUnitsModal();
+    return;
+  }
+  select.dataset.prevUnit = select.value;
 }
 
 async function onPackUnitChange() {
@@ -1542,6 +1579,7 @@ registerUnitRefreshCallback(async () => {
   const ud = await apiGet(`tables/units?page=1&limit=100`);
   allUnits = (ud.data || []).slice().sort((a, b) => a.sort_order - b.sort_order);
   populateUnitDropdown(document.getElementById('ePackUnit'));
+  populateUnitDropdown(document.getElementById('pStockUnit'));
 });
 
 // Reload the category dropdown after manage-categories / inline-add changes
