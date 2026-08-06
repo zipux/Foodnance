@@ -236,6 +236,31 @@ console.log(`\nAt 150 invoices/month, the cheapest run above would cost ` +
 
 console.log('\n\nDID THE NUMBERS SURVIVE?');
 console.log('─'.repeat(78));
+
+// A run can come back billed-for but unusable: `stop_reason: max_tokens` means
+// the model was still writing when it hit the ceiling, so the JSON is cut off
+// mid-object and nothing can be read from it. That is a REAL production
+// outcome, not a harness problem — src/index.ts sends the same max_tokens —
+// so report it as a result rather than crashing on the missing fields, which
+// is what this used to do and which read like a broken tool.
+for (const r of results) {
+  if (r.error)      console.log(`\n${r.label}: ⚠ API error — ${r.error}`);
+  else if (!r.parsed) {
+    console.log(`\n${r.label}: ⚠ NO USABLE RESULT — ${r.outTok} output tokens, ` +
+                `stop_reason=${r.stopReason}` +
+                (r.stopReason === 'max_tokens'
+                  ? `\n  Hit the ${16000}-token output ceiling and was truncated mid-JSON. ` +
+                    `Production sends the same ceiling, so this invoice would fail there too.`
+                  : '') +
+                (r.parseError ? `\n  JSON did not parse: ${r.parseError}` : ''));
+  }
+}
+if (!base.parsed) {
+  console.log('\nNo baseline to compare against — the high run produced nothing usable.');
+  console.log('─'.repeat(78));
+  process.exit(0);
+}
+
 const bs = summarise(base);
 console.log(`baseline: ${bs.vendor} · ${bs.invoice_number} · ${bs.invoice_date} · ` +
             `${bs.items} line items · total $${bs.total}`);
