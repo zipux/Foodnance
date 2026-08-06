@@ -3512,56 +3512,92 @@ async function buildExplodeCtx(db: D1Database, org: string | null): Promise<Expl
 // `org` is threaded through rather than filtered at the call site: every
 // statement below matches on id OR name, so an unscoped one would rewrite
 // another business's history.
+// `aliasName` (Group only) is the absorbed product's name, remembered so future
+// invoices using that wording route into the survivor. It is written inside the
+// same transaction as the merge, so an absorbed product can never end up live
+// history-less AND un-aliased.
 async function mergeInto(
   db: D1Database,
   merged: { id: string; name: string },
   surviving: { id: string; name: string },
-  org: string | null
+  org: string | null,
+  aliasName?: string | null
 ) {
-  // 1. Re-link product_entries (the purchase/cost history)
-  await db.prepare(
-    'UPDATE product_entries SET generic_product_id = ?, generic_product_name = ? WHERE generic_product_id = ? AND org_id IS ?'
-  ).bind(surviving.id, surviving.name, merged.id, org).run()
-
-  // 2. Merge inventory rows (pool the stock into one bin)
+  // Reads first, then every write in ONE db.batch(), which D1 runs as a single
+  // transaction: a merge either lands in full or not at all. This used to be
+  // five separate awaits, and when one failed the earlier ones had already
+  // committed — the purchase history moved to the survivor while the absorbed
+  // product stayed live, empty and un-aliased, with the user shown only a 500.
   const mergedInv = await db.prepare('SELECT id, quantity FROM inventory WHERE item_id = ? AND org_id IS ?')
     .bind(merged.id, org).first<{ id: string; quantity: number }>()
-  if (mergedInv) {
-    const survivingInv = await db.prepare('SELECT id FROM inventory WHERE item_id = ? AND org_id IS ?')
-      .bind(surviving.id, org).first<{ id: string }>()
-    if (survivingInv) {
-      await db.prepare('UPDATE inventory SET quantity = quantity + ? WHERE item_id = ? AND org_id IS ?')
-        .bind(mergedInv.quantity, surviving.id, org).run()
-      await db.prepare('DELETE FROM inventory WHERE item_id = ? AND org_id IS ?').bind(merged.id, org).run()
-    } else {
-      // No surviving inventory row — reassign the merged row
-      await db.prepare('UPDATE inventory SET item_id = ?, item_name = ? WHERE item_id = ? AND org_id IS ?')
-        .bind(surviving.id, surviving.name, merged.id, org).run()
-    }
+  const survivingInv = mergedInv
+    ? await db.prepare('SELECT id FROM inventory WHERE item_id = ? AND org_id IS ?')
+        .bind(surviving.id, org).first<{ id: string }>()
+    : null
+  const alias    = (aliasName || '').trim()
+  const aliasDup = alias
+    ? await db.prepare(
+        'SELECT id FROM product_aliases WHERE generic_product_id = ? AND LOWER(TRIM(alias_name)) = LOWER(TRIM(?)) AND supplier_id IS NULL AND org_id IS ?'
+      ).bind(surviving.id, alias, org).first()
+    : null
+
+  const writes: D1PreparedStatement[] = []
+
+  // 1. Re-link product_entries (the purchase/cost history)
+  writes.push(db.prepare(
+    'UPDATE product_entries SET generic_product_id = ?, generic_product_name = ? WHERE generic_product_id = ? AND org_id IS ?'
+  ).bind(surviving.id, surviving.name, merged.id, org))
+
+  // 2. Merge inventory rows (pool the stock into one bin)
+  if (mergedInv && survivingInv) {
+    writes.push(
+      db.prepare('UPDATE inventory SET quantity = quantity + ? WHERE item_id = ? AND org_id IS ?')
+        .bind(mergedInv.quantity, surviving.id, org),
+      db.prepare('DELETE FROM inventory WHERE item_id = ? AND org_id IS ?')
+        .bind(merged.id, org),
+    )
+  } else if (mergedInv) {
+    // No surviving inventory row — reassign the merged row
+    writes.push(db.prepare('UPDATE inventory SET item_id = ?, item_name = ? WHERE item_id = ? AND org_id IS ?')
+      .bind(surviving.id, surviving.name, merged.id, org))
   }
 
   // 3. Re-link recipe_items
-  await db.prepare('UPDATE recipe_items SET product_id = ?, product_name = ? WHERE product_id = ? AND org_id IS ?')
-    .bind(surviving.id, surviving.name, merged.id, org).run()
+  writes.push(db.prepare('UPDATE recipe_items SET product_id = ?, product_name = ? WHERE product_id = ? AND org_id IS ?')
+    .bind(surviving.id, surviving.name, merged.id, org))
 
   // 3b. Cascade the surviving identity to the remaining tables where the merged
   // product's name/id is denormalized (invoice_lines, product_mappings, stock_log).
   // Without this the absorbed rows keep the old name and stock_log keeps pointing
   // at the now-deleted product id, so spending breakdown / stock history drift.
-  await db.batch([
-    db.prepare(
-      `UPDATE invoice_lines SET generic_product_id = ?, product_name = ?
-        WHERE (generic_product_id = ? OR LOWER(TRIM(product_name)) = LOWER(TRIM(?))) AND org_id IS ?`
-    ).bind(surviving.id, surviving.name, merged.id, merged.name, org),
+  //
+  // invoice_lines is matched BY NAME ONLY — it stores the line as read off the
+  // invoice and has no product id column (see migrations 0002 and 0035). An
+  // earlier version of this cascade also set `invoice_lines.generic_product_id`,
+  // which has never existed, so every Merge and Group failed here. Nothing
+  // anywhere reads such a column; the name is the whole link. Matches
+  // cascadeRename below, which has always done it this way.
+  writes.push(
+    db.prepare('UPDATE invoice_lines SET product_name = ? WHERE LOWER(TRIM(product_name)) = LOWER(TRIM(?)) AND org_id IS ?')
+      .bind(surviving.name, merged.name, org),
     db.prepare('UPDATE product_mappings SET corrected_name = ? WHERE LOWER(TRIM(corrected_name)) = LOWER(TRIM(?)) AND org_id IS ?')
       .bind(surviving.name, merged.name, org),
     db.prepare('UPDATE stock_log SET item_id = ?, item_name = ? WHERE item_id = ? AND org_id IS ?')
       .bind(surviving.id, surviving.name, merged.id, org),
-  ])
+  )
 
   // 4. Soft-delete the merged product
-  await db.prepare("UPDATE generic_products SET deleted_at = datetime('now') WHERE id = ? AND org_id IS ?")
-    .bind(merged.id, org).run()
+  writes.push(db.prepare("UPDATE generic_products SET deleted_at = datetime('now') WHERE id = ? AND org_id IS ?")
+    .bind(merged.id, org))
+
+  // 5. Group only: the alias for the absorbed name.
+  if (alias && !aliasDup && alias.toLowerCase() !== surviving.name.trim().toLowerCase()) {
+    writes.push(db.prepare(
+      'INSERT INTO product_aliases (id, alias_name, generic_product_id, supplier_id, org_id) VALUES (?, ?, ?, NULL, ?)'
+    ).bind(uid(), alias, surviving.id, org))
+  }
+
+  await db.batch(writes)
 }
 
 // Rename a product and cascade the new name to every denormalized copy. Name-only
@@ -3644,22 +3680,15 @@ app.post('/api/products/group', async (c) => {
   }
   const surviving = { id: survivor.id, name: generalName }
 
+  // One product at a time, each merge atomic in itself (mergeInto batches its
+  // own writes, alias included). Deliberately NOT one batch for the whole group:
+  // pooling inventory needs to see the row the previous merge just moved, and a
+  // single up-front read would have two absorbed products each reassign their
+  // bin to the survivor instead of adding to it.
   let grouped = 0
   for (const p of products) {
     if (p.id === survivor.id) continue
-    await mergeInto(c.env.DB, p, surviving, org)
-    // Remember the absorbed name so future invoices with that wording route in.
-    const aliasName = p.name.trim()
-    if (aliasName && aliasName.toLowerCase() !== generalName.toLowerCase()) {
-      const dup = await c.env.DB.prepare(
-        'SELECT id FROM product_aliases WHERE generic_product_id = ? AND LOWER(TRIM(alias_name)) = LOWER(TRIM(?)) AND supplier_id IS NULL AND org_id IS ?'
-      ).bind(survivor.id, aliasName, org).first()
-      if (!dup) {
-        await c.env.DB.prepare(
-          'INSERT INTO product_aliases (id, alias_name, generic_product_id, supplier_id, org_id) VALUES (?, ?, ?, NULL, ?)'
-        ).bind(uid(), aliasName, survivor.id, org).run()
-      }
-    }
+    await mergeInto(c.env.DB, p, surviving, org, p.name)
     grouped++
   }
 

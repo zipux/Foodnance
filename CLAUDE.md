@@ -73,6 +73,7 @@ npm test               # unit — auto-discovers every tests/*.test.mjs
 npm run test:pos       # POS sales import  — needs `npm run dev:sandbox` running
 npm run test:isolation # tenant isolation  — needs the sandbox; the pre-launch gate
 npm run test:lifecycle # account lifecycle — needs the sandbox
+npm run test:merge     # product merge/group — needs the sandbox
 ```
 
 Plain Node, no framework, no dependencies. `tests/helpers/browser-module.mjs`
