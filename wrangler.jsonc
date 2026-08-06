@@ -6,6 +6,8 @@
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
+
+	// ── PRODUCTION — what `npm run deploy` uses. Real customer data. ──
 	"d1_databases": [
 		{
 			"binding": "DB",
@@ -18,5 +20,49 @@
 			"binding": "FILES",
 			"bucket_name": "invoicedb-files"
 		}
-	]
+	],
+
+	// ── STAGING — what `npm run deploy:staging` uses. ──────────────
+	//
+	// Cloudflare Pages has exactly two environments, "production" and "preview".
+	// A deployment made with `--branch staging` (anything other than the
+	// production branch) is a PREVIEW deployment, and preview deployments read
+	// the bindings below instead of the ones above.
+	//
+	// The binding NAMES are identical on purpose — `DB` and `FILES` on both
+	// sides. src/index.ts never learns there are two environments; only the
+	// cabinet behind the name changes. So there is no branch in the code that
+	// could be wrong, and nothing to remember when writing a query.
+	//
+	// This exists because every deployment URL Cloudflare has ever issued for
+	// this project pointed at the LIVE database. An old deploy URL looks like a
+	// sandbox and is not one: it is different code wired to real customer rows,
+	// so "just checking what the old version did" could void a real invoice.
+	//
+	// It also gives migrations somewhere to be rehearsed. Production migrations
+	// are applied here by hand against live D1 — 0038 and 0042 both rebuilt a
+	// table — and until now the only dress rehearsal was a local SQLite file
+	// that has drifted from production before (0033 had its column but not its
+	// index, and nobody noticed for weeks).
+	//
+	// Set the staging database up with:  npm run db:migrate:staging
+	// It needs its own API key, or invoice parsing there will fail:
+	//   npx wrangler pages secret put ANTHROPIC_API_KEY --project-name webapp
+	"env": {
+		"preview": {
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "invoicedb-staging",
+					"database_id": "5a6d0914-7e25-4a29-844d-18edafeb5378"
+				}
+			],
+			"r2_buckets": [
+				{
+					"binding": "FILES",
+					"bucket_name": "invoicedb-files-staging"
+				}
+			]
+		}
+	}
 }

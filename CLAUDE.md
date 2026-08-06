@@ -11,18 +11,64 @@ DoughMeter — a business-management app for food/product businesses (products, 
 ```bash
 npm run dev              # Vite dev server (Hono via @hono/vite-dev-server)
 npm run build            # Build to dist/ (bundles worker + copies public/ via vite plugin)
-npm run deploy           # build + wrangler pages deploy dist --project-name webapp
+npm run deploy           # ⚠️ LIVE — build + deploy to production (real customers)
+npm run deploy:staging   # same build to staging.webapp-g5y.pages.dev (staging data)
 npm run dev:sandbox      # wrangler pages dev against dist/, local D1, port 3000
 
 # Database (D1) — migrations live in migrations/, numbered NNNN_name.sql
-npm run db:migrate:local # apply migrations to local SQLite
-npm run db:migrate:prod  # ⚠️ DO NOT RUN — see "Production migration state" below
-npm run db:reset         # wipe local D1 and re-apply all migrations
-npm run db:wipe:local    # run wipe-data.sql (clears data, keeps schema) — local
-npm run db:wipe:prod     # same against remote D1
+npm run db:migrate:local   # apply migrations to local SQLite
+npm run db:migrate:staging # apply to the staging D1 — rehearse here first
+npm run db:migrate:prod    # ⚠️ DO NOT RUN — see "Production migration state" below
+npm run db:reset           # wipe local D1 and re-apply all migrations
+npm run db:wipe:local      # run wipe-data.sql (clears data, keeps schema) — local
+npm run db:wipe:staging    # same against staging — safe, it holds no real data
+npm run db:wipe:prod       # ⚠️ same against LIVE customer data
 
 npm run cf-typegen       # regenerate Cloudflare binding types
 ```
+
+### Environments — production and staging (set up 2026-08-06)
+
+| | Production | Staging |
+|---|---|---|
+| URL | `webapp-g5y.pages.dev` | `staging.webapp-g5y.pages.dev` |
+| Deploy | `npm run deploy` | `npm run deploy:staging` |
+| D1 | `invoicedb-production` | `invoicedb-staging` |
+| R2 | `invoicedb-files` | `invoicedb-files-staging` |
+| Data | **real customers** | throwaway |
+
+Cloudflare Pages has exactly two environments, **production** and **preview**.
+`deploy:staging` passes `--branch staging`, which makes it a *preview*
+deployment, and preview deployments pick up the `env.preview` bindings in
+`wrangler.jsonc`. The binding **names are identical on both sides** (`DB`,
+`FILES`) — `src/index.ts` never learns which environment it is in, so there is
+no branch in the code that could be wrong.
+
+**Every per-deploy URL is production.** Before this existed, all of them were:
+`https://<hash>.webapp-g5y.pages.dev` is different *code* wired to the *same
+live database*, so "just checking what the old version did" could void a real
+customer's invoice. Preview deployments (staging and its hashes) are the only
+ones that are not. When comparing behaviour, use staging, never an old hash URL.
+
+**Secrets are per-environment and are NOT copied over.** Staging has its own
+`SESSION_SECRET`, deliberately different, so a staging session cookie can never
+be a valid credential against production. It has **no `ANTHROPIC_API_KEY`**, so
+AI invoice/recipe parsing returns an error there — set one if you need to test
+it (`npx wrangler pages secret put ANTHROPIC_API_KEY --project-name webapp --env preview`),
+and remember it spends real money.
+
+Staging D1 lives under `env.preview`, so direct `wrangler d1` commands against
+it need `--env preview` or wrangler cannot find the database:
+
+```bash
+npx wrangler d1 execute invoicedb-staging --env preview --remote --command "SELECT ..."
+```
+
+**Rehearse migrations here.** `npm run db:migrate:staging` works normally — the
+staging database was built by applying `0001`→`0046` to an empty D1, and all 46
+applied cleanly, which is the first end-to-end proof that the migration files
+produce a working schema. That makes staging the honest dress rehearsal
+production has never had; see the warning below for why that matters.
 
 ### ⚠️ Production migration state — read before any prod DB work
 
