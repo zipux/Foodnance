@@ -153,9 +153,14 @@
     // Real sign-in. The server replies with a signed HttpOnly session cookie,
     // which the browser then sends on every /api/* request automatically —
     // there is nothing to store here, and no token JavaScript can read.
-    const AFTER_LOGIN        = '/home';           // Price Movers, first tab in the app
-    const AFTER_LOGIN_ADMIN  = '/admin';          // super-admin goes to the admin screen
-    const AFTER_LOGIN_MOBILE = '/upload-invoice'; // on a phone, the only job is photographing a delivery note
+    // The .html suffix is deliberate and matches every other internal link in
+    // the app. Cloudflare Pages strips it and 308-redirects in production, so
+    // these still land on /home and /admin there; without it they 404 under
+    // `npm run dev`, which serves files as they are. Logging in and being
+    // bounced straight to a 404 is a bad first thirty seconds of local testing.
+    const AFTER_LOGIN        = '/home.html';           // Price Movers, first tab in the app
+    const AFTER_LOGIN_ADMIN  = '/admin.html';          // super-admin goes to the admin screen
+    const AFTER_LOGIN_MOBILE = '/upload-invoice.html'; // on a phone, the only job is photographing a delivery note
 
     // A phone is a capture device, not a reporting one: someone signing in on
     // one is standing at a delivery, not reading Price Movers. Land them on the
