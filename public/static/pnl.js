@@ -231,6 +231,38 @@ function spreadAllocationRange(row, from, to) {
 }
 
 // Short human range label, e.g. "13 Jun – 18 Sep 2026".
+// Is a fixed monthly cost being paid in month `m` ('YYYY-MM')?
+//
+// Both bounds are inclusive and either may be absent. Absent means "no
+// boundary", which is what every row meant before dates existed — so a row
+// nobody has dated behaves exactly as it always has. 'YYYY-MM' sorts
+// lexicographically, so these are plain string comparisons.
+//
+// The point of this: rent applied to every month forever, including months
+// before the business existed, so an empty January reported a $9,670 loss and
+// Year to Date carried thousands against no sales.
+function recurringActiveIn(row, m) {
+  const start = (row.start_period || '').trim();
+  const end   = (row.end_period   || '').trim();
+  if (start && m < start) return false;
+  if (end   && m > end)   return false;
+  return true;
+}
+
+// The note beside a fixed cost's month boxes. It deliberately never repeats the
+// dates — the two inputs are right there showing them — and says only what the
+// boxes cannot: whether this row reached the period on screen, and how much of
+// it. `months` is how many months of the current period the row was paid in.
+function recurringMonthsNote(row, monthsActive, nMonths, single) {
+  const dated = (row.start_period || '').trim() || (row.end_period || '').trim();
+  // The row is listed but contributes nothing — without this it looks like the
+  // total is wrong, or like the cost was forgotten.
+  if (monthsActive === 0) return single ? 'not paid this month' : 'not paid in this period';
+  if (!dated)             return 'every month';
+  if (!single && monthsActive !== nMonths) return `counted in ${monthsActive} of ${nMonths} months`;
+  return '';
+}
+
 function spreadRangeLabel(row) {
   const fmtOne = ymd => {
     const [y, m, d] = String(ymd || '').split('-').map(Number);
@@ -272,9 +304,20 @@ function render() {
   const beverage = useCogs ? (parseFloat(cogsData.beverage_cogs) || 0) : bevBought;
   const fees     = parseFloat(pnlCosts.invoice_fees) || 0;
   const ohTotal  = pnlOverheads.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-  // Fixed costs are per month, so a 3-month period carries 3× the rent.
-  const fixedPerMonth = pnlRecurring.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-  const fixedTotal    = fixedPerMonth * nMonths;
+  // Fixed costs are per month, so a 3-month period carries 3× the rent — but
+  // only for the months each one was actually being paid in. A row with no
+  // start month still means "every month, forever", which is what every row
+  // meant before they had dates.
+  const fixedAlloc = pnlRecurring.map(r => {
+    const active = months.filter(m => recurringActiveIn(r, m));
+    const amount = parseFloat(r.amount) || 0;
+    return { row: r, months: active.length, total: amount * active.length };
+  });
+  const fixedTotal    = fixedAlloc.reduce((s, x) => s + x.total, 0);
+  // What a full month of the current line-up costs — only meaningful as a
+  // "× n months" summary when every row really does run the whole period.
+  const fixedPerMonth = fixedAlloc.reduce((s, x) => s + (parseFloat(x.row.amount) || 0), 0);
+  const fixedAllMonths = fixedAlloc.every(x => x.months === nMonths);
   // Spread costs: the period's fair share of each multi-month bill.
   const spreadThisMonth = pnlSpread
     .map(r => ({ row: r, ...spreadAllocationRange(r, pnlFrom, pnlTo) }))
@@ -322,15 +365,33 @@ function render() {
 
   const monthShort = m => new Date(m + '-01T00:00:00').toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
 
-  // Fixed monthly cost rows (recurring — same every month, editable)
-  const fixedRowsHtml = pnlRecurring.map(r => `
-    <div class="pnl-oh-row">
-      <input type="text" value="${esc(r.name || '')}" placeholder="e.g. Rent, Wages, Insurance"
-             onchange="pnlUpdateRecurring('${esc(r.id)}','name',this.value)" />
-      <input type="number" step="0.01" min="0" value="${r.amount != null ? r.amount : ''}" placeholder="0.00"
-             onchange="pnlUpdateRecurring('${esc(r.id)}','amount',this.value)" />
-      <button class="pnl-oh-del" title="Remove" onclick="pnlDeleteRecurring('${esc(r.id)}')"><i class="fas fa-times"></i></button>
-    </div>`).join('');
+  // Fixed monthly cost rows (recurring — editable, with the months they run).
+  // The dates sit on their own line under the row rather than as two more
+  // columns: they are usually blank, and crowding them into the money line
+  // would make the common case harder to read than the rare one.
+  const fixedRowsHtml = fixedAlloc.map(x => {
+    const r    = x.row;
+    const note = recurringMonthsNote(r, x.months, nMonths, single);
+    return `
+    <div style="padding-bottom:.35rem">
+      <div class="pnl-oh-row">
+        <input type="text" value="${esc(r.name || '')}" placeholder="e.g. Rent, Insurance, Licence"
+               onchange="pnlUpdateRecurring('${esc(r.id)}','name',this.value)" />
+        <input type="number" step="0.01" min="0" value="${r.amount != null ? r.amount : ''}" placeholder="0.00"
+               onchange="pnlUpdateRecurring('${esc(r.id)}','amount',this.value)" />
+        <button class="pnl-oh-del" title="Remove" onclick="pnlDeleteRecurring('${esc(r.id)}')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="pnl-fixed-when">
+        <span>Paid from</span>
+        <input type="month" value="${esc(r.start_period || '')}" title="First month you paid this. Leave blank for every month."
+               onchange="pnlUpdateRecurring('${esc(r.id)}','start_period',this.value)" />
+        <span>to</span>
+        <input type="month" value="${esc(r.end_period || '')}" title="Last month you paid this. Leave blank if you still pay it."
+               onchange="pnlUpdateRecurring('${esc(r.id)}','end_period',this.value)" />
+        <span class="pnl-fixed-hint">${esc(note)}</span>
+      </div>
+    </div>`;
+  }).join('');
 
   // Manual one-off overhead rows (editable). Over a multi-month period each row
   // is tagged with the month it belongs to.
@@ -485,6 +546,30 @@ function render() {
        </div>`
     : '';
 
+  // A period in which literally nothing was recorded — no sales, no invoices, no
+  // one-offs, no payroll — but which still shows a loss, because undated fixed
+  // costs apply to every month there has ever been. That is how an empty January
+  // reported "Net profit: −$9,670" and how Year to Date carried thousands
+  // against no trading.
+  //
+  // Say so rather than dropping the month from the total: a month with no sales
+  // is not always a month that never happened — a kitchen closed for a
+  // refurbishment still pays its rent, and silently excluding it would understate
+  // the year. The customer knows which of the two it was; the app does not, and
+  // now has somewhere for them to say it.
+  const nothingRecorded = sales <= 0 && cogsTotal <= 0 && fees <= 0 &&
+                          expenseInvTotal <= 0 && ohTotal <= 0 &&
+                          spreadTotal <= 0 && laborTotal <= 0;
+  const emptyPeriodNote = (nothingRecorded && fixedTotal > 0)
+    ? `<div class="pnl-warn">
+         <i class="fas fa-circle-info"></i>
+         <span>Nothing has been recorded for ${esc(periodLabel(pnlFrom, pnlTo))} — no sales, no
+         invoices, no staff cost. The ${fmtMoney(fixedTotal)} below is only your fixed monthly
+         costs, which apply to every month unless you say otherwise. If you weren't trading yet,
+         set the month each one <strong>started</strong> in the list below.</span>
+       </div>`
+    : '';
+
   // Invoices dated in this period that are still in review. Their costs are NOT
   // in any figure on this page, so the profit shown is flattering. Say so before
   // the customer reads the number, not in a footnote under it.
@@ -609,6 +694,7 @@ function render() {
       <div><div class="pnl-label"><strong>Net sales</strong> (money in)</div><div class="pnl-sub">What you took in after tax, discounts and refunds${single ? ' — enter it here' : ''}</div></div>
       ${salesCell}
     </div>
+    ${emptyPeriodNote}
     ${missingSalesNote}
     ${pendingNote}
 
@@ -633,11 +719,13 @@ function render() {
     ${fees ? costRow('Delivery &amp; surcharges', 'From invoices', fees) : ''}
     ${expenseInv.map(r => costRow(esc(r.category), 'From an uploaded bill', parseFloat(r.amount) || 0)).join('')}
 
-    <div class="pnl-sub" style="margin:.9rem .25rem .1rem;font-weight:600;color:var(--text)">Fixed monthly costs <span style="font-weight:400;color:var(--text-muted)">— same every month</span></div>
+    <div class="pnl-sub" style="margin:.9rem .25rem .1rem;font-weight:600;color:var(--text)">Fixed monthly costs <span style="font-weight:400;color:var(--text-muted)">— every month, unless you say when they start or stop</span></div>
     <div>${fixedRowsHtml || '<div class="pnl-sub" style="padding:.25rem">None set yet — add rent, wages, insurance…</div>'}</div>
-    ${(!single && fixedPerMonth) ? `
+    ${(!single && fixedTotal) ? `
     <div class="pnl-row" style="border-bottom:none;padding-top:.15rem">
-      <div class="pnl-sub">${fmtMoney(fixedPerMonth)} a month × ${nMonths} months</div>
+      <div class="pnl-sub">${fixedAllMonths
+        ? `${fmtMoney(fixedPerMonth)} a month × ${nMonths} months`
+        : `Each cost counted only in the months it was paid`}</div>
       <div class="pnl-amount">${fmtMoney(fixedTotal)}</div>
       <div class="pnl-pct">${pct(fixedTotal)}</div>
     </div>` : ''}
@@ -766,10 +854,17 @@ async function pnlDeleteOverhead(id) {
   }
 }
 
-// ── Fixed monthly costs (recurring — apply to every month) ─────
+// ── Fixed monthly costs (recurring — apply from their start month on) ─────
 async function pnlAddRecurring() {
   try {
-    const row = await apiPost(`tables/recurring_expenses`, { name: '', amount: 0, active: 1 });
+    // Start it in the first month of the period being looked at. Someone
+    // entering rent while viewing August means August, and someone building out
+    // a March–August range means March — either way, not "every month that has
+    // ever existed", which is what a blank start still means and what every row
+    // used to do. It is a prefill, not a rule: the box is right there and can be
+    // cleared to get the old behaviour back.
+    const row = await apiPost(`tables/recurring_expenses`,
+      { name: '', amount: 0, active: 1, start_period: pnlFrom });
     pnlRecurring.push(row);
     render();
     const inputs = document.querySelectorAll('.pnl-oh-row input[type="text"]');
@@ -790,12 +885,25 @@ async function pnlUpdateRecurring(id, field, value) {
     const n = parseFloat(value);
     if (isNaN(n) || n < 0) { showToast('Enter a valid amount.', 'error'); return; }
     payload.amount = n; row.amount = n;
+  } else if (field === 'start_period' || field === 'end_period') {
+    // '' clears that boundary back to "no limit in this direction".
+    const v = String(value || '').trim();
+    if (v && !/^\d{4}-\d{2}$/.test(v)) { showToast('Enter a valid month.', 'error'); return; }
+    const start = field === 'start_period' ? v : (row.start_period || '');
+    const end   = field === 'end_period'   ? v : (row.end_period   || '');
+    if (start && end && end < start) {
+      showToast('The last month must be on or after the first month.', 'error');
+      render();   // put the rejected box back to what is actually stored
+      return;
+    }
+    payload[field] = v || null; row[field] = v || null;
   } else {
     payload.name = String(value).trim(); row.name = payload.name;
   }
   try {
     await apiPatch(`tables/recurring_expenses/${id}`, payload);
     render();
+
   } catch (e) {
     showToast('Save failed: ' + e.message, 'error');
   }
