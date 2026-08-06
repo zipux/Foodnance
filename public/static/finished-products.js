@@ -282,33 +282,35 @@ function fp_costPerUnit(p) {
   if (p._cpu !== undefined) return p._cpu;
   return entryPackFacts(p).cost_per_unit;
 }
-// 'oz' is the WEIGHT ounce (28.35 g); fluid ounces are the separate 'fl oz' unit.
-const _FP_WEIGHT_KG = { kg: 1, g: 0.001, lb: 0.453592, oz: 0.0283495231 };
-const _FP_VOLUME_ML = { l: 1000, ml: 1, 'fl oz': 29.5735296 };
-function _fpIsEach(u) { return u === 'each' || u === 'ea' || u === 'unit'; }
+// ── Unit conversion — ONE table for the whole app ──────────────
+// Delegates to invConvertUnitCost() in utils.js, loaded before this file (see
+// finished-products.html). This file used to keep its own copy of the weight
+// and volume factors; that copy did not know `gal`, while utils.js and the
+// backend both did, so a menu item using milk bought by the gallon refused a
+// conversion it could actually make and costed the line in gallons instead.
+// See the same note in recipes.js.
+function _fpIsEach(u) { return invIsEachUnit(u); }
 
 // Dimension of a unit for compatibility checks: 'weight' | 'volume' | 'each' | 'other'.
 function _fpUnitDim(u) {
-  const x = (u || '').toLowerCase().trim();
-  if (_FP_WEIGHT_KG[x] != null) return 'weight';   // kg, g, lb, oz
-  if (_FP_VOLUME_ML[x] != null) return 'volume';   // L, ml, fl oz
-  if (_fpIsEach(x)) return 'each';
-  return 'other';   // case, sub-unit, or anything unrecognised
+  const info = invUnitInfo(u);
+  if (info) return info.dim;          // kg, g, lb, oz, L, ml, fl oz, gal
+  if (invIsEachUnit(u)) return 'each';
+  return 'other';                     // case, sub-unit, or anything unrecognised
 }
 
-// Can `fromU` be expressed in `toU` at all? Same dimension converts; weight↔each
-// bridges via a product's average weight — allowed only when `allowEachWeight`
-// (product lines), never for recipe lines (a recipe has no average weight). The
-// bridge is still flagged uncostable if the weight is missing (see the converter),
-// not blocked here. Volume never crosses; 'other'/'case' only matches itself.
+// Can `fromU` be expressed in `toU` at all? weight↔each bridges via a product's
+// average weight — allowed only when `allowEachWeight` (product lines), never
+// for recipe lines (a recipe has no average weight). Probed with a nominal
+// average weight, so a bridge that EXISTS but isn't set up yet still counts as
+// compatible: it is flagged uncostable by the converter rather than blocked
+// here, which leaves the user somewhere to go.
 function _fpUnitsCompatible(fromU, toU, allowEachWeight) {
-  const a = _fpUnitDim(fromU), b = _fpUnitDim(toU);
-  if (a === 'other' || b === 'other') {
-    return (fromU || '').toLowerCase().trim() === (toU || '').toLowerCase().trim();
+  if (!allowEachWeight) {
+    const a = _fpUnitDim(fromU), b = _fpUnitDim(toU);
+    if ((a === 'weight' && b === 'each') || (a === 'each' && b === 'weight')) return false;
   }
-  if (a === b) return true;
-  if ((a === 'weight' && b === 'each') || (a === 'each' && b === 'weight')) return !!allowEachWeight;
-  return false;
+  return !invConvertUnitCost(1, fromU, toU, 1).error;
 }
 
 // Conversion factor from `fromU` to `toU`, or null when the two units can't be
@@ -316,23 +318,8 @@ function _fpUnitsCompatible(fromU, toU, allowEachWeight) {
 // no average weight). Never a silent factor of 1 — callers treat null as "can't
 // cost this line" and flag it instead of multiplying by a wrong number.
 function fp_conversionFactor(fromU, toU, avgWeightKg) {
-  const pu = (fromU || '').toLowerCase().trim();
-  const ru = (toU   || '').toLowerCase().trim();
-  if (pu === ru) return 1;
-  // Weight ↔ weight (kg, g, lb, oz)
-  if (_FP_WEIGHT_KG[pu] != null && _FP_WEIGHT_KG[ru] != null) return _FP_WEIGHT_KG[ru] / _FP_WEIGHT_KG[pu];
-  // Volume ↔ volume (L, ml, fl oz)
-  if (_FP_VOLUME_ML[pu] != null && _FP_VOLUME_ML[ru] != null) return _FP_VOLUME_ML[ru] / _FP_VOLUME_ML[pu];
-  // Each ↔ weight, via the product's average weight per each (product lines only)
-  if (_fpIsEach(pu) && _FP_WEIGHT_KG[ru] != null) {
-    if (!avgWeightKg || avgWeightKg <= 0) return null;
-    return _FP_WEIGHT_KG[ru] / avgWeightKg;
-  }
-  if (_FP_WEIGHT_KG[pu] != null && _fpIsEach(ru)) {
-    if (!avgWeightKg || avgWeightKg <= 0) return null;
-    return avgWeightKg / _FP_WEIGHT_KG[pu];
-  }
-  return null;   // no bridge between these units
+  const r = invConvertUnitCost(1, fromU, toU, avgWeightKg);
+  return r.error ? null : r.cost;
 }
 
 // ── Recipe Lines ───────────────────────────────────────────────
@@ -510,6 +497,13 @@ function buildFpUnitOptions(selectedUnit, product) {
   if (su) {
     const isSel = sel === su.toLowerCase() ? 'selected' : '';
     html += `<option value="${esc(su)}" ${isSel} style="font-weight:700;color:#4f46e5">${esc(su)} ← sub-unit</option>`;
+  }
+  // The unit this line is ACTUALLY costed in always appears, even when it isn't
+  // in the master list — otherwise the <select> matches nothing and the browser
+  // displays its first option, so the screen names a different unit from the one
+  // the money is being calculated in. Same guard as buildUnitOptions in recipes.js.
+  if (sel && !seen.has(sel) && sel !== su.toLowerCase().trim()) {
+    html += `<option value="${esc(selectedUnit)}" selected>${esc(selectedUnit)}</option>`;
   }
   html += std.map(u => {
     const isSel = sel === u.toLowerCase() ? 'selected' : '';

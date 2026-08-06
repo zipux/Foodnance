@@ -168,70 +168,41 @@ function packUnit(p) { return entryPackFacts(p).pack_unit; }
 // Cost per single base unit (e.g. per kg, per L)
 function costPerUnit(p) { return entryPackFacts(p).cost_per_unit; }
 
-// kg-equivalent of one weight unit (used for all weight ↔ weight math). 'oz' is
-// the WEIGHT ounce (28.35 g); fluid ounces are the separate 'fl oz' volume unit.
-const _WEIGHT_KG = { kg: 1, g: 0.001, lb: 0.453592, oz: 0.0283495231 };
-// ml-equivalent of one volume unit (used for all volume ↔ volume math).
-const _VOLUME_ML = { l: 1000, ml: 1, 'fl oz': 29.5735296 };
-// Treat these pack units as a discrete "each"/count
-function _isEachUnit(u) { return u === 'each' || u === 'ea' || u === 'unit'; }
-
-// Dimension of a unit for compatibility checks: 'weight' | 'volume' | 'each' | 'other'.
-function _unitDim(u) {
-  const x = (u || '').toLowerCase().trim();
-  if (_WEIGHT_KG[x] != null) return 'weight';   // kg, g, lb, oz
-  if (_VOLUME_ML[x] != null) return 'volume';   // L, ml, fl oz
-  if (_isEachUnit(x)) return 'each';
-  return 'other';                               // case, or anything unrecognised
-}
-
-// Can a product priced in `packU` be expressed in `otherU` at all? Same dimension
-// converts; weight↔each bridges via the product's average weight (that bridge is
-// still flagged uncostable if the weight is missing — see unitConversionFactor —
-// not blocked here). Volume never crosses to weight/each, and an 'other'/'case'
-// unit only matches itself. Drives the recipe unit-switch guard so 'each'/'case'
-// items are checked too, instead of only the hardcoded weight↔volume pair.
+// ── Unit conversion — ONE table for the whole app ──────────────
+// Everything below delegates to invConvertUnitCost()/invConvertQty() in
+// utils.js, which utils.js loads before this file on every page that uses it
+// (see recipes.html). This file used to carry its OWN copy of the weight and
+// volume factors, and that copy is how a 180 ml pour of milk bought by the
+// gallon became a $898.20 line: `gal` was known to utils.js and to the backend
+// but not here, so the recipe screen called a conversion it could genuinely do
+// "impossible", refused the switch, and left the 180 sitting under `gal`.
+// A private table also drifted — it carried lb = 0.453592 where the shared one
+// carries 0.45359237.
+//
+// Can a product priced in `packU` be expressed in `otherU` at all? Probed with a
+// nominal average weight, because a MISSING average weight is not an
+// incompatibility: it's a gap the user can fill on the product page, and until
+// they do, the line flags itself uncostable via the null below. This asks "is
+// there a bridge between these two units", not "is it set up yet".
 function _unitsCompatible(packU, otherU) {
-  const a = _unitDim(packU), b = _unitDim(otherU);
-  if (a === 'other' || b === 'other') {
-    return (packU || '').toLowerCase().trim() === (otherU || '').toLowerCase().trim();
-  }
-  if (a === b) return true;
-  return (a === 'weight' && b === 'each') || (a === 'each' && b === 'weight');
+  return !invConvertUnitCost(1, packU, otherU, 1).error;
 }
 
 // Conversion factor: how many "packUnit" equal 1 "recipeUnit".
 // Returns a multiplier so that:  line_cost = unit_cost_per_packUnit × quantity × conversionFactor
 // e.g. packUnit=kg, recipeUnit=g  → 1g = 0.001kg → factor = 0.001
 // e.g. packUnit=g,  recipeUnit=kg → 1kg = 1000g  → factor = 1000
+// The cost of one unit IS that factor, which is why this asks the shared cost
+// converter rather than repeating its table.
 //
 // Each ↔ weight requires the product's average weight per each (avgWeightKg,
-// stored in kg as generic_products.avg_weight_per_unit). If that conversion is
-// needed but no average weight is set, returns NULL — callers must treat null
-// as "cannot cost this line" and flag it, never fall back to a silent factor of 1.
+// stored in kg as generic_products.avg_weight_per_unit). Returns NULL when the
+// units can't be bridged at all, or when that bridge is needed and no average
+// weight is set — callers must treat null as "cannot cost this line" and flag
+// it, never fall back to a silent factor of 1.
 function unitConversionFactor(packUnitStr, recipeUnitStr, avgWeightKg) {
-  const pu = (packUnitStr  || '').toLowerCase();
-  const ru = (recipeUnitStr || '').toLowerCase();
-  if (pu === ru) return 1;
-  // Weight ↔ weight (kg, g, lb, oz)
-  if (_WEIGHT_KG[pu] != null && _WEIGHT_KG[ru] != null) return _WEIGHT_KG[ru] / _WEIGHT_KG[pu];
-  // Volume ↔ volume (L, ml, fl oz)
-  if (_VOLUME_ML[pu] != null && _VOLUME_ML[ru] != null) return _VOLUME_ML[ru] / _VOLUME_ML[pu];
-  // Each ↔ weight, via average weight per each
-  //   packUnit=each, recipeUnit=weight → each per 1 recipeUnit = (recipeUnit in kg) / avgWeightKg
-  //   packUnit=weight, recipeUnit=each → packUnits per 1 each = avgWeightKg / (packUnit in kg)
-  if (_isEachUnit(pu) && _WEIGHT_KG[ru] != null) {
-    if (!avgWeightKg || avgWeightKg <= 0) return null;
-    return _WEIGHT_KG[ru] / avgWeightKg;
-  }
-  if (_WEIGHT_KG[pu] != null && _isEachUnit(ru)) {
-    if (!avgWeightKg || avgWeightKg <= 0) return null;
-    return avgWeightKg / _WEIGHT_KG[pu];
-  }
-  // No bridge between these units (e.g. weight↔volume, each↔volume, case↔weight).
-  // Return null — "cannot cost this line" — never a silent factor of 1, which
-  // would mis-cost the line with no warning. Callers must treat null as uncostable.
-  return null;
+  const r = invConvertUnitCost(1, packUnitStr, recipeUnitStr, avgWeightKg);
+  return r.error ? null : r.cost;
 }
 
 // Average weight (kg per each) for the product referenced by a recipe row, or 0.
@@ -262,6 +233,16 @@ function buildUnitOptions(selectedUnit, product) {
   if (su) {
     const isSelected = sel === su.toLowerCase() ? 'selected' : '';
     html += `<option value="${esc(su)}" ${isSelected} style="font-weight:700;color:#4f46e5">${esc(su)} ← sub-unit</option>`;
+  }
+
+  // The unit this line is ACTUALLY costed in always appears, even when it isn't
+  // in the master list. Without it the <select> matches nothing and the browser
+  // falls back to displaying its first option — so a milk line costed in `gal`
+  // showed `kg`, and the screen disagreed with the number at the moment of
+  // saving. A unit that can't be converted is a refusal the user can see and
+  // act on; a unit that can't be *seen* is not.
+  if (sel && !seen.has(sel) && sel !== su.toLowerCase().trim()) {
+    html += `<option value="${esc(selectedUnit)}" selected>${esc(selectedUnit)}</option>`;
   }
 
   // Standard options — match case-insensitively so 'each' matches 'Each' etc.
@@ -1385,9 +1366,18 @@ function updatePbPreview() {
     return;
   }
 
-  // Scale factor: how many times the base recipe is being made. Yield scaling has
-  // no avg-weight bridge; keep the historic factor-of-1 fallback for mismatched units.
-  const scaleFactor = (batchQty * (unitConversionFactor(batchUnit, recipeYieldUnit) ?? 1)) / recipeYieldQty;
+  // Scale factor: how many times the base recipe is being made — the batch
+  // quantity expressed in the recipe's own yield unit, over the recipe's yield.
+  // This is a QUANTITY conversion, so it goes through invConvertQty. It used to
+  // multiply by unitConversionFactor, which converts the other way (it answers
+  // "how many pack units are in one recipe unit"), so making 2 kg of a recipe
+  // that yields 500 g scaled by 0.000004 instead of 4. Harmless while the unit
+  // box matches the recipe's yield unit, which is what it opens on — but it is a
+  // free dropdown, and changing it deducted a millionth of the ingredients.
+  // Yield scaling has no avg-weight bridge; keep the historic fallback of using
+  // the quantity as-is when the two units can't be bridged.
+  const _scaleConv  = invConvertQty(batchQty, batchUnit, recipeYieldUnit);
+  const scaleFactor = (_scaleConv.error ? batchQty : _scaleConv.qty) / recipeYieldQty;
 
   let totalBatchCost = 0;
 
@@ -1466,7 +1456,10 @@ async function confirmProduceBatch() {
 
   const recipeYieldQty  = parseFloat(pbRecipeData.servings) || 1;
   const recipeYieldUnit = pbRecipeData.yield_unit || 'kg';
-  const scaleFactor     = (batchQty * (unitConversionFactor(batchUnit, recipeYieldUnit) ?? 1)) / recipeYieldQty;
+  // Same conversion as the preview above — the panel the user approved and the
+  // deduction that follows it must be produced the same way.
+  const _scaleConv      = invConvertQty(batchQty, batchUnit, recipeYieldUnit);
+  const scaleFactor     = (_scaleConv.error ? batchQty : _scaleConv.qty) / recipeYieldQty;
   const reason          = note ? `Batch production: ${pbRecipeData.name} — ${note}` : `Batch production: ${pbRecipeData.name}`;
 
   const btn = document.getElementById('confirmProduceBatchBtn');

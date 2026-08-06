@@ -368,7 +368,10 @@ function normalizeUnit(u: string): string {
 // Order here is the picker's sort_order. Already normalizeUnit()-cased.
 // 'oz' is weight; fluid ounces are the separate 'fl oz' unit — the two never
 // convert into each other, which is why both are present.
-const DEFAULT_UNITS = ['kg', 'g', 'lb', 'ml', 'L', 'each', 'case', 'oz', 'fl oz']
+// 'gal' is here because the invoice reader already emits it (parsePackSize
+// matches it) and both converters have always known it — leaving it out of the
+// picker meant a product could be created in a unit the picker could not show.
+const DEFAULT_UNITS = ['kg', 'g', 'lb', 'ml', 'L', 'each', 'case', 'oz', 'fl oz', 'gal']
 
 // ─── The category master list every new organization starts with ───
 // Seeded into `categories` at account creation, alongside DEFAULT_UNITS.
