@@ -205,6 +205,34 @@ function unitConversionFactor(packUnitStr, recipeUnitStr, avgWeightKg) {
   return r.error ? null : r.cost;
 }
 
+// Why a line can't be costed, and what to do about it — in that order, because
+// "Cannot convert case to each" tells someone what happened and nothing about
+// how to get on with their day. Three distinct causes, three different fixes:
+//
+//   case/ct/pk → anything   the app has no idea what is inside a case. The
+//                           product's SUB-UNIT is the answer, and it already
+//                           works — a case of 24 tonics costs $0.90 a bottle.
+//   each ↔ weight           needs the product's average weight per unit.
+//   weight ↔ volume         no fix; they measure different things.
+function uncostableReason(packU, wantU, productName) {
+  const name = productName ? `"${productName}"` : 'This item';
+  const dimOf = (u) => (invUnitInfo(u) ? invUnitInfo(u).dim : (invIsEachUnit(u) ? 'each' : 'other'));
+  const from = dimOf(packU), to = dimOf(wantU);
+
+  if (from === 'other' || to === 'other') {
+    const pack = from === 'other' ? packU : wantU;
+    return `${name} is priced by the ${pack}, and the app doesn't know what is inside one — ` +
+           `so it can't cost this line in ${wantU}. Set a sub-unit on the product ` +
+           `(for example 1 ${pack} = 200 ${wantU}) and pick that instead.`;
+  }
+  if ((from === 'each' && to === 'weight') || (from === 'weight' && to === 'each')) {
+    return `${name} is bought by the ${packU}. To use it by the ${wantU}, set an ` +
+           `"Average Weight per Unit" on the product.`;
+  }
+  return `${name} is priced by the ${packU}, which measures something different from ${wantU} — ` +
+         `there is no way to convert between them, so this line won't be costed.`;
+}
+
 // Average weight (kg per each) for the product referenced by a recipe row, or 0.
 function rowAvgWeightKg(r) {
   const p = r && r.product_id ? allProducts.find(x => x.id === r.product_id) : null;
@@ -476,7 +504,10 @@ function _updateIngCostDisplay(idx) {
   const unit   = r.unit || r.pack_unit;
   const factor = unitConversionFactor(r.pack_unit, unit, rowAvgWeightKg(r));
   if (factor === null) {
-    el.innerHTML = `<span style="color:#dc2626" title="Set an Average Weight per Unit on this product to use it by ${esc(unit)}"><i class="fas fa-triangle-exclamation"></i> set avg. weight</span>`;
+    // The title carries the specific remedy. The old text always said "set an
+    // average weight", which is the fix for exactly one of the three reasons a
+    // line can't be costed — useless advice for a case-priced item.
+    el.innerHTML = `<span style="color:#dc2626" title="${esc(uncostableReason(r.pack_unit, unit, r.product_name))}"><i class="fas fa-triangle-exclamation"></i> can’t cost in ${esc(unit)}</span>`;
     return;
   }
   el.textContent = fmtUnitCost(r.unit_cost * factor, unit);
@@ -501,19 +532,26 @@ function onUnitChange(idx) {
   const prevUnit = sel.dataset.prevUnit || ingredientRows[idx]?.unit || '';
   const row      = ingredientRows[idx] || {};
 
-  // Block a switch to a unit this ingredient can't be costed in. Compatibility is
-  // driven by the product's pack unit (what it's priced in) and real dimension
-  // bridges, not a hardcoded weight/volume list — so 'each'/'case' items are
-  // guarded too (e.g. an each-priced cucumber can't switch to L). The product's
-  // own sub-unit is always allowed (costed via the sub-unit path, not conversion).
+  // A unit this ingredient can't be costed in is ALLOWED, and the line then
+  // reads ⚠ n/a — it is not refused.
+  //
+  // Refusing it was worse. The switch was reverted but the quantity was left
+  // alone, so a "200" typed meaning 200 napkins stayed sitting under `case` and
+  // the line billed 200 CASES: $6,000, arithmetically correct and completely
+  // wrong. A toast is transient; the $6,000 is what gets saved. Letting the
+  // unit through routes the line into the uncostable path that already exists
+  // for an each-priced product used by weight — ⚠ n/a on the line, ⚠ on the
+  // total, and a warning before saving. Wrong-and-confident becomes visibly
+  // unpriced, which is the same trade the rest of this file makes.
+  //
+  // The product's own sub-unit is always fine (costed via the sub-unit path,
+  // not conversion) and is also the actual remedy for a case-priced item.
   if (newUnit !== prevUnit) {
     const packU   = row.pack_unit || prevUnit || 'kg';
     const subName = (row.sub_unit_name || '').toLowerCase().trim();
     const isSub   = subName && newUnit.toLowerCase().trim() === subName;
     if (!isSub && !_unitsCompatible(packU, newUnit)) {
-      sel.value = prevUnit;
-      showToast(`Cannot convert ${packU} to ${newUnit} — unit reset.`, 'warning');
-      return;
+      showToast(uncostableReason(packU, newUnit, row.product_name), 'warning');
     }
   }
 
@@ -905,7 +943,7 @@ function anyUncostable(rows) {
 // Format a line/total cost cell; uncostable → a red warning marker.
 function fmtLineCost(v) {
   return isUncostable(v)
-    ? '<span style="color:#dc2626" title="Set an Average Weight per Unit on this product to cost it by weight">⚠&nbsp;n/a</span>'
+    ? '<span style="color:#dc2626" title="This line can’t be costed in the unit chosen — change the unit, or set a sub-unit or average weight on the product">⚠&nbsp;n/a</span>'
     : fmt(v);
 }
 
@@ -929,7 +967,7 @@ async function saveRecipe() {
   if (!items.length) { showToast('Add at least one ingredient.', 'error'); return; }
 
   if (anyUncostable(items)) {
-    showToast('Some ingredients can’t be costed — set an Average Weight per Unit on those products. Saving with those lines counted as $0.', 'warning');
+    showToast('Some ingredients can’t be costed in the unit chosen — look for the ⚠ rows. Saving counts those lines as $0.', 'warning');
   }
 
   const total = sumLineCosts(items);

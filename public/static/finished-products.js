@@ -447,10 +447,12 @@ function onFpRecipeUnitChange(idx) {
   // A recipe carries no average weight, so it can only be measured in its yield
   // dimension. Block a switch the converter can't perform (e.g. a Puree recipe
   // that yields L can't be used by kg).
+  // Allowed, not refused — the line then reads ⚠ n/a. Reverting the dropdown
+  // left the quantity behind under the old unit, so a number typed for one unit
+  // was billed as another. See the same change in recipes.js onUnitChange.
   if (newUnit !== prevUnit && !_fpUnitsCompatible(yieldU, newUnit, false)) {
-    if (sel) sel.value = prevUnit;
-    showToast(`Cannot convert ${yieldU} to ${newUnit} — unit reset.`, 'warning');
-    return;
+    showToast(`This recipe yields ${yieldU}, which can't be converted to ${newUnit} — ` +
+              `this line won't be costed until the unit matches.`, 'warning');
   }
   fpRecipeRows[idx].unit        = newUnit;
   fpRecipeRows[idx]._manualUnit = true; // user explicitly chose — lock it
@@ -663,10 +665,18 @@ function onFpProductUnitChange(idx) {
   // Product lines bridge each↔weight via the product's average weight (flagged
   // uncostable if it's missing, not blocked); the product's own sub-unit is
   // costed directly. Block only genuinely incompatible switches (e.g. kg↔L).
+  // Allowed, not refused — see the recipe-line branch above. A case-priced
+  // product used by the each is the case this exists for: refusing left "200"
+  // sitting under `case` and billed 200 cases.
   if (newUnit !== prevUnit && !isSub && !_fpUnitsCompatible(packU, newUnit, true)) {
-    if (sel) sel.value = prevUnit;
-    showToast(`Cannot convert ${packU} to ${newUnit} — unit reset.`, 'warning');
-    return;
+    const dim = (u) => (invUnitInfo(u) ? invUnitInfo(u).dim : (invIsEachUnit(u) ? 'each' : 'other'));
+    showToast(
+      (dim(packU) === 'other' || dim(newUnit) === 'other')
+        ? `This product is priced by the ${packU}, and the app doesn't know what is inside one — ` +
+          `set a sub-unit on the product (for example 1 ${packU} = 200 ${newUnit}) to use it that way. ` +
+          `Until then this line won't be costed.`
+        : `${packU} can't be converted to ${newUnit}, so this line won't be costed.`,
+      'warning');
   }
   fpProductRows[idx].unit        = newUnit;
   fpProductRows[idx]._manualUnit = true; // user explicitly chose — lock it
