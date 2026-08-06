@@ -6,6 +6,12 @@ type Bindings = {
   FILES: R2Bucket
   ANTHROPIC_API_KEY: string     // secret set via wrangler / .dev.vars
   SESSION_SECRET: string        // secret — signs session cookies; see auth section
+  // 'production' | 'staging' — a plain var, not a secret, set per environment in
+  // wrangler.jsonc. Drives the staging banner and nothing else. It defaults to
+  // 'production' everywhere it is missing, so a forgotten var can only ever hide
+  // the banner on staging (harmless: you stay careful) and never show a
+  // "safe to break" banner over live customer data.
+  APP_ENV?: string
 }
 
 const app = new Hono<{ Bindings: Bindings; Variables: { user: SessionUser } }>()
@@ -31,6 +37,7 @@ const PUBLIC_API = new Set([
   '/api/auth/logout',     // clearing a cookie needn't be authenticated
   '/api/auth/me',         // its whole job is answering "am I signed in?" (401 when not)
   '/api/auth/bootstrap',  // first-run only; refuses once any user exists
+  '/api/env',             // returns 'production'/'staging'; the URL already says as much
 ])
 
 // Still allowed while an account is suspended: everything about the session
@@ -762,6 +769,22 @@ function publicUser(u: SessionUser) {
       : [...planFeatures(u.org_plan)],
   }
 }
+
+// ─── Which environment is this? ───────────────────────────────
+// GET /api/env  →  { environment: 'production' | 'staging' }
+//
+// Drives the staging banner (public/static/env-banner.js) and nothing else.
+// Public, and safe to be: it discloses nothing the address bar doesn't already,
+// and it is needed BEFORE sign-in — the login screen is exactly where mistaking
+// one site for the other begins.
+//
+// Anything other than the literal 'staging' answers 'production'. The banner
+// promises a screen is safe to break, so the default must be the careful one: a
+// missing or misspelt APP_ENV hides the banner on staging rather than painting
+// one over live customer data.
+app.get('/api/env', (c) => c.json({
+  environment: c.env.APP_ENV === 'staging' ? 'staging' : 'production',
+}))
 
 // One-time bootstrap: creates the very first super-admin. Because there is no
 // signup page, without this there would be no way to get the first account in.

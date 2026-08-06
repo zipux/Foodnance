@@ -50,6 +50,16 @@ live database*, so "just checking what the old version did" could void a real
 customer's invoice. Preview deployments (staging and its hashes) are the only
 ones that are not. When comparing behaviour, use staging, never an old hash URL.
 
+**The staging site wears a banner.** `public/static/env-banner.js` (loaded by
+every page, including `login.html`, so it works before sign-in) asks
+`GET /api/env` and paints a hazard-striped bar plus a `[STAGING]` tab title when
+the answer is `staging`. The answer comes from the `APP_ENV` var in
+`wrangler.jsonc`, set per environment. **Anything other than the literal
+`'staging'` means production**, so a missing or misspelt var hides the banner on
+staging (harmless — you stay careful) rather than promising "nothing here is
+real" over live customer data. Bump the `?v=` when editing it, like any static
+JS: the CDN caches by full URL and will happily keep serving the old copy.
+
 **Secrets are per-environment and are NOT copied over.** Staging has its own
 `SESSION_SECRET`, deliberately different, so a staging session cookie can never
 be a valid credential against production. It has **no `ANTHROPIC_API_KEY`**, so

@@ -8,6 +8,12 @@
 	],
 
 	// ── PRODUCTION — what `npm run deploy` uses. Real customer data. ──
+	// APP_ENV drives the staging banner (see /api/env in src/index.ts). Anything
+	// but the literal "staging" means production, so the banner can never appear
+	// over live data by accident.
+	"vars": {
+		"APP_ENV": "production"
+	},
 	"d1_databases": [
 		{
 			"binding": "DB",
@@ -50,6 +56,9 @@
 	//   npx wrangler pages secret put ANTHROPIC_API_KEY --project-name webapp
 	"env": {
 		"preview": {
+			"vars": {
+				"APP_ENV": "staging"
+			},
 			"d1_databases": [
 				{
 					"binding": "DB",
