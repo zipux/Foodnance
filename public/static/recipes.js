@@ -1093,9 +1093,18 @@ async function openRecipeDetail(id) {
   const yieldQty  = recipe.servings   || 1;
   const yieldUnit = recipe.yield_unit || 'kg';
 
-  // Recalculate total live so it always reflects correct unit conversions
+  // Take the total from the shared live cost index — the same figure the card
+  // behind this modal is showing. Recomputing it here is what let the two
+  // disagree by a penny on a rounding boundary, and the index also carries the
+  // uncostable flag, which this screen used to drop entirely.
+  const rIdx = rCostIndex.recipe.get(recipe.id);
   let totalCost = 0;
-  if (items.length) {
+  let anyUnc    = !!rIdx?.uncostable;
+  if (rIdx) {
+    totalCost = recipeLiveCost(recipe);
+  } else if (items.length) {
+    // Index not built yet (the modal can be opened before the catalogue load
+    // finishes). Recompute, and work out the flag the same way.
     items.forEach(it => {
       const prod = allProducts.find(p => p.id === it.product_id);
       const row = {
@@ -1108,11 +1117,19 @@ async function openRecipeDetail(id) {
         sub_unit_qty:  prod?.sub_unit_qty  || 0,
       };
       const c = calcIngredientLineCost(row);
-      totalCost += isUncostable(c) ? 0 : c;
+      if (isUncostable(c)) anyUnc = true;
+      else totalCost += c;
     });
   } else {
     totalCost = recipe.total_cost || 0; // fallback to saved value
   }
+
+  // The same marker the list card and the edit form use. A total that quietly
+  // leaves out an ingredient it could not price reads as a complete number, and
+  // this modal is the screen people open to check a cost in detail.
+  const uncWarn = anyUnc
+    ? ' <span title="An ingredient could not be costed — set an average weight, or check its unit" style="color:#dc2626">&#9888;</span>'
+    : '';
 
   let body = `
     ${costBasisNote(rCostIndex.recipe.get(recipe.id)?.basis)}
@@ -1176,12 +1193,12 @@ async function openRecipeDetail(id) {
       <div>
         <div class="label"><i class="fas fa-calculator"></i> Total Recipe Cost</div>
       </div>
-      <div class="amount">${fmt(totalCost)}</div>
+      <div class="amount">${fmt(totalCost)}${uncWarn}</div>
     </div>
     ${yieldQty > 0 ? `
     <div class="detail-cost-box" style="margin-top:.5rem;background:#f0fdf4;border-color:#86efac">
-      <div><div class="label"><i class="fas fa-balance-scale"></i> Cost per ${esc(yieldUnit)}</div></div>
-      <div class="amount" style="color:#16a34a">${fmt(totalCost / yieldQty)}</div>
+      <div><div class="label"><i class="fas fa-balance-scale"></i> Cost per ${esc(priceUnitLabel(yieldUnit))}</div></div>
+      <div class="amount" style="color:#16a34a">${fmt(scalePriceUnit(totalCost / yieldQty, yieldUnit).cost)}</div>
     </div>` : ''}
   `;
 

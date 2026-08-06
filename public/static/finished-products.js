@@ -813,6 +813,12 @@ function recalcFpCosts() {
 
   // Sum recipe costs (quantity × cost_per_yield_unit × unit conversion)
   fpRecipeRows.filter(r => r && r.ref_id).forEach(r => {
+    // A menu item INHERITS its recipe's uncostable-ness. The recipe hands back a
+    // perfectly good number with the unpriceable ingredient simply left out, so
+    // looking only at this form's own lines reported a clean total for an
+    // Affogato whose Vanilla Cream carries a ⚠. The list card knew, because the
+    // shared index carries the flag upwards; this form did not.
+    if (fpCostIndex.recipe.get(r.ref_id)?.uncostable) anyUncostable = true;
     const factor = fp_conversionFactor(r.yield_unit || 'kg', r.unit || 'kg');
     if (factor === null) { anyUncostable = true; return; }
     total += (r.cost_per_yield_unit || 0) * (r.quantity || 0) * factor;
@@ -1047,6 +1053,14 @@ async function openFpDetail(id) {
   const productItems = items.filter(i => i.item_type === 'product');
   // Derived from today's prices, not the stored snapshot — see fpLiveCost().
   const totalCost    = fpLiveCost(fp);
+  // The same marker the card carries. Without it this modal reports a confident
+  // total for a menu item that contains something the app could not price —
+  // and this is the screen people open precisely to check a cost in detail.
+  // A finished product inherits it from its recipes too, which is why it reads
+  // the shared index rather than looking only at its own lines.
+  const uncWarn      = fpLiveUncostable(fp)
+    ? ' <span title="An ingredient could not be costed — set an average weight, or check its unit" style="color:#dc2626">&#9888;</span>'
+    : '';
   const selling      = parseFloat(fp.selling_price) || 0;
   const profit       = selling > 0 ? selling - totalCost : 0;
   const margin       = selling > 0 ? (profit / selling) * 100 : 0;
@@ -1056,7 +1070,7 @@ async function openFpDetail(id) {
     <div class="detail-section-title">Product Info</div>
     <div class="detail-info-grid">
       ${fp.description ? `<div class="detail-info-item"><span>Description</span><span>${esc(fp.description)}</span></div>` : ''}
-      <div class="detail-info-item"><span>Total Cost</span><span>${fmt(totalCost)}</span></div>
+      <div class="detail-info-item"><span>Total Cost</span><span>${fmt(totalCost)}${uncWarn}</span></div>
       <div class="detail-info-item"><span>Selling Price</span><span>${selling ? fmt(selling) : '—'}</span></div>
       <div class="detail-info-item"><span>Profit / Loss</span><span style="color:${profit >= 0 ? '#16a34a' : '#dc2626'};font-weight:700">${profit >= 0 ? '+' : ''}${fmt(profit)}</span></div>
       ${selling ? `<div class="detail-info-item"><span>Margin</span><span>${margin.toFixed(1)}%</span></div>` : ''}
@@ -1110,7 +1124,7 @@ async function openFpDetail(id) {
   body += `
     <div class="detail-cost-box" style="margin-top:1rem">
       <div><div class="label"><i class="fas fa-calculator"></i> Total Cost</div></div>
-      <div class="amount">${fmt(totalCost)}</div>
+      <div class="amount">${fmt(totalCost)}${uncWarn}</div>
     </div>
   `;
   if (selling) {
