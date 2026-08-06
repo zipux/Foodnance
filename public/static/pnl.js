@@ -917,13 +917,71 @@ function pnlEditLabor(id) {
   openModal('laborModal');
 }
 
+// Pay periods already on file whose dates touch start..end, newest first.
+// `excludeId` is the row being edited — re-saving it must not warn about itself.
+//
+// Entering payroll is the most repetitive job on this page (26 times a year,
+// always the same shape), which makes it the one most likely to be entered
+// twice; and labour is the biggest number here, so a duplicate does more damage
+// than a duplicate anywhere else. A duplicated August fortnight took $23,800 off
+// the month's profit with nothing on screen to say why.
+//
+// pnlLabor holds EVERY pay period, not just the ones in view, so a clash with a
+// fortnight outside the current month is still caught.
+function pnlOverlappingLabor(start, end, excludeId) {
+  const s = _dayNum(start), e = _dayNum(end);
+  if (isNaN(s) || isNaN(e)) return [];
+  return pnlLabor.filter(r => {
+    if (!r.start_date || !r.end_date) return false;
+    if (excludeId && r.id === excludeId) return false;
+    return _dayNum(r.start_date) <= e && s <= _dayNum(r.end_date);
+  });
+}
+
+// An exact repeat — same dates, same money — is almost certainly the same pay
+// run entered twice. A partial overlap is a different thing: splitting kitchen
+// and front of house into two rows for one fortnight is legitimate. Both are
+// worth mentioning, but only one of them should sound like a mistake.
+function _isSameLaborRun(r, start, end, total) {
+  return r.start_date === start && r.end_date === end &&
+         Math.abs((parseFloat(r.total_amount) || 0) - total) < 0.005;
+}
+
+// One sentence naming what the new row clashes with. Null when nothing does.
+function pnlLaborClashNote(start, end, total, excludeId) {
+  const clashes = pnlOverlappingLabor(start, end, excludeId);
+  if (!clashes.length) return null;
+  const dup   = !isNaN(total) && clashes.find(r => _isSameLaborRun(r, start, end, total));
+  const first = dup || clashes[0];
+  const label = `${first.name ? `"${first.name}" · ` : ''}${spreadRangeLabel(first)} · ${fmtMoney(first.total_amount)}`;
+  const more  = clashes.length > 1 ? ` (and ${clashes.length - 1} more)` : '';
+  return dup
+    ? `You already have an identical pay period: ${label}${more}. Saving this adds it a second time.`
+    : `This overlaps a pay period you already have: ${label}${more}. That is fine if you are splitting one pay run across two rows — otherwise the staff cost is counted twice.`;
+}
+
 // Live "this period's share" hint — the whole reason the dates exist, so it is
-// worth showing before they save rather than after.
+// worth showing before they save rather than after. Doubles as the place the
+// overlap warning appears, so the clash is visible while the dates are still
+// under the cursor rather than only at the moment of saving.
 function updateLaborPreview() {
   const el    = document.getElementById('laborPreview');
   const total = parseFloat(document.getElementById('laborTotal').value);
   const start = document.getElementById('laborStart').value;
   const end   = document.getElementById('laborEnd').value;
+
+  const warnEl = document.getElementById('laborOverlapWarn');
+  const clash  = (start && end && _dayNum(end) >= _dayNum(start))
+    ? pnlLaborClashNote(start, end, total, document.getElementById('laborId').value)
+    : null;
+  if (clash) {
+    warnEl.classList.remove('hidden');
+    warnEl.innerHTML = `<i class="fas fa-triangle-exclamation"></i> ${esc(clash)}`;
+  } else {
+    warnEl.classList.add('hidden');
+    warnEl.textContent = '';
+  }
+
   if (isNaN(total) || !start || !end || _dayNum(end) < _dayNum(start)) { el.textContent = ''; return; }
   const a = spreadAllocationRange({ total_amount: total, start_date: start, end_date: end }, pnlFrom, pnlTo);
   const label = periodLabel(pnlFrom, pnlTo);
@@ -941,6 +999,13 @@ async function pnlSaveLabor() {
   if (isNaN(total) || total < 0)     { showToast('Enter a valid staff cost.', 'error'); return; }
   if (!start || !end)                { showToast('Enter the pay period start and end dates.', 'error'); return; }
   if (_dayNum(end) < _dayNum(start)) { showToast('End date must be on or after the start date.', 'error'); return; }
+
+  // Warn, never block: two rows for one fortnight is a legitimate way to split
+  // kitchen from front of house, and refusing it would send someone off adding
+  // their payroll together by hand. The amber note in the modal has already said
+  // this; the confirm is the last chance to notice it.
+  const clash = pnlLaborClashNote(start, end, total, id);
+  if (clash && !confirm(`${clash}\n\nSave it anyway?`)) return;
 
   // Unnamed is fine — the row falls back to "Pay period" and prints the dates
   // underneath, so auto-filling the range into the name only says it twice.
