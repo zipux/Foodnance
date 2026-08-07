@@ -60,23 +60,42 @@ function fmtDate(iso) {
 // pack ("2 x 2 kg" = 4 kg) pre-fills correctly instead of collapsing to qty "2"
 // with an unrecognized "x 2 kg" unit (which shows blank and, if approved, gets
 // coerced to "each"). Simple "N unit" packs keep their existing behavior.
+// 'lt' is a supplier spelling of litre, not a unit of its own. It is translated
+// to 'L' here rather than added to the units master list on purpose: a stored
+// 'lt' would be a SECOND volume unit that does not convert into 'L', so oil
+// invoiced in 'lt' could not be costed into a recipe measured in 'L'. Keeping it
+// out of the master list keeps it out of every picker, so the customer only ever
+// sees 'L'. Mirrors normalizeUnit() in src/index.ts.
+//
+// Deliberately narrow: ONLY 'lt' is rewritten. Every other unit token is passed
+// through exactly as matched, casing included ("KG" stays "KG"), because the
+// unit dropdown and isKnownUnit() already compare case-insensitively and
+// changing that would move rows this parser gets right today.
+function normalizeInvoiceUnit(u) {
+  const t = (u || '').trim();
+  return t.toLowerCase() === 'lt' ? 'L' : t;
+}
+
 function parsePackaging(str) {
   const s = (str || '').trim();
   if (!s) return { pack_qty: '', pack_unit: '' };
-  const unitPat = '(?:kg|g|lb|lbs|l|ml|oz|fl\\s*oz|gal)';
-  // "N x M unit" → qty = N*M (e.g. "2 x 2 kg" → 4 kg)
+  // MUST stay identical to the copy in src/index.ts — this screen and the write
+  // path have to agree on what a pack size means. tests/pack-size-pins.test.mjs
+  // fails the suite if they drift apart.
+  const unitPat = '(?:kg|g|lb|lbs|l|lt|ml|oz|fl\\s*oz|gal)';
+  // "N x M unit" → qty = N*M (e.g. "2 x 2 kg" → 4 kg, "4x3 lt" → 12 L)
   let m = s.match(new RegExp(`^([\\d.]+)\\s*[×xX]\\s*([\\d.]+)\\s*(${unitPat})\\b`, 'i'));
   if (m) {
     const q = (parseFloat(m[1]) || 1) * (parseFloat(m[2]) || 1);
-    return { pack_qty: String(Math.round(q * 1000) / 1000), pack_unit: m[3].trim() };
+    return { pack_qty: String(Math.round(q * 1000) / 1000), pack_unit: normalizeInvoiceUnit(m[3]) };
   }
   // "N/M unit" fraction notation → the second number is the pack size (e.g. "1/5 kg" → 5 kg)
   m = s.match(new RegExp(`^([\\d.]+)\\s*/\\s*([\\d.]+)\\s*(${unitPat})\\b`, 'i'));
-  if (m) return { pack_qty: m[2], pack_unit: m[3].trim() };
+  if (m) return { pack_qty: m[2], pack_unit: normalizeInvoiceUnit(m[3]) };
   // Simple "N unit" / "N word" (unchanged)
   m = s.match(/^([\d.,]+)\s*(.*)$/);
-  if (m) return { pack_qty: m[1], pack_unit: m[2].trim() };
-  return { pack_qty: '', pack_unit: s };
+  if (m) return { pack_qty: m[1], pack_unit: normalizeInvoiceUnit(m[2]) };
+  return { pack_qty: '', pack_unit: normalizeInvoiceUnit(s) };
 }
 
 // Returns total base units: qty_ordered × the numeric size in pack_size string.

@@ -358,16 +358,28 @@ function classifyNameMatch(
 //   "5L"          → { packQty: 5, packUnit: "L" }
 //   "35 LB"       → { packQty: 35, packUnit: "LB" }
 // ─── Helper: canonical casing for a unit of measure ────────────
-// Cosmetic normalization only — every unit conversion elsewhere is already
-// case-insensitive, so this changes display casing, never math. Lowercases the
-// unit, except litre which uses the SI symbol 'L' (a lowercase 'l' reads as a 1).
-// Applied to parsed invoice units so imports stay consistent (e.g. "LB" → "lb",
-// "KG" → "kg", "Each" → "each"). Custom multi-word units pass through lowercased.
+// Mostly cosmetic — every unit conversion elsewhere is already case-insensitive,
+// so the casing rules change display, never math. Lowercases the unit, except
+// litre which uses the SI symbol 'L' (a lowercase 'l' reads as a 1). Applied to
+// parsed invoice units so imports stay consistent (e.g. "LB" → "lb", "KG" →
+// "kg", "Each" → "each"). Custom multi-word units pass through lowercased.
+//
+// The one rule here that is NOT cosmetic is 'lt' → 'L'. 'lt' is a supplier
+// spelling of litre, never a unit in its own right, and it is translated here
+// rather than added to DEFAULT_UNITS on purpose: a stored 'lt' would be a
+// SECOND volume unit that does not convert into 'L', so oil invoiced in 'lt'
+// could not be costed into a recipe measured in 'L' and would come back
+// uncostable. Keeping it out of the master list keeps it out of every picker,
+// so a customer never sees the token at all.
+//
+// Reached only from parsePackSize() below, so this translation cannot touch a
+// unit a user typed themselves.
 function normalizeUnit(u: string): string {
   const t = (u || '').trim()
   if (!t) return t
-  if (t.toLowerCase() === 'l') return 'L'
-  return t.toLowerCase()
+  const lower = t.toLowerCase()
+  if (lower === 'l' || lower === 'lt') return 'L'
+  return lower
 }
 
 // ─── The unit master list every new organization starts with ───
@@ -419,8 +431,14 @@ function parsePackSize(raw: string): { packQty: number; packUnit: string } {
   const s = (raw || '').trim()
   if (!s) return { packQty: 1, packUnit: normalizeUnit('each') }
 
-  // Known measurable unit pattern (case-insensitive)
-  const unitPat = '(?:kg|g|lb|lbs|l|ml|oz|fl\\s*oz|gal)'
+  // Known measurable unit pattern (case-insensitive).
+  // MUST stay identical to the copy in public/static/invoices.js — the review
+  // screen and this write path have to agree on what a pack size means.
+  // tests/pack-size-pins.test.mjs fails the suite if they drift apart.
+  // 'lt' is here so a multiplied pack written "4x3 lt" multiplies out to 12
+  // instead of collapsing to 4 with an unusable unit; normalizeUnit() then
+  // turns it into 'L', so 'lt' is never stored or shown.
+  const unitPat = '(?:kg|g|lb|lbs|l|lt|ml|oz|fl\\s*oz|gal)'
 
   // Pattern 1: "N × N UNIT" or "N x N UNIT" (e.g. "1 × 1.89L", "6 x 100OZ", "6x100 OZ")
   const multMatch = s.match(
