@@ -471,6 +471,35 @@ function parsePackSize(raw: string): { packQty: number; packUnit: string } {
   return { packQty: 1, packUnit: normalizeUnit(s || 'each') }
 }
 
+// cost_per_unit: line_total ÷ (pack_qty × qty_ordered) gives price per standard unit.
+//   4 bags × 12 LB/bag at $111.84 total → $111.84 ÷ 48 lb = $2.33/lb
+//   3 bags × 5 LB/bag at $53.28 total → $53.28 ÷ 15 lb = $3.552/lb
+// For "Each" or non-standard units, cost per each = cost / qty_ordered.
+//
+// That second example used to be written "$3.55/lb" here, which was the ROUNDED
+// output being quoted back as the arithmetic — the tell that the rounding below
+// had stopped looking like a lossy step and started looking like the answer.
+//
+// DO NOT round this to cents. A per-unit price is a RATE, not a money amount:
+// priced per g or per ml a real price is a fraction of a cent, so a
+// Math.round(x*100)/100 here does not tidy the number, it destroys it. Measured
+// on live data 2026-08-08: Heineken 0.0 at $43.96 for 4 × 1980 ml is
+// $0.005551/ml and was stored as $0.01 — an 80% overstatement; sparkling water
+// went the other way at −33%. Anything under half a cent per unit collapses to
+// 0.00 outright, which reads downstream as a free ingredient (flour at
+// $1.50/kg is $0.0015/g) — the exact silent zero entryPackFacts() refuses to
+// produce elsewhere.
+//
+// The other two writers of this column already store full precision — the
+// manual entry form in products.js and the unit-conversion cascade, which keeps
+// 6dp — so rounding here also made the AI import path disagree with them for
+// the same purchase. Rounding belongs in the display layer, where
+// fmtUnitCost() already quotes per-g prices per kg for exactly this reason.
+function unitCostFrom(cost: number, packQty: number, qtyOrdered: number): number {
+  const totalUnits = packQty * qtyOrdered
+  return totalUnits > 0 ? cost / totalUnits : cost
+}
+
 // True when a pack-size string carries an explicit unit of measure — a real unit
 // token ("kg", "L"…), a count word ("each"), or any alphabetic unit — as opposed
 // to a bare number. A number-only pack size ("2") would otherwise be silently
@@ -3265,14 +3294,7 @@ app.post('/api/bulk/upsert-products', async (c) => {
     //   "12 Each"     → 12, "Each"
     const { packQty, packUnit } = parsePackSize((p.pack_size as string) || '')
 
-    // cost_per_unit: line_total ÷ (pack_qty × qty_ordered) gives price per standard unit.
-    // e.g. 3 bags × 5 LB/bag at $53.28 total → $53.28 ÷ 15 lb = $3.55/lb
-    // e.g. 4 bags × 12 LB/bag at $111.84 total → $111.84 ÷ 48 lb = $2.33/lb
-    // For "Each" or non-standard units, cost per each = cost / qty_ordered
-    const totalUnits = packQty * qtyOrdered
-    const costPerUnit = totalUnits > 0
-      ? Math.round((cost / totalUnits) * 100) / 100
-      : cost
+    const costPerUnit = unitCostFrom(cost, packQty, qtyOrdered)
 
     // Calculate days_left from expiry_date
     let daysLeftVal: number | null = null
