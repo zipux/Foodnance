@@ -3340,14 +3340,21 @@ app.post('/api/bulk/upsert-products', async (c) => {
     await c.env.DB.prepare(
       `INSERT INTO product_entries
          (id, generic_product_id, generic_product_name, supplier_id, supplier_name,
-          vendor_item_name, sku, pack_qty, pack_unit, cost, cost_per_unit,
+          vendor_item_name, brand, sku, pack_qty, pack_unit, cost, cost_per_unit,
           purchase_date, expiry_date, days_left, invoice_ref,
           invoice_id, invoice_file_key, invoice_file_name, qty_ordered, org_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       entryId, genericId, canonicalName,
       rowSupplierId, rowSupplierName,
       (p.vendor_item_name as string) || name,
+      // Already sent by both save paths and, until migration 0049, dropped on
+      // arrival: the quick upload posts the parsed `brand`, and the invoice
+      // detail screen posts `l.category`, which holds the brand despite its
+      // name. A LABEL on the purchase — never part of product identity, or
+      // grouping interchangeable items (the point of the two-level model) would
+      // start splitting them.
+      (p.brand as string) || '',
       (p.sku as string) || '',
       packQty, packUnit,
       cost, costPerUnit,

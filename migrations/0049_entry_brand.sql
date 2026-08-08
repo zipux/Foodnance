@@ -1,0 +1,29 @@
+-- 0049 — remember which brand a purchase was
+--
+-- The invoice reader already extracts a brand per line, and BOTH save paths
+-- already send it: the quick upload posts the parsed `brand`, and the invoice
+-- detail screen posts `l.category`, which despite its name holds the brand
+-- (hydrated from `it.brand` when the line is built). The server was the only
+-- gap — there was no column, so the value was dropped on arrival.
+--
+-- Grouping interchangeable items under one product is deliberate: the two-level
+-- model exists so one generic_product can carry many purchase entries. But with
+-- the brand discarded, a correctly grouped product became unreadable. One live
+-- example: a BCL invoice put a Sawmill Creek 4 L box ($7.38/L) and 24 Verduzzo
+-- Delle Venezie 750 ml bottles ($23.84/L) under one "Pinot Grigio", and the only
+-- thing distinguishing them in the database was the supplier's SKU.
+--
+-- This is a LABEL on the purchase, never part of product identity. Making brand
+-- identifying would split the group, which is the opposite of the intent.
+--
+-- Deliberately NOT read by /api/price-movers. That endpoint decides "price
+-- change" vs "different item" from vendor_item_name, and feeding brand into it
+-- is a separate decision with a real downside: a supplier rewording a line would
+-- flip a genuine price rise to "different item" and hide the signal.
+--
+-- Existing rows get '' rather than NULL so every read path treats them as "no
+-- brand recorded" without a null check. They are not backfilled: the brand was
+-- never stored, and invoice_lines joins to products by name only, so there is no
+-- reliable source to recover it from. It fills in going forward.
+
+ALTER TABLE product_entries ADD COLUMN brand TEXT DEFAULT '';

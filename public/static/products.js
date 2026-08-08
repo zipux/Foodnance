@@ -692,7 +692,7 @@ function renderEntriesTable(genericId) {
     return `
       <tr>
         <td><strong>${esc(e.supplier_name || '—')}</strong></td>
-        <td>${esc(e.vendor_item_name || '—')}</td>
+        <td>${esc(e.brand || e.vendor_item_name || '—')}</td>
         <td>${e.pack_qty ? esc(e.pack_qty + ' ' + (e.pack_unit || '')) : '—'}</td>
         <td>${fmt(e.cost)}</td>
         <td><strong>${esc(fmtUnitCost(cpu, entryPackUnit(e)))}</strong></td>
