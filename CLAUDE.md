@@ -88,9 +88,17 @@ working schema, and the dress rehearsal production has never had.
 
 Secrets are per environment and **none are copied over**. Staging's
 `SESSION_SECRET` is deliberately different, so a staging cookie can never be a
-credential against production. Staging has **no `ANTHROPIC_API_KEY`** (confirmed
-2026-08-08), so AI parsing errors there — add one if you need it, and remember
-parses spend real money (~$0.15 each).
+credential against production. Staging has had its own `ANTHROPIC_API_KEY` since
+2026-08-08, verified end-to-end with a live `parse-recipe` call — so parses there
+spend real money (~$0.15 an invoice).
+
+Each environment should hold exactly `ANTHROPIC_API_KEY` + `SESSION_SECRET`
+(preview also carries `APP_ENV`, managed from `wrangler.jsonc`). **Editing a
+dashboard row renames it**, so adding a key by editing the existing row replaces
+`SESSION_SECRET` instead of adding beside it — that happened on 2026-08-08 and
+would have locked everyone out of staging at the next deploy, invisibly, because
+the live deployment kept serving the secrets it was built with. After any secret
+change, `secret list` and check the whole set, not just the one you touched.
 
 **Pages binds secrets at DEPLOY time, not runtime** — setting one does nothing to
 already-live deployments; ship a new deployment after. This has caused two
@@ -102,6 +110,11 @@ not show in `secret list` and have not reached direct-upload deploys. Or:
 npx wrangler pages secret put  ANTHROPIC_API_KEY --project-name webapp [--env preview]
 npx wrangler pages secret list --project-name webapp [--env preview]   # a put has silently failed before
 ```
+
+After deploying, the alias (`staging.webapp-g5y.pages.dev`) can serve the *previous*
+build for a minute — check `https://<new-hash>.webapp-g5y.pages.dev` to test the
+deploy you just shipped. A rotated `SESSION_SECRET` makes the switchover obvious:
+existing cookies start returning "Not signed in".
 
 **`ANTHROPIC_API_KEY` has been revoked three times** (2026-07-19, 08-07, 08-08),
 twice mid-session, each surfacing as "API key is invalid" on invoice upload.
