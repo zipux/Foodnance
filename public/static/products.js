@@ -242,7 +242,7 @@ function renderProductTable() {
           <td><strong>${esc(g.name)}</strong></td>
           <td>${g.category ? `<span class="category-badge cat-${slugify(g.category)}">${esc(g.category)}</span>` : '—'}</td>
           <td>${supplierLabel}</td>
-          <td>${latestCpu !== null ? fmt(latestCpu) + ' / ' + esc(latestUnit) : '—'}</td>
+          <td>${latestCpu !== null ? esc(fmtUnitCost(latestCpu, latestUnit)) : '—'}</td>
           <td style="color:var(--text-muted);font-size:.85rem">Archived ${archivedOn}</td>
           <td style="white-space:nowrap">
             <button class="btn btn-primary btn-icon" onclick="restoreGenericProduct('${esc(g.id)}')" title="Restore product">
@@ -258,7 +258,7 @@ function renderProductTable() {
         <td><strong>${esc(g.name)}</strong></td>
         <td>${g.category ? `<span class="category-badge cat-${slugify(g.category)}">${esc(g.category)}</span>` : '—'}</td>
         <td>${supplierLabel}</td>
-        <td>${latestCpu !== null ? fmt(latestCpu) + ' / ' + esc(latestUnit) : '—'}</td>
+        <td>${latestCpu !== null ? esc(fmtUnitCost(latestCpu, latestUnit)) : '—'}</td>
         <td style="color:var(--text-muted);font-size:.85rem">${lastPurchase}</td>
         <td onclick="event.stopPropagation()" style="white-space:nowrap">
           <button class="btn btn-icon" style="background:#4f46e5;color:#fff" onclick="openGroupProductsModal('${esc(g.id)}')" title="Group with interchangeable products">
@@ -695,7 +695,7 @@ function renderEntriesTable(genericId) {
         <td>${esc(e.vendor_item_name || '—')}</td>
         <td>${e.pack_qty ? esc(e.pack_qty + ' ' + (e.pack_unit || '')) : '—'}</td>
         <td>${fmt(e.cost)}</td>
-        <td><strong>${fmt(cpu)} / ${esc(entryPackUnit(e))}</strong></td>
+        <td><strong>${esc(fmtUnitCost(cpu, entryPackUnit(e)))}</strong></td>
         <td style="font-size:.8rem">${fmtDate(e.purchase_date)}</td>
         ${hidePurchaseAdmin ? '' : `
         <td style="font-size:.8rem">${e.expiry_date ? daysBadge(daysLeft) : '—'}</td>

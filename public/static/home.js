@@ -58,6 +58,66 @@ function formatPct(pct) {
   return `${sign}${pct.toFixed(1)}%`;
 }
 
+// A per-unit PRICE has to be quoted in a unit big enough to hold real money.
+// Priced per ml or per g it is a fraction of a cent, so fmt() rounds it to
+// "$0.00" ("this is free") or squashes genuinely different products onto the
+// same penny — Heineken at $0.005551/ml and Peroni at $0.006763/ml both read
+// "$0.01 / ml". utils.js already solves this for recipes and finished products
+// via scalePriceUnit(); Price Movers is where the customer actually hit it,
+// quoting a wine bought at $23.84/L as "$0.02 / ml".
+//
+// Done ONCE here, at the data boundary, rather than at each of the eight render
+// sites (card, trend chart, its axis and tooltip, vendor chart, vendor strip,
+// portfolio table, detail table). Every one of those reads product.unit and the
+// fields below, so rescaling the payload leaves all of them correct with no
+// further change — and there is no site left that could be forgotten.
+//
+// Three kinds of number, three different rules:
+//   PRICES     ($/unit)  multiply by the factor  — cost_per_stock_unit,
+//                        latest_price, cheapest_price
+//   QUANTITIES (units)   DIVIDE by it            — qty_stock. 18000 ml bought
+//                        is 18 L bought; leaving it alone would print "18000 L".
+//   TOTALS     ($)       untouched               — spend, overpay_est are
+//                        already money and do not depend on the unit at all.
+//
+// purchases[].cost_per_unit is deliberately NOT touched: it is the figure the
+// supplier invoiced, expressed in their own pack_unit, and is shown beside the
+// normalised price so the row reconciles with the paperwork. It is scaled at
+// the point of display with fmtUnitCost(), which moves value and label together.
+function pmRescaleForDisplay(p) {
+  const scaled = scalePriceUnit(1, p.unit || '');
+  const per    = scaled.cost;
+  if (!(per > 0) || per === 1) return p;   // kg, lb, L, each… nothing to do
+
+  const price = v => (v == null ? v : v * per);
+  return {
+    ...p,
+    unit: scaled.unit,
+    cheapest_price: price(p.cheapest_price),
+    purchases: (p.purchases || []).map(q => ({
+      ...q,
+      cost_per_stock_unit: price(q.cost_per_stock_unit),
+    })),
+    vendors: (p.vendors || []).map(v => ({
+      ...v,
+      latest_price: price(v.latest_price),
+      qty_stock:    v.qty_stock == null ? v.qty_stock : v.qty_stock / per,
+    })),
+  };
+}
+
+// One purchase's price, quoted in the unit it is legitimately expressed in: the
+// group's comparison unit when it converted, otherwise the unit the supplier
+// actually invoiced. The old code fell back to cost_per_unit but kept the
+// group's label, so an unconvertible purchase was printed with someone else's
+// unit — a $/case figure labelled "/kg".
+function _pmQuote(purchase, groupUnit) {
+  if (!purchase) return '—';
+  return purchase.cost_per_stock_unit != null
+    ? fmtUnitCost(purchase.cost_per_stock_unit, groupUnit || 'unit')
+    : fmtUnitCost(purchase.cost_per_unit, purchase.pack_unit || 'unit');
+}
+
 // ── Fetch + state ────────────────────────────────────────────
 async function loadMovers() {
   const from = document.getElementById('pmFrom').value;
@@ -70,7 +130,7 @@ async function loadMovers() {
     if (from) qs.set('from', from);
     if (to)   qs.set('to', to);
     const r = await apiGet(`price-movers?${qs.toString()}`);
-    pmData = r.data || [];
+    pmData = (r.data || []).map(pmRescaleForDisplay);
   } catch (e) {
     listEl.innerHTML = `<div class="pm-empty" style="color:var(--danger)">Failed to load: ${esc(e.message || e)}</div>`;
     return;
@@ -131,8 +191,8 @@ function renderList() {
         <div>
           <div class="pm-name">${esc(p.product_name)}</div>
           <div class="pm-meta">
-            ${fmt(latest.cost_per_stock_unit ?? latest.cost_per_unit)}/${esc(p.unit || 'unit')}
-            <span style="color:var(--text-muted)"> · prev ${fmt(prev.cost_per_stock_unit ?? prev.cost_per_unit)}</span>
+            ${_pmQuote(latest, p.unit)}
+            <span style="color:var(--text-muted)"> · prev ${_pmQuote(prev, p.unit)}</span>
           </div>
           ${switchNote}
         </div>
@@ -281,15 +341,15 @@ function renderChart(chrono, unit) {
               const p = chrono[item.dataIndex];
               const lines = [`Vendor: ${p.vendor || '—'}`];
               if (p.cost_per_stock_unit == null) {
-                lines.push(`Invoiced: ${fmt(p.cost_per_unit)} / ${p.pack_unit || '?'}`);
+                lines.push(`Invoiced: ${fmtUnitCost(p.cost_per_unit, p.pack_unit || 'unit')}`);
                 lines.push(`Can't convert to ${unit} — not comparable`);
               } else {
-                lines.push(`Price:  ${fmt(p.cost_per_stock_unit)} / ${unit}`);
+                lines.push(`Price:  ${fmtUnitCost(p.cost_per_stock_unit, unit)}`);
                 // When the supplier billed in another unit, show what they
                 // actually invoiced too — otherwise the figure won't match
                 // the paperwork.
                 if (p.pack_unit && !invSameUnit(p.pack_unit, unit)) {
-                  lines.push(`Invoiced as ${fmt(p.cost_per_unit)} / ${p.pack_unit}`);
+                  lines.push(`Invoiced as ${fmtUnitCost(p.cost_per_unit, p.pack_unit)}`);
                 }
               }
               return lines;
@@ -586,13 +646,13 @@ function renderPortfolio() {
 // a different unit — so the row still reconciles with the paperwork.
 function _pmPriceCell(p, unit) {
   if (p.cost_per_stock_unit == null) {
-    return `<td>${fmt(p.cost_per_unit)} / ${esc(p.pack_unit || '?')}
+    return `<td>${esc(fmtUnitCost(p.cost_per_unit, p.pack_unit || 'unit'))}
               <span class="pm-unit-note" title="Can't convert to ${esc(unit)}">not comparable</span></td>`;
   }
   const invoiced = (p.pack_unit && !invSameUnit(p.pack_unit, unit))
-    ? `<span class="pm-unit-note">invoiced ${fmt(p.cost_per_unit)}/${esc(p.pack_unit)}</span>`
+    ? `<span class="pm-unit-note">invoiced ${esc(fmtUnitCost(p.cost_per_unit, p.pack_unit))}</span>`
     : '';
-  return `<td>${fmt(p.cost_per_stock_unit)} / ${esc(unit)}${invoiced}</td>`;
+  return `<td>${esc(fmtUnitCost(p.cost_per_stock_unit, unit))}${invoiced}</td>`;
 }
 
 function renderDetailTable(purchases, unit) {

@@ -500,6 +500,32 @@ function unitCostFrom(cost: number, packQty: number, qtyOrdered: number): number
   return totalUnits > 0 ? cost / totalUnits : cost
 }
 
+// The stocking unit to declare on a product created from an invoice line.
+//
+// Products created by import used to be inserted with base_unit unset, and blank
+// is not neutral: /api/price-movers prices every purchase through the product's
+// declared unit, and with none it falls back to whichever purchase sorts first
+// (`stock_unit || packUnit`). So the lens was decided by row order and could
+// change as new purchases arrived. A wine bought as a 4 L box and as 750 ml
+// bottles was quoted per millilitre because the bottles were written four
+// seconds later. Measured 2026-08-08: 18 of 30 products in one live account and
+// 8 of 10 in another had no declared unit.
+//
+// Deliberately the same answer the Products page already infers for a blank
+// base_unit (_inferStockUnit in products.js: the newest entry's pack unit), so
+// this persists a guess the UI was already making rather than introducing a new
+// policy — nothing on screen moves, the guess just stops being re-made, and
+// re-made differently, in three places.
+//
+// normalizeUnit rather than the frontend's toLowerCase(): 'L' has to stay
+// uppercase to match the units master list, and 'lt' has to become 'L' so a
+// supplier's spelling never becomes a second volume unit that will not convert.
+// A blank pack unit yields a blank stocking unit — never invent one, since a
+// wrong declared unit is harder to notice than a missing one.
+function stockUnitFor(packUnit: string): string {
+  return normalizeUnit(packUnit || '')
+}
+
 // True when a pack-size string carries an explicit unit of measure — a real unit
 // token ("kg", "L"…), a count word ("each"), or any alphabetic unit — as opposed
 // to a bare number. A number-only pack size ("2") would otherwise be silently
@@ -3202,6 +3228,18 @@ app.post('/api/bulk/upsert-products', async (c) => {
     const name = (p.name as string || '').trim()
     if (!name) continue
 
+    // Split pack_size string into pack_qty + pack_unit, handling complex formats:
+    //   "500g"        → 500, "g"
+    //   "2 kg"        → 2, "kg"
+    //   "12 LB"       → 12, "LB"
+    //   "1 × 1.89L"   → 1.89, "L"    (multiplied: 1 × 1.89)
+    //   "6 x 100OZ"   → 600, "OZ"   (multiplied: 6 × 100)
+    //   "1/5 KG CS"   → 5, "KG"     (fraction notation: qty/size UNIT)
+    //   "12 Each"     → 12, "Each"
+    // Parsed up here rather than beside the entry insert below because a product
+    // created on this line needs its stocking unit declared at creation time.
+    const { packQty, packUnit } = parsePackSize((p.pack_size as string) || '')
+
     // 1. Find existing generic_product by name (case-insensitive, skip soft-deleted)
     // The product's OWN name comes back too: when a line matches via an alias,
     // the entry must be stored under the product's name, not the vendor's
@@ -3262,14 +3300,15 @@ app.post('/api/bulk/upsert-products', async (c) => {
       const isPlaceholder = !providedCategory || providedCategory === 'Ingredients' || providedCategory === 'Other'
       const category = isPlaceholder ? inferCategory(name) : providedCategory
       await c.env.DB.prepare(
-        `INSERT INTO generic_products (id, name, category, sub_unit_name, sub_unit_qty, org_id)
-         VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO generic_products (id, name, category, sub_unit_name, sub_unit_qty, base_unit, org_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         genericId,
         name,
         category,
         (p.sub_unit_name as string) || '',
         p.sub_unit_qty ?? null,
+        stockUnitFor(packUnit),
         org
       ).run()
       createdGenerics++
@@ -3284,16 +3323,6 @@ app.post('/api/bulk/upsert-products', async (c) => {
     const today   = new Date().toISOString().slice(0, 10)
     const cost        = parseFloat(p.cost as string) || 0
     const qtyOrdered  = parseFloat(p.qty  as string) || 1
-    // Split pack_size string into pack_qty + pack_unit, handling complex formats:
-    //   "500g"        → 500, "g"
-    //   "2 kg"        → 2, "kg"
-    //   "12 LB"       → 12, "LB"
-    //   "1 × 1.89L"   → 1.89, "L"    (multiplied: 1 × 1.89)
-    //   "6 x 100OZ"   → 600, "OZ"   (multiplied: 6 × 100)
-    //   "1/5 KG CS"   → 5, "KG"     (fraction notation: qty/size UNIT)
-    //   "12 Each"     → 12, "Each"
-    const { packQty, packUnit } = parsePackSize((p.pack_size as string) || '')
-
     const costPerUnit = unitCostFrom(cost, packQty, qtyOrdered)
 
     // Calculate days_left from expiry_date
