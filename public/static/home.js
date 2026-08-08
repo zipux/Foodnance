@@ -196,7 +196,7 @@ function renderList() {
           </div>
           ${switchNote}
         </div>
-        <div class="pm-change ${isSwitch ? 'switch' : cls}" title="${isSwitch ? 'Difference between two different purchases, not a price change by one vendor' : 'Price change'}">
+        <div class="pm-change ${isSwitch ? 'switch' : cls}" title="${isSwitch ? 'Difference between two different purchases, not a price change by one vendor' : 'Change since your previous purchase. Vendor Compare measures against your cheapest vendor instead, so the two figures differ.'}">
           ${isSwitch ? '⇄' : arrow} ${formatPct(p.pct_change)}
         </div>
       </div>
@@ -271,7 +271,14 @@ function renderDetail(product) {
   }
 
   const unit = product.unit || product.purchases[0].pack_unit || 'unit';
-  subEl.textContent = `Last ${product.purchases.length} purchase${product.purchases.length === 1 ? '' : 's'} · unit: ${unit}`;
+  // Say which baseline the % is measured against. Trend compares the latest
+  // purchase with the one before it; Vendor Compare measures each vendor against
+  // the cheapest. Same product, same prices, two different reference points — so
+  // the two tabs legitimately show different numbers, and with no label that
+  // reads as a bug. (A $6 gap on prosciutto is -18% against the dearer earlier
+  // price and +22% against the cheaper vendor: the same gap from either end.)
+  subEl.textContent = `Last ${product.purchases.length} purchase${product.purchases.length === 1 ? '' : 's'} · unit: ${unit}`
+    + ` · % is the change since your previous purchase`;
 
   const cls = changeClass(product.pct_change);
   changeEl.textContent = product.pct_change === null ? '' : `${formatPct(product.pct_change)}`;
@@ -290,7 +297,8 @@ function renderDetail(product) {
     changeEl.textContent = '';
     legendEl.innerHTML = '';
     const nv = product.vendor_count || (product.vendors || []).length;
-    subEl.textContent = `${nv} vendor${nv === 1 ? '' : 's'} · latest price per ${unit}`;
+    subEl.textContent = `${nv} vendor${nv === 1 ? '' : 's'} · latest price per ${unit}`
+      + ` · % is how much more than your cheapest vendor`;
   } else {
     renderChart(chrono, unit);
     hideVendorExtras();

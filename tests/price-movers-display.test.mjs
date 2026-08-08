@@ -12,8 +12,13 @@
 // The quantity rule is the one that bites: it is the only field that moves the
 // other way, it sits in the same object as latest_price, and getting it wrong
 // inflates a volume by 1000x in a sentence a manager reads as fact.
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadBrowserModule } from './helpers/browser-module.mjs';
 import { suite } from './helpers/assert.mjs';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const t = suite('price-movers-display');
 
@@ -128,5 +133,33 @@ t.check('a per-g fallback is still quoted per kg',
 t.check('a missing purchase renders a dash, not a crash', _pmQuote(null, 'kg') === '—');
 t.check('a purchase with no unit at all does not throw',
   typeof _pmQuote({ cost_per_stock_unit: null, cost_per_unit: 1 }, '') === 'string');
+
+// ── The two tabs measure from different ends ─────────────────────
+// Trend divides the gap by the PREVIOUS purchase; Vendor Compare divides the
+// same gap by the CHEAPEST vendor. Both are correct and they disagree by
+// construction — a $6 gap on prosciutto is -18% one way and +22% the other.
+// Without a label on each, one product shows two percentages with opposite
+// signs on one screen, which reads as a bug. These pin that both captions exist
+// and name different baselines.
+t.section('each percentage says what it is measured against');
+const homeSrc = readFileSync(join(ROOT, 'public/static/home.js'), 'utf8');
+t.check('the Trend caption names the previous purchase',
+  /change since your previous purchase/i.test(homeSrc));
+t.check('the Vendor caption names the cheapest vendor',
+  /how much more than your cheapest vendor/i.test(homeSrc));
+t.check('they are different sentences, not the same label twice',
+  !/change since your previous purchase[\s\S]{0,80}change since your previous purchase/i.test(homeSrc));
+t.check('the list-row tooltip explains why the two differ',
+  /Vendor Compare measures against your cheapest vendor instead/i.test(homeSrc));
+
+// The arithmetic those captions describe, on the real prosciutto figures.
+t.section('and the captions describe the arithmetic correctly');
+const CIOFFI = 32.9899, BOSA = 26.9903;          // 22 May dearer, 28 May cheaper
+const sinceLast = ((BOSA - CIOFFI) / CIOFFI) * 100;
+const vsCheapest = ((CIOFFI - BOSA) / BOSA) * 100;
+t.check('since previous purchase = -18%', Math.abs(sinceLast + 18.2) < 0.1, sinceLast.toFixed(1));
+t.check('vs cheapest vendor = +22%', Math.abs(vsCheapest - 22.2) < 0.1, vsCheapest.toFixed(1));
+t.check('same gap, two baselines — which is exactly why the labels are needed',
+  Math.abs((CIOFFI - BOSA) - 6.0) < 0.01 && Math.abs(sinceLast) !== Math.abs(vsCheapest));
 
 t.done();
