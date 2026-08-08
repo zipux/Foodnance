@@ -280,6 +280,36 @@ Presentation only, with the same limit as plan gating.
 ### Product categories
 Categories are **free-text** on `generic_products.category`. The managed master list is the **`categories` table** (migration `0018`, same shape as `units`: `id`/`name`/`sort_order`, integer PK), edited through the **Manage Categories** modal (`public/static/utils.js`, mirrors Manage Units) and picked in the product form, with "+ New category…" for inline adds. Deleting one only removes it from the picker — products keep their label (the DELETE is usage-checked, `?force=true` to override).
 
+**A new product's category is chosen by Claude, not by keywords.**
+`aiCategorizeProducts()` runs from `POST /api/bulk/upsert-products` for products
+being created for the **first time** — a repeat purchase matches an existing
+`generic_product` and keeps whatever category it has, so a hand correction is
+permanent and the model never gets a second vote. That is also what makes it
+affordable: one batched call per invoice that introduces new products (measured
+$0.0044 for four), never a per-invoice tax. It is logged to `ai_parse_log` as
+`kind='category'`, which keeps it **out** of the monthly invoice cap
+(`monthlyInvoiceParses` filters `kind='invoice'`) while still counting in the
+admin spend totals.
+
+The model may answer **only** with one of the org's own categories: the prompt
+lists them and the answer is re-checked against the `categories` table on the way
+back, because a prompt is a request and a whitelist is a guarantee. An invented
+category would have no `type` and no `.cat-<slug>` badge, so it would land money
+in no P&L bucket at all. It runs **after** every write and fails soft in every
+direction — no key, HTTP error, truncation, bad JSON, off-list answer — leaving
+`inferCategory()`'s keyword guess in place. A dead Anthropic key must never block
+a customer from saving an invoice. A category the user picked in the review
+screen is an instruction, not a gap, and is never overruled.
+
+`inferCategory()` is the **fallback**. Its keywords match on **word boundaries**
+(`keywordHit`), not substrings: matching raw substrings filed "Extra Vir**gin**
+White Truffle Oil" as Alcohol and "Aspa**rag**us" as Linen & Uniforms, which are
+typed `beverage` and `supplies` — so both left food COGS silently. The `(e?s)`
+tail in that regex is load-bearing: without it `tomato` stops matching
+"Tomatoes with Basil". `tests/infer-category.test.mjs` pins both halves, and its
+boundary cases are deliberately chosen to match *no* legitimate keyword, because
+several obvious-looking pins pass even with the bug restored.
+
 The built-in taxonomy (grouped food-COGS / beverage / operating-supplies) is seeded by `0018` and **duplicated in four places that must stay in sync**: `DEFAULT_CATEGORIES` in `public/static/utils.js` (frontend fallback + seed reference), `DEFAULT_CATEGORIES` in `src/index.ts` (seeded into every new org at creation, with its `type`), the stat-chip/badge CSS in `public/static/style.css` (`.cat-<slug>` + `.cat-chip.cat-<slug>`, slug via `slugify`), and the `inferCategory` keyword rules in `src/index.ts` (auto-classifies invoice imports; unmatched → `Other`). The live picker reads the `categories` table at runtime, not `DEFAULT_CATEGORIES`. `Ingredients` is a retired legacy value kept for back-compat.
 
 Category names are unique **per organization** via the expression index `idx_categories_org_name` on `COALESCE(org_id, '')` + `name` (migration `0038`) — deliberately not a plain `UNIQUE(org_id, name)`, since SQLite treats NULLs as distinct and the NULL-org demo account would collect duplicates. `0040` does the same for `units` (`idx_units_org_name`, also over `LOWER(name)`, since `normalizeUnit` lower-cases everything except `L`); it only *records* a fix production already had by hand, after prod's `units` lost its global `UNIQUE` in the 2026-07-29 seeding work — without it any database rebuilt from these files fails on its second account creation.

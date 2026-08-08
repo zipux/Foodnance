@@ -529,34 +529,182 @@ function packSizeUnitIsKnown(raw: string, known: Set<string>): boolean {
 // distinctive food groups (seafood, meat, dairy) are matched before broad ones
 // (produce, dry goods). Unmatched items fall to 'Other' rather than being
 // silently dumped into a food bucket.
+// Keywords match on WORD BOUNDARIES, never as raw substrings. Substring
+// matching silently filed food under operating supplies, and the damage was not
+// cosmetic: "Extra Virgin White Truffle Oil" matched 'gin' → Alcohol, and
+// "Asparagus" matched 'rag' → Linen & Uniforms. Those categories are typed
+// 'beverage' and 'supplies', so both products left food COGS entirely in the
+// P&L. "Extra Virgin Olive Oil" escaped the same fate only because the Oils
+// rule happens to be checked before Alcohol — luck, not design.
+//
+// The optional (e?s) tail keeps plurals working, which a bare \b would break:
+// 'tomato' still has to match "Tomatoes with Basil", 'olive' still has to match
+// "Olives Mixed Mediterranean Pitted".
+const _KW_RE = new Map<string, RegExp>()
+function keywordHit(haystack: string, keyword: string): boolean {
+  let re = _KW_RE.get(keyword)
+  if (!re) {
+    const esc = keyword.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    re = new RegExp(`\\b${esc}(?:e?s)?\\b`, 'i')
+    _KW_RE.set(keyword, re)
+  }
+  return re.test(haystack)
+}
+
+// The keyword list is the FALLBACK, not the primary path — aiCategorizeProducts()
+// below is what actually categorises a new product. This runs when there is no
+// API key, when the call fails, or when the model answers with something that
+// isn't one of the org's categories. It is deliberately English and generic; no
+// hand-maintained word list will ever cover a specialty supplier (none of
+// 'guanciale', 'pecorino', 'arugula', 'broccolini' were here, which is why 8 of
+// 22 products in one Italian restaurant landed in Other). Adding keywords here
+// is safe and touches nothing else — adding a CATEGORY needs all four sync
+// points listed at the top of this section.
 function inferCategory(name: string): string {
   const n = name.toLowerCase()
   const rules: [string, string[]][] = [
     // ── Food (COGS) ──
-    ['Seafood',                    ['fish','salmon','tuna','shrimp','prawn','crab','lobster','oyster','mussel','clam','scallop','squid','calamari','cod','halibut','tilapia','anchovy','seafood']],
-    ['Meat & Poultry',             ['beef','pork','chicken','turkey','lamb','veal','bacon','sausage','prosciutto','salami','pepperoni','ham','duck','steak','brisket','ribs','poultry','meat']],
-    ['Dairy & Eggs',               ['milk','cream','butter','cheese','yogurt','yoghurt','egg','mozzarella','parmesan','parmigiano','cheddar','ricotta','mascarpone','buttermilk','dairy']],
-    ['Bakery',                     ['bread','bun','bagel','baguette','brioche','croissant','pastry','tortilla','dough','crust','bakery']],
+    ['Seafood',                    ['fish','salmon','tuna','shrimp','prawn','crab','lobster','oyster','mussel','clam','scallop','squid','calamari','cod','halibut','tilapia','anchovy','sardine','branzino','octopus','shellfish','seafood']],
+    ['Meat & Poultry',             ['beef','pork','chicken','turkey','lamb','veal','bacon','sausage','prosciutto','salami','pepperoni','ham','duck','steak','brisket','ribs','poultry','meat','guanciale','pancetta','mortadella','bresaola','speck','capicola','coppa','soppressata','nduja','chorizo','tenderloin']],
+    ['Dairy & Eggs',               ['milk','cream','butter','cheese','yogurt','yoghurt','egg','mozzarella','parmesan','parmigiano','cheddar','ricotta','mascarpone','buttermilk','dairy','pecorino','grana padano','grana','gorgonzola','provolone','fontina','taleggio','burrata','stracciatella','asiago','feta','brie','gruyere','halloumi']],
+    ['Bakery',                     ['bread','bun','bagel','baguette','brioche','croissant','pastry','tortilla','dough','crust','bakery','focaccia','ciabatta','panettone','breadcrumb']],
     ['Frozen',                     ['frozen','ice cream','gelato','sorbet']],
-    ['Oils, Sauces & Condiments',  ['olive oil','canola','vinegar','sauce','ketchup','mustard','mayo','mayonnaise','dressing','condiment']],
+    ['Oils, Sauces & Condiments',  ['olive oil','canola','vinegar','sauce','ketchup','mustard','mayo','mayonnaise','dressing','condiment','pesto','aioli','tahini','harissa']],
     ['Spices & Seasonings',        ['spice','seasoning','cinnamon','cumin','paprika','oregano','nutmeg','turmeric','pepper corn','peppercorn','sea salt','kosher salt']],
-    ['Produce',                    ['lettuce','tomato','onion','potato','carrot','garlic','mushroom','spinach','kale','cucumber','celery','avocado','apple','lemon','lime','berry','banana','herb','produce','vegetable','fruit']],
-    ['Dry Goods & Pantry',        ['flour','sugar','rice','pasta','noodle','bean','lentil','chickpea','grain','oat','quinoa','cereal','cornstarch','baking','yeast','canned','pantry']],
+    // Fruit names that double as juice flavours ('orange', 'cranberry') are
+    // deliberately NOT here: Produce is checked before Non-Alcoholic Beverages,
+    // so adding them would file "Orange Juice" as Produce.
+    ['Produce',                    ['lettuce','tomato','onion','potato','carrot','garlic','mushroom','spinach','kale','cucumber','celery','avocado','apple','lemon','lime','berry','banana','herb','produce','vegetable','fruit','arugula','rocket','broccolini','broccoli','basil','parsley','cilantro','coriander','thyme','rosemary','sage','mint','chard','radicchio','endive','fennel','zucchini','eggplant','aubergine','artichoke','asparagus','olive','shallot','leek','cabbage','beet','radish','scallion','squash','pumpkin']],
+    ['Dry Goods & Pantry',        ['flour','sugar','rice','pasta','noodle','bean','lentil','chickpea','grain','oat','quinoa','cereal','cornstarch','baking','yeast','canned','pantry','polenta','semolina','farro','couscous','arborio','risotto']],
     // ── Beverage ──
-    ['Alcohol',                    ['wine','beer','spirit','liquor','vodka','whiskey','whisky','rum','gin','tequila','alcohol']],
-    ['Non-Alcoholic Beverages',    ['juice','water','soda','pop','coffee','tea','syrup','cordial','soft drink','beverage']],
+    ['Alcohol',                    ['wine','beer','spirit','liquor','vodka','whiskey','whisky','rum','gin','tequila','alcohol','prosecco','chianti','vermouth','amaro','grappa','liqueur','champagne']],
+    ['Non-Alcoholic Beverages',    ['juice','water','soda','pop','coffee','tea','syrup','cordial','soft drink','beverage','cola','lemonade','kombucha','espresso']],
     // ── Operating supplies ──
     ['Cleaning & Sanitation',      ['cleaner','sanitizer','sanitiser','soap','detergent','bleach','disinfectant','degreaser','cleaning']],
-    ['Disposables',                ['glove','napkin','tissue','straw','cutlery','disposable','paper towel','food wrap','deli container']],
+    ['Disposables',                ['glove','napkin','tissue','straw','cutlery','disposable','paper towel','food wrap','deli container','foil','parchment','skewer','toothpick']],
     ['Packaging',                  ['box','bag','wrap','film','pail','jar','bottle','carton','clamshell','packaging','label']],
     ['Linen & Uniforms',           ['towel','apron','uniform','tablecloth','rag','linen']],
     ['Smallwares & Equipment',     ['pan','pot','knife','sheet tray','whisk','spatula','tong','utensil','smallware','equipment']],
-    ['Office & Admin',             ['printer','ink','toner','stationery','pen ','envelope','office']],
+    ['Office & Admin',             ['printer','ink','toner','stationery','pen','envelope','office']],
   ]
   for (const [category, keywords] of rules) {
-    if (keywords.some(k => n.includes(k))) return category
+    if (keywords.some(k => keywordHit(n, k))) return category
   }
   return 'Other'
+}
+
+// ─── AI category assignment — new products only ───────────────
+// Called from POST /api/bulk/upsert-products for products being created for the
+// FIRST time. A repeat purchase matches an existing generic_product and keeps
+// the category it already has, so this never runs twice for the same item: a
+// hand correction is permanent, and the model never gets a second vote. That is
+// also why it is affordable — the cost is once per product ever, not once per
+// invoice forever.
+//
+// The model may answer ONLY with one of the org's own categories. A category
+// that is not in the `categories` table has no `type` ('food' | 'beverage' |
+// 'supplies'), which is exactly what the P&L buckets money by, and no
+// `.cat-<slug>` badge style — an invented one would land money nowhere and look
+// broken doing it. The prompt says so and the answer is checked against the list
+// again on the way back, because a prompt is a request and a whitelist is a
+// guarantee.
+//
+// Fails soft in every direction — no key, HTTP error, truncation, malformed
+// JSON, unknown category name — leaving the inferCategory() keyword guess in
+// place. Categorising is never worth failing a save over.
+async function aiCategorizeProducts(
+  env: Bindings, orgId: string | null, names: string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  const apiKey = env.ANTHROPIC_API_KEY
+  if (!apiKey || !names.length) return out
+
+  const cats = await env.DB.prepare(
+    `SELECT name FROM categories WHERE org_id IS ? ORDER BY sort_order, name`,
+  ).bind(orgId).all<{ name: string }>()
+  const allowed = (cats.results || []).map(r => (r.name || '').trim()).filter(Boolean)
+  // No master list means nothing to choose from, and inventing one here would
+  // create the untyped category this whole function exists to avoid.
+  if (!allowed.length) return out
+  const byLower = new Map(allowed.map(n => [n.toLowerCase(), n]))
+
+  const prompt = `You assign each product to exactly one category.
+
+CATEGORIES — you may ONLY use one of these exact strings:
+${allowed.map(a => `- ${a}`).join('\n')}
+
+Rules:
+- Copy the category string exactly as written above. Do not invent new ones, do
+  not reword, do not change capitalisation or punctuation.
+- If you are unsure, or nothing fits well, answer "Other".
+- These are products a restaurant or food business buys from suppliers. Names
+  come from invoices, so they may be abbreviated, include a brand, or be in
+  Italian, Spanish or French.
+
+PRODUCTS:
+${names.map((n, i) => `${i + 1}. ${n}`).join('\n')}
+
+Reply with JSON only, no prose:
+{"categories":[{"n":1,"category":"..."},{"n":2,"category":"..."}]}`
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-opus-4-8',
+        // No `thinking` block, unlike parse-invoice/parse-recipe: this is a
+        // short classification against a fixed list, not a document to read,
+        // and thinking tokens bill at the output rate. 64 tokens per product
+        // plus slack covers the JSON with room for a long category list.
+        max_tokens: Math.min(4000, 200 + names.length * 64),
+        messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+      }),
+    })
+    if (!response.ok) return out
+
+    const data = await response.json() as {
+      content?: Array<{ type: string; text?: string }>
+      stop_reason?: string
+      usage?: { input_tokens?: number; output_tokens?: number }
+    }
+
+    // Log the spend before reading the answer — Anthropic has billed for the
+    // call whether or not its JSON parses. kind='category' keeps it OUT of the
+    // monthly invoice cap (monthlyInvoiceParses filters kind='invoice') while
+    // still showing up in the admin cost totals, which sum every row.
+    const inputTokens  = data.usage?.input_tokens  || 0
+    const outputTokens = data.usage?.output_tokens || 0
+    const cost = Math.round(((inputTokens / 1_000_000) * 5 + (outputTokens / 1_000_000) * 25) * 1_000_000) / 1_000_000
+    await env.DB.prepare(
+      `INSERT INTO ai_parse_log (id, org_id, kind, input_tokens, output_tokens, cost)
+       VALUES (?, ?, 'category', ?, ?, ?)`,
+    ).bind(uid(), orgId, inputTokens, outputTokens, cost).run()
+
+    if (data.stop_reason === 'max_tokens') return out
+
+    const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text || '').join('')
+    const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)
+    if (!json) return out
+    const parsed = JSON.parse(json) as { categories?: Array<{ n?: number; category?: string }> }
+
+    for (const row of parsed.categories || []) {
+      const idx = Number(row?.n)
+      const name = names[idx - 1]
+      if (!name) continue
+      // The whitelist check. Anything the model made up is dropped here and the
+      // keyword guess stands, which is the whole point of doing it server-side.
+      const canonical = byLower.get(String(row?.category || '').trim().toLowerCase())
+      if (canonical) out.set(name.toLowerCase(), canonical)
+    }
+  } catch {
+    return out
+  }
+  return out
 }
 
 // ─── Storage layout (sections + item placement) ───────────────
@@ -3015,6 +3163,12 @@ app.post('/api/bulk/upsert-products', async (c) => {
 
   let saved = 0, createdGenerics = 0, reusedGenerics = 0
 
+  // Products created in THIS request whose category was guessed rather than
+  // supplied. They get one batched AI pass after the loop; see
+  // aiCategorizeProducts(). Collected instead of asked per-product so an invoice
+  // introducing eight new items costs one call, not eight.
+  const guessedCategories: Array<{ id: string; name: string }> = []
+
   for (const p of body.products) {
     const name = (p.name as string || '').trim()
     if (!name) continue
@@ -3090,6 +3244,10 @@ app.post('/api/bulk/upsert-products', async (c) => {
         org
       ).run()
       createdGenerics++
+      // Only when WE guessed. A category the user picked in the review screen is
+      // an instruction, not a gap to fill, and the model does not get to
+      // overrule it.
+      if (isPlaceholder) guessedCategories.push({ id: genericId, name })
     }
 
     // 2. Always add a new product_entry for this purchase
@@ -3156,10 +3314,32 @@ app.post('/api/bulk/upsert-products', async (c) => {
     saved++
   }
 
+  // ── Categorise the new products, once, in one call ───────────
+  // Deliberately after every write above: the products already exist with their
+  // keyword category, so if this throws, times out, or the key is dead, the save
+  // still succeeded and the only cost is a rougher category the user can edit.
+  // The alternative — categorising before the insert — would let a failing
+  // Anthropic call block a customer from saving an invoice.
+  let aiCategorized = 0
+  if (guessedCategories.length) {
+    const picked = await aiCategorizeProducts(c.env, org, guessedCategories.map(g => g.name))
+    const updates = guessedCategories
+      .map(g => ({ g, cat: picked.get(g.name.toLowerCase()) }))
+      .filter(u => !!u.cat)
+      .map(u => c.env.DB.prepare(
+        `UPDATE generic_products SET category = ? WHERE id = ? AND org_id IS ?`,
+      ).bind(u.cat, u.g.id, org))
+    if (updates.length) {
+      await c.env.DB.batch(updates)
+      aiCategorized = updates.length
+    }
+  }
+
   return c.json({
     saved,
     created_generics:  createdGenerics,
     reused_generics:   reusedGenerics,
+    ai_categorized:    aiCategorized,
     supplier_id:       supplierId,
     supplier_name:     supplierName,
     supplier_created:  supplierCreated,
