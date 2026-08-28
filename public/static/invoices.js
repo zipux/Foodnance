@@ -713,7 +713,57 @@ async function loadAndRenderLines(invoiceId) {
   // autoFill=true: if all extra-cost fields are 0 but there's a gap vs stored total,
   // auto-populate the Delivery field with the difference
   renderCostSummary({ autoFill: true });
+  if (isActionRequired) checkProductMatches();
 }
+
+// ── Product de-dupe (near-duplicate name matching) ────────────────
+// Ask the backend whether any parsed line's product name is a near-duplicate
+// of an existing product ("Granulated Sugar" vs an existing "Sugar"), so
+// parsing variance doesn't spawn a second product for the same ingredient.
+// One batched call for every named line, same idea as checkVendorMatch above.
+// Suggest-tier only — see classifyProductNameMatch in src/index.ts for why
+// this never auto-links.
+async function checkProductMatches() {
+  const names = [...new Set(currentLines.map(l => (l.product_name || '').trim()).filter(Boolean))];
+  if (!names.length) return;
+  let res;
+  try {
+    res = await apiPost('products/match', { names });
+  } catch (_) { return; }
+  const results = res?.results || {};
+  let changed = false;
+  currentLines.forEach(l => {
+    const m = results[(l.product_name || '').trim()];
+    if (m && m.decision === 'suggest' && m.match && !l._link_product_id) {
+      l._nameMatch = m.match;
+      changed = true;
+    }
+  });
+  if (changed) renderLinesTable();
+}
+
+// Suggest tier: user accepted the existing product — reuses the same
+// _link_product_id/_link_product_name fields the manual "link to existing
+// product" flow sets, so save/alias-learning need no separate handling.
+function acceptProductMatch(idx) {
+  const line = currentLines[idx];
+  if (!line || !line._nameMatch) return;
+  line._link_product_id   = line._nameMatch.id;
+  line._link_product_name = line._nameMatch.name;
+  const usedName = line._nameMatch.name;
+  delete line._nameMatch;
+  renderLinesTable();
+  showToast(`Line linked to "${usedName}".`, 'success');
+}
+
+function dismissProductMatch(idx) {
+  const line = currentLines[idx];
+  if (!line) return;
+  delete line._nameMatch;
+  renderLinesTable();
+}
+window.acceptProductMatch  = acceptProductMatch;
+window.dismissProductMatch = dismissProductMatch;
 
 // ── Toggle editable meta inputs vs read-only labels ─────────────
 function toggleEditableMeta(editable) {
@@ -1123,7 +1173,13 @@ function renderLinesTable() {
                     style="border:none;background:none;color:#94a3b8;cursor:pointer;padding:0 .1rem">
               <i class="fas fa-times"></i>
             </button>
-          </div>` : ''}
+          </div>` : (l._nameMatch ? `
+          <div style="font-size:.68rem;color:#b45309;margin-top:.15rem;display:flex;align-items:center;gap:.25rem;flex-wrap:wrap">
+            <i class="fas fa-circle-question"></i>
+            <span>Same as <strong>${esc(l._nameMatch.name)}</strong>?</span>
+            <a href="#" onclick="acceptProductMatch(${i});return false" style="font-weight:600">Use it</a>
+            <a href="#" onclick="dismissProductMatch(${i});return false">No</a>
+          </div>` : '')}
       </td>
       <td><input type="text"   class="line-input" data-idx="${i}" data-f="vendor_item"  value="${esc(l.vendor_item ||'')}" placeholder="Vendor item" style="width:110px"/></td>
       <td><input type="text"   class="line-input" data-idx="${i}" data-f="item_code"    value="${esc(l.item_code   ||'')}" placeholder="Code" style="width:72px"/></td>
@@ -1178,6 +1234,14 @@ function renderLinesTable() {
       // Clear any validation/flag styling on the field now that it's been touched
       e.target.style.borderColor = '';
       e.target.style.background  = '';
+      // A suggestion was classified against the old text — once the name is
+      // edited by hand it no longer applies, so drop it without a full
+      // re-render (which would steal focus mid-keystroke).
+      if (f === 'product_name' && currentLines[idx]._nameMatch) {
+        delete currentLines[idx]._nameMatch;
+        const row = tbody.querySelector(`tr[data-idx="${idx}"]`);
+        row?.querySelector('td .fa-circle-question')?.closest('div')?.remove();
+      }
       // Refresh line total cell (only price/qty affect it)
       const row   = tbody.querySelector(`tr[data-idx="${idx}"]`);
       const price = parseFloat(currentLines[idx].price) || 0;

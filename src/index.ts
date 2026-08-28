@@ -350,6 +350,51 @@ function classifyNameMatch(
   return { decision: 'none', match: null, score: bestScore }
 }
 
+// Like supplierTokenContained, but for product names — which run shorter and
+// more clustered than supplier names ("Sugar" / "Granulated Sugar", "Cherry
+// Tomato" / "Cherry Tomatoes"). supplierTokenContained requires 2+ significant
+// tokens on the short side specifically to avoid firing on a single common
+// word, which is exactly what misses "Sugar" ⊂ "Granulated Sugar" (one token).
+// Deliberately looser: one token (≥4 chars) contained in a name at most 2
+// tokens longer is enough. That same looseness will also suggest "Onion" ⊂
+// "Green Onion" or "Milk" ⊂ "Skim Milk" — real products that must NOT merge —
+// which is why classifyProductNameMatch below never lets this rise past
+// 'suggest': worst case is one dismissible prompt, never a silent merge.
+function productTokenContained(a: string, b: string): boolean {
+  const fullA = normalizeSupplierName(a).split(' ').filter(Boolean)
+  const fullB = normalizeSupplierName(b).split(' ').filter(Boolean)
+  if (!fullA.length || !fullB.length) return false
+  const [shortFull, longFull] = fullA.length <= fullB.length ? [fullA, fullB] : [fullB, fullA]
+  if (longFull.length - shortFull.length > 2) return false
+  const shortSig = shortFull.filter(t => t.length >= 4)
+  if (!shortSig.length) return false
+  const longSet = new Set(longFull)
+  return shortSig.every(t => longSet.has(t))
+}
+
+// Classify a candidate product name against this org's existing products.
+// Wraps classifyNameMatch (catches typos/plural variants like "Cherry
+// Tomato(es)" via Levenshtein) with the looser single-token containment above
+// (catches "Sugar" / "Granulated Sugar"). Unlike suppliers, this NEVER returns
+// 'auto' — grocery names are too short and clustered to snap silently, so
+// every match is 'suggest' tier, confirmed by a person.
+function classifyProductNameMatch(
+  name: string,
+  products: { id: string; name: string }[]
+): SupplierMatch {
+  const base = classifyNameMatch(name, products)
+  if (base.match) return { ...base, decision: 'suggest' }
+  let best: { id: string; name: string } | null = null
+  let bestScore = -1
+  for (const p of products) {
+    if (!productTokenContained(name, p.name)) continue
+    const score = supplierSimilarity(name, p.name)
+    if (score > bestScore) { best = p; bestScore = score }
+  }
+  if (best) return { decision: 'suggest', match: best, score: Math.max(bestScore, 0.7) }
+  return { decision: 'none', match: null, score: 0 }
+}
+
 // ─── Helper: parse pack_size strings into { packQty, packUnit } ─
 // Handles complex formats from OCR/GPT:
 //   "12 LB"       → { packQty: 12, packUnit: "LB" }
@@ -3351,6 +3396,34 @@ app.post('/api/suppliers/match', async (c) => {
   const all = await c.env.DB.prepare(`SELECT id, name FROM suppliers WHERE org_id IS ?`)
     .bind(org).all<{ id: string; name: string }>()
   return c.json(classifyNameMatch(name, all.results || []))
+})
+
+// POST /api/products/match
+// Batch-classify candidate product names against this org's existing
+// generic_products — the invoice review modal's "did you mean X?" for
+// near-duplicate names ("Granulated Sugar" parsed off one invoice vs an
+// existing "Sugar" from another), same idea as /api/suppliers/match but for
+// products and batched since a review screen has many lines at once.
+// Body: { names: string[] } → { results: { [name]: { decision, match, score } } }
+// A name already resolving exactly is reported 'none' — nothing to suggest,
+// the existing exact-match path in bulk/upsert-products will find it anyway.
+app.post('/api/products/match', async (c) => {
+  const body = await c.req.json() as { names?: string[] }
+  const names = [...new Set((Array.isArray(body.names) ? body.names : []).map(n => (n || '').trim()).filter(Boolean))]
+  if (!names.length) return c.json({ results: {} })
+
+  const org = orgOf(c)
+  const all = await c.env.DB.prepare(
+    `SELECT id, name FROM generic_products WHERE deleted_at IS NULL AND org_id IS ?`
+  ).bind(org).all<{ id: string; name: string }>()
+  const products = all.results || []
+
+  const results: Record<string, SupplierMatch> = {}
+  for (const name of names) {
+    const exact = products.find(p => p.name.trim().toLowerCase() === name.toLowerCase())
+    results[name] = exact ? { decision: 'none', match: null, score: 1 } : classifyProductNameMatch(name, products)
+  }
+  return c.json({ results })
 })
 
 // PUT /api/suppliers/:id
