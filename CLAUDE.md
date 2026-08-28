@@ -126,25 +126,45 @@ is still TODO. Production should hold exactly two secrets, `ANTHROPIC_API_KEY`
 and `SESSION_SECRET`; a stray misspelled `WebApp ANTROPHIC` was deleted
 2026-08-08.
 
-### 🚨 BEFORE THE FIRST REAL CUSTOMER — delete the old deployment URLs
+### ✅ Old deployment URLs — DELETED 2026-08-09
 
-**293 deployments exist** (the CLI lists only 25; the API pages to the real
-total). **250 predate authentication entirely** — built before 2026-07-27, when
-there was no login screen — and each is still publicly reachable at
-`https://<hash>.webapp-g5y.pages.dev`, wired to the **current live D1 and R2**.
-Verified 2026-08-06, anonymous and cookieless, against a 6 April deployment:
-`GET https://d8f782f1.webapp-g5y.pages.dev/api/tables/invoices` → `200` with a
-real vendor, invoice number, total and `file_key`. Reads are confirmed open;
-writes untested, but that code has no auth middleware, so assume they are too.
+**Closed.** 306 deployments existed (the CLI lists only 25; the API pages
+25-at-a-time to the real total). **285 were deleted**, leaving **21**: the 12 most
+recent production builds as rollback targets, and the 9 staging previews built
+after `7181423`. All 285 deletes returned 200; a 25-deployment random sample of
+the deleted set now returns `404`.
 
-**Deferred 2026-08-06** because production today is test data due to be wiped —
-fair, and why this is a checklist item rather than an emergency. But wiping data
-does not close the URLs; the same 250 addresses expose real customer invoices the
-moment real ones exist. **The custom domain does NOT fix it**: Cloudflare keeps
-serving `pages.dev` alongside it (`public/robots.txt` notes the missing 301), and
-no guard added today can reach old worker code. The only fix is deletion. Keep
-the ~12 most recent as rollback targets, plus previews built after `7181423` —
-older previews are on live data (above) and must go too.
+What this closed: **250 of them predated authentication entirely** — built before
+2026-07-27, when there was no login screen — and each was publicly reachable at
+`https://<hash>.webapp-g5y.pages.dev` wired to the **current live D1 and R2**.
+Re-proved immediately before deletion, anonymous and cookieless, against the 6
+April build `d8f782f1`: `GET /api/tables/invoices` → `200` with 19 real rows
+(vendor `YEN BROS`, total `1149.84`, `file_key` set). Two *previews* also went:
+`ad12a023` and `f1f4f12f`, both commit `d4ef033` — built minutes before
+`7181423`, so they wore a `staging` branch label while carrying **production**
+bindings. That is the trap described under "Environments"; check the commit, not
+the label.
+
+**Residual, and it is not zero.** `d8f782f1` still answers `200` on exactly the
+**8 `/api/tables/*` paths probed during the audits** — `invoices`, `suppliers`,
+`recipes`, `generic_products`, `stock_log`, `inventory`, `product_entries`,
+`invoice_lines`. These are **stale Cloudflare edge-cache entries, not a live
+deployment**: the control plane returns `404` for the deployment ID, and any
+cache-key variation (`?x=1`, a trailing slash, a different case, any unprobed
+path) returns `500` from the dead origin. So the snapshots are frozen at their
+2026-08-08 contents, cannot refresh, and cannot be enumerated further. They
+expire on Cloudflare's own TTL — **`pages.dev` is Cloudflare's zone, not ours, so
+there is no purge API available to us.** Re-check before real customer data
+lands; it should be long gone.
+
+**Deletion was the only fix, and the custom domain would not have been one:**
+Cloudflare keeps serving `pages.dev` alongside a custom domain
+(`public/robots.txt` notes the missing 301), and no guard added today can reach
+old worker code.
+
+**Keep it closed.** Deploys accumulate — 306 built up in four months. Prune
+periodically to ~12 production + current previews, and always check
+`environment` *and* the commit hash before trusting a "preview" label.
 
 ### ⚠️ Production migration state — read before any prod DB work
 
