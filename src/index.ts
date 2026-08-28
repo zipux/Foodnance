@@ -38,6 +38,8 @@ const PUBLIC_API = new Set([
   '/api/auth/me',         // its whole job is answering "am I signed in?" (401 when not)
   '/api/auth/bootstrap',  // first-run only; refuses once any user exists
   '/api/env',             // returns 'production'/'staging'; the URL already says as much
+  '/api/invites/lookup',       // shows who's inviting before the visitor has a session
+  '/api/auth/accept-invite',   // the one signup path — gated by a token, not by being public
 ])
 
 // Still allowed while an account is suspended: everything about the session
@@ -966,6 +968,11 @@ app.post('/api/inventory/:id/adjust', async (c) => {
 // super-admin on /api/admin/organizations after an actual conversation with
 // the customer — see the accounts plan. That removes the whole email
 // dependency: no verification mail, no password-reset mail, no bot defence.
+//
+// The one exception is invite acceptance (below, near /api/team) — an owner
+// generates a copy-link inside their own account and shares it however they
+// like, so the "account-creating" endpoint is reachable only via a token an
+// authenticated owner chose to hand out, not by anyone who finds the URL.
 
 const MIN_PASSWORD_LEN = 8
 
@@ -1181,6 +1188,194 @@ app.post('/api/auth/change-password', async (c) => {
   return c.json({ ok: true })
 })
 
+// ══════════════════════════════════════════════════════════════
+// TEAM — an owner invites teammates into their own organization.
+//
+// Invited users get IDENTICAL access to the owner. `role` already carries no
+// authorization meaning anywhere in this file (every gate is org_id plus the
+// super_admin exemption via orgOf()) — so there is no new permission logic
+// here, only the honest choice to store 'owner' rather than invent a
+// restricted 'member' this codebase would never actually enforce.
+//
+// Copy-link, not email: the owner generates a link and shares it however
+// they like (text, WhatsApp, in person). Matches migrations/0034's own
+// comment on the invites table and the same no-email-infrastructure
+// decision already made for password reset.
+// ══════════════════════════════════════════════════════════════
+
+// GET /api/team — this org's active users and pending (unaccepted) invites.
+app.get('/api/team', async (c) => {
+  const org = orgOf(c)
+  if (!org) return c.json({ error: 'No organization to manage.' }, 400)
+
+  const users = await c.env.DB.prepare(
+    `SELECT id, email, name, role, created_at, last_login_at
+       FROM users WHERE org_id = ? AND archived_at IS NULL ORDER BY created_at`,
+  ).bind(org).all()
+
+  const invites = await c.env.DB.prepare(
+    `SELECT id, email, name, token, created_at, expires_at
+       FROM invites WHERE org_id = ? AND accepted_at IS NULL ORDER BY created_at DESC`,
+  ).bind(org).all()
+
+  return c.json({ users: users.results || [], invites: invites.results || [] })
+})
+
+// POST /api/team/invite  { email?, name? } — generate a copy-link.
+app.post('/api/team/invite', async (c) => {
+  const org = orgOf(c)
+  if (!org) return c.json({ error: 'No organization to manage.' }, 400)
+
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const email = normalizeEmail(body.email)
+  const name = String(body.name || '').trim()
+  const me = c.get('user') as SessionUser
+
+  const id = uid()
+  const token = randomHex(32)
+  await c.env.DB.prepare(
+    `INSERT INTO invites (id, org_id, email, name, role, token, created_by, expires_at)
+     VALUES (?, ?, ?, ?, 'owner', ?, ?, datetime('now', '+7 days'))`,
+  ).bind(id, org, email, name, token, me.id).run()
+
+  return c.json({ id, token }, 201)
+})
+
+// POST /api/team/invites/:id/revoke — cancel a not-yet-accepted invite.
+// Hard delete: an unaccepted invite carries no financial or stock history, so
+// the usual soft-delete invariant doesn't apply here.
+app.post('/api/team/invites/:id/revoke', async (c) => {
+  const org = orgOf(c)
+  if (!org) return c.json({ error: 'No organization to manage.' }, 400)
+  const { id } = c.req.param()
+
+  const result = await c.env.DB.prepare(
+    `DELETE FROM invites WHERE id = ? AND org_id = ? AND accepted_at IS NULL`,
+  ).bind(id, org).run()
+  if (!result.meta.changes) return c.json({ error: 'Invite not found.' }, 404)
+
+  return c.json({ ok: true })
+})
+
+// POST /api/team/:id/archive — deactivate a teammate.
+app.post('/api/team/:id/archive', async (c) => {
+  const org = orgOf(c)
+  if (!org) return c.json({ error: 'No organization to manage.' }, 400)
+  const { id } = c.req.param()
+  const me = c.get('user') as SessionUser
+
+  // Confirm the target is actually in the caller's org BEFORE either safety
+  // check runs. Getting this order wrong doesn't open a security hole — the
+  // UPDATE below is scoped by org_id regardless — but it did produce a
+  // confusing failure the first time this was tested cross-org: an org of
+  // one refusing to archive a stranger from a different account, with an
+  // error message ("last active person") that was true of the CALLER's own
+  // org and had nothing to do with why the request actually failed.
+  const target = await c.env.DB.prepare(
+    `SELECT id FROM users WHERE id = ? AND org_id = ? AND archived_at IS NULL`,
+  ).bind(id, org).first()
+  if (!target) return c.json({ error: 'Teammate not found.' }, 404)
+
+  if (id === me.id) return c.json({ error: "You can't deactivate your own account." }, 400)
+
+  const activeCount = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM users WHERE org_id = ? AND archived_at IS NULL`,
+  ).bind(org).first<{ n: number }>()
+  if ((activeCount?.n || 0) <= 1) {
+    return c.json({ error: 'This is the last active person on the account — nothing to deactivate down to.' }, 400)
+  }
+
+  await c.env.DB.prepare(
+    `UPDATE users SET archived_at = datetime('now') WHERE id = ? AND org_id = ? AND archived_at IS NULL`,
+  ).bind(id, org).run()
+
+  return c.json({ ok: true })
+})
+
+// POST /api/invites/lookup  { token } — PUBLIC. Lets the accept-invite page
+// show who's inviting before asking for a password. One error message for
+// unknown/expired/already-used, so the response shape can't be used to probe
+// which tokens are real.
+app.post('/api/invites/lookup', async (c) => {
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const token = String(body.token || '')
+  const invalid = () => c.json({ error: 'This invite link is no longer valid.' }, 404)
+  if (!token) return invalid()
+
+  const invite = await c.env.DB.prepare(
+    `SELECT i.email, i.name, o.name AS org_name
+       FROM invites i JOIN organizations o ON o.id = i.org_id
+      WHERE i.token = ? AND i.accepted_at IS NULL
+        AND (i.expires_at IS NULL OR i.expires_at > datetime('now'))`,
+  ).bind(token).first<{ email: string; name: string; org_name: string }>()
+  if (!invite) return invalid()
+
+  return c.json(invite)
+})
+
+// POST /api/auth/accept-invite  { token, name, email, password } — PUBLIC.
+// Creates the user, consumes the invite, and signs the caller straight in —
+// see the note above /api/auth/login for why this is the one exception to
+// "no signup endpoint".
+app.post('/api/auth/accept-invite', async (c) => {
+  if (!c.env.SESSION_SECRET) return c.json({ error: 'SESSION_SECRET is not configured on the server.' }, 500)
+
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const token = String(body.token || '')
+  const name = String(body.name || '').trim()
+  const email = normalizeEmail(body.email)
+  const password = String(body.password || '')
+
+  const invalid = () => c.json({ error: 'This invite link is no longer valid.' }, 404)
+  if (!token) return invalid()
+
+  // Re-validate for real — the client's earlier /api/invites/lookup call is
+  // not trusted, it only shaped the form.
+  const invite = await c.env.DB.prepare(
+    `SELECT id, org_id FROM invites WHERE token = ? AND accepted_at IS NULL
+       AND (expires_at IS NULL OR expires_at > datetime('now'))`,
+  ).bind(token).first<{ id: string; org_id: string }>()
+  if (!invite) return invalid()
+
+  if (!email.includes('@')) return c.json({ error: 'A valid email is required.' }, 400)
+  if (password.length < MIN_PASSWORD_LEN) {
+    return c.json({ error: `Password must be at least ${MIN_PASSWORD_LEN} characters.` }, 400)
+  }
+  // Global unique index on users.email — must be re-checked at redemption
+  // time, not just when the invite was created, since two people could
+  // accept different invites with the same email in the meantime.
+  const clash = await c.env.DB.prepare(`SELECT id FROM users WHERE email = ?`).bind(email).first()
+  if (clash) return c.json({ error: 'That email already has an account.' }, 409)
+
+  const userId = uid()
+  const salt = randomHex(16)
+  const hash = await hashPassword(password, salt)
+
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      `INSERT INTO users (id, org_id, email, password_hash, password_salt, password_iter, role, name)
+       VALUES (?, ?, ?, ?, ?, ?, 'owner', ?)`,
+    ).bind(userId, invite.org_id, email, hash, salt, PBKDF2_ITERATIONS, name),
+    c.env.DB.prepare(`UPDATE invites SET accepted_at = datetime('now') WHERE id = ?`).bind(invite.id),
+  ])
+
+  // Sign the caller in immediately — same shape as /api/auth/login — so a new
+  // teammate lands in the app rather than at a login screen right after
+  // setting the password they just typed.
+  const expiresAt = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS
+  const sessionToken = await signSession(c.env.SESSION_SECRET, userId, expiresAt)
+  c.header('Set-Cookie', sessionCookieHeader(sessionToken, c.req.url, SESSION_TTL_SECONDS))
+
+  const me = await c.env.DB.prepare(
+    `SELECT ${SESSION_USER_COLUMNS}
+       FROM users u
+       LEFT JOIN organizations o ON o.id = u.org_id
+      WHERE u.id = ?`,
+  ).bind(userId).first<SessionUser>()
+
+  return c.json({ ok: true, user: me ? publicUser(me) : null })
+})
+
 // ── Super-admin: reset someone's forgotten password ───────────
 // The manual-onboarding counterpart to a reset email: the operator sets a new
 // temporary password and tells the customer, exactly as at signup. Deliberately
@@ -1263,7 +1458,40 @@ app.get('/api/admin/organizations', async (c) => {
             -- within the filtered range. The demand a hard block hides.
             (SELECT COUNT(*) FROM ai_cap_blocks b
               WHERE b.org_id = o.id
-                AND b.created_at >= ?1 AND b.created_at <= ?2) AS cap_blocks
+                AND b.created_at >= ?1 AND b.created_at <= ?2) AS cap_blocks,
+            -- Self-serve spot-check queue. Deliberately NOT scoped by the
+            -- from/to range above — a backlog must never vanish because of a
+            -- date picker. 'Action Required' is a real AI-parsed draft
+            -- awaiting review; 'In Processing' is a separate, orphaned stub
+            -- state (see ensure-invoice) that no code ever advances, so it is
+            -- counted apart rather than inflating a number Simone is meant to
+            -- be able to clear to zero. Archived organizations are excluded
+            -- entirely — a closed relationship is out of his hands the same
+            -- way a Closed invoice is.
+            (SELECT COUNT(*) FROM invoices i
+              WHERE i.org_id = o.id AND o.archived_at IS NULL
+                AND i.status = 'Action Required'
+                AND i.voided_at IS NULL AND i.reviewed_at IS NULL) AS waiting_unchecked,
+            (SELECT COUNT(*) FROM invoices i
+              WHERE i.org_id = o.id AND o.archived_at IS NULL
+                AND i.status = 'Action Required'
+                AND i.voided_at IS NULL AND i.reviewed_at IS NOT NULL) AS waiting_checked,
+            (SELECT COUNT(*) FROM invoices i
+              WHERE i.org_id = o.id AND o.archived_at IS NULL
+                AND i.status = 'In Processing'
+                AND i.voided_at IS NULL) AS waiting_stub,
+            (SELECT MIN(i.created_at) FROM invoices i
+              WHERE i.org_id = o.id AND o.archived_at IS NULL
+                AND i.status = 'Action Required'
+                AND i.voided_at IS NULL AND i.reviewed_at IS NULL) AS waiting_oldest,
+            -- The invoice id behind waiting_oldest, so the admin queue can
+            -- deep-link straight to it (invoices.js already handles ?open=)
+            -- instead of landing on the list and making him find it himself.
+            (SELECT i.id FROM invoices i
+              WHERE i.org_id = o.id AND o.archived_at IS NULL
+                AND i.status = 'Action Required'
+                AND i.voided_at IS NULL AND i.reviewed_at IS NULL
+              ORDER BY i.created_at LIMIT 1) AS waiting_oldest_id
        FROM organizations o
       ORDER BY o.created_at DESC`,
   ).bind(fromTs, toTs, monthStart()).all()
@@ -1278,6 +1506,51 @@ app.get('/api/admin/organizations', async (c) => {
     range: { from, to },
     plan_caps: PLAN_INVOICE_CAPS,
   })
+})
+
+// POST /api/admin/invoices/:id/reviewed   { checked: boolean }
+//
+// Marks that the operator has LOOKED at an invoice, so it drops off the admin
+// queue. Not an approval and not a gate — the customer could have approved it
+// a second later, and nothing downstream reads these columns.
+//
+// Super-admin only, and the actor is taken from the session, never the
+// request body: the whole value of the column is that it says who actually
+// looked. Deliberately not the generic PATCH /api/tables/invoices/:id, which
+// records no actor and would let any signed-in user in the org set
+// reviewed_by to anything.
+app.post('/api/admin/invoices/:id/reviewed', async (c) => {
+  const me = await requireSuperAdmin(c)
+  if (!me) return c.json({ error: 'Not authorized.' }, 403)
+
+  const id = c.req.param('id')
+  const { checked } = await c.req.json() as { checked?: boolean }
+
+  // A super-admin acts across organizations, so orgOf(c) is the wrong scope
+  // here — read the row's own org first, then scope the UPDATE by it. An
+  // unscoped UPDATE is exactly what tests/org-scoping.test.mjs exists to
+  // catch, and opening its allowlist for this one route isn't worth it.
+  const row = await c.env.DB.prepare(
+    'SELECT id, org_id, status, voided_at FROM invoices WHERE id = ?',
+  ).bind(id).first<{ id: string; org_id: string | null; status: string; voided_at: string | null }>()
+  if (!row) return c.json({ error: 'Not found.' }, 404)
+
+  // Once it's Closed (or voided) it's out of his hands — there is no
+  // after-the-fact amendment in this design, so a check here could not lead
+  // to any action.
+  if (checked && (row.status === 'Closed' || row.voided_at)) {
+    return c.json({ error: 'Already closed — nothing to check.' }, 409)
+  }
+
+  const reviewedBy = checked ? me.email : null
+  const reviewedAt = checked ? new Date().toISOString().slice(0, 19).replace('T', ' ') : null
+
+  await c.env.DB.prepare(
+    `UPDATE invoices SET reviewed_by = ?, reviewed_at = ?
+      WHERE id = ? AND org_id IS ?`,
+  ).bind(reviewedBy, reviewedAt, id, row.org_id).run()
+
+  return c.json({ id, checked: !!checked, reviewed_by: reviewedBy, reviewed_at: reviewedAt })
 })
 
 app.post('/api/admin/organizations', async (c) => {
@@ -1680,8 +1953,21 @@ function orgOf(c: any): string | null {
 
 // org_id is server-assigned, never client-supplied. Without this a customer
 // could POST {"org_id": "<someone else's id>"} and write into their data.
-function stripOrgId(body: Record<string, unknown>): Record<string, unknown> {
-  const { org_id, ...rest } = body
+// Columns the SERVER owns. The generic table routes below interpolate body
+// keys straight into the SQL with no column allowlist, so this function is
+// the only thing standing between a JSON key and a column.
+//
+// org_id: without it a client could POST/PATCH its way into another org's data.
+//
+// reviewed_by / reviewed_at (migration 0050): these say WHO spot-checked an
+// invoice and WHEN, and the admin queue hides anything with reviewed_at set.
+// Without this, a customer could PATCH their own invoice with
+// {"reviewed_by": "...", "reviewed_at": "..."} — forging the operator's
+// signature on an invoice he never opened, AND silently removing it from his
+// queue, in one request. They are written only by
+// POST /api/admin/invoices/:id/reviewed, which requires a super-admin session.
+function stripServerOwned(body: Record<string, unknown>): Record<string, unknown> {
+  const { org_id, reviewed_by, reviewed_at, ...rest } = body
   return rest
 }
 
@@ -1764,7 +2050,7 @@ const INTEGER_PK_TABLES = ['units', 'categories']
 app.post('/api/tables/:table', async (c) => {
   const table = c.req.param('table')
   if (!ALLOWED_TABLES.includes(table)) return c.json({ error: 'Unknown table' }, 400)
-  const body = stripOrgId(await c.req.json() as Record<string, unknown>)
+  const body = stripServerOwned(await c.req.json() as Record<string, unknown>)
   if (!body.id && !INTEGER_PK_TABLES.includes(table)) body.id = uid()
   // Stamped from the session, after stripping any client-supplied value.
   body.org_id = orgOf(c)
@@ -1781,7 +2067,7 @@ app.post('/api/tables/:table', async (c) => {
 app.put('/api/tables/:table/:id', async (c) => {
   const { table, id } = c.req.param()
   if (!ALLOWED_TABLES.includes(table)) return c.json({ error: 'Unknown table' }, 400)
-  const body = stripOrgId(await c.req.json() as Record<string, unknown>)
+  const body = stripServerOwned(await c.req.json() as Record<string, unknown>)
   body.id = id
   const keys = Object.keys(body)
   const vals = Object.values(body)
@@ -1797,7 +2083,7 @@ app.put('/api/tables/:table/:id', async (c) => {
 app.patch('/api/tables/:table/:id', async (c) => {
   const { table, id } = c.req.param()
   if (!ALLOWED_TABLES.includes(table)) return c.json({ error: 'Unknown table' }, 400)
-  const body = stripOrgId(await c.req.json() as Record<string, unknown>)
+  const body = stripServerOwned(await c.req.json() as Record<string, unknown>)
   const keys = Object.keys(body)
   if (!keys.length) return c.json({ error: 'No fields to update' }, 400)
   const setCols = keys.map(k => `${k} = ?`).join(', ')

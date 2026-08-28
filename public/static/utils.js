@@ -357,7 +357,9 @@ async function renderSessionChip() {
       <i class="fas fa-user-circle"></i>
       <span>${esc(me.org_name || (me.is_super_admin ? 'Admin' : me.email))}</span>
     </span>
-    ${me.is_super_admin ? '<a href="/admin" class="session-icon" title="Admin" aria-label="Admin"><i class="fas fa-gear"></i></a>' : ''}
+    ${me.is_super_admin
+      ? '<a href="/admin" class="session-icon" title="Admin" aria-label="Admin"><i class="fas fa-gear"></i></a>'
+      : '<a href="/settings" class="session-icon" title="Settings" aria-label="Settings"><i class="fas fa-gear"></i></a>'}
     <a href="#" id="navChangePw" class="session-icon" title="Change password" aria-label="Change password">
       <i class="fas fa-key"></i>
     </a>

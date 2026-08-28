@@ -305,6 +305,20 @@
             <div class="inv-detail-label">AI Parse Cost (USD)</div>
             <div class="inv-detail-value" id="detailAiCost" title="">—</div>
           </div>
+          <!-- Operator-only spot-check marker. Hidden by default and revealed
+               only for a super-admin, same as the AI cost block above — an
+               unknown session (bootstrap slow or failed) keeps it hidden.
+               Marking an invoice checked is a note to self, never a gate: it
+               does not stop the customer approving it, and self-serve means
+               they may already have by the time this loads. -->
+          <div id="detailReviewedBlock" style="display:none">
+            <div class="inv-detail-label">Spot-check</div>
+            <div class="inv-detail-value" id="detailReviewedStatus">Not checked</div>
+            <button type="button" id="detailReviewedBtn" class="btn btn-ghost"
+                    style="margin-top:.3rem;font-size:.8rem;padding:.3rem .6rem">
+              <i class="fas fa-check"></i> Mark checked
+            </button>
+          </div>
         </div>
 
         <!-- ── Expense-bill toggle (utilities/rent/etc. — not goods) ── -->
@@ -523,9 +537,9 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="/static/env-banner.js?v=20260807-2"></script>
-  <script src="/static/utils.js?v=20260805-4"></script>
+  <script src="/static/utils.js?v=20260810-1"></script>
   <script src="/static/image-preproc.js?v=20260806-1"></script>
   <script src="/static/inventory.js?v=20260803-3"></script>
-  <script src="/static/invoices.js?v=20260807-2"></script>
+  <script src="/static/invoices.js?v=20260810-1"></script>
 </body>
 </html>

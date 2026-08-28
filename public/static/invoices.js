@@ -179,6 +179,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('deleteInvBtn').addEventListener('click',        deleteInvoice);
   document.getElementById('voidInvBtn').addEventListener('click',         voidInvoice);
   document.getElementById('restoreInvBtn').addEventListener('click',      restoreInvoice);
+  document.getElementById('detailReviewedBtn')?.addEventListener('click', toggleReviewed);
   document.getElementById('addPageBtn')?.addEventListener('click', () => document.getElementById('addPageFileInput')?.click());
   document.getElementById('addPageFileInput')?.addEventListener('change', handleAddPageFile);
   document.getElementById('markCompleteBtn')?.addEventListener('click', markInvoiceComplete);
@@ -453,6 +454,18 @@ async function openInvDetail(id) {
     aiCostEl.textContent = '—';
     aiCostEl.title = '';
   }
+
+  // Spot-check marker — same operator-only reveal as AI cost, above. Not shown
+  // once the invoice is Closed or voided: self-serve means the customer may
+  // have already approved it by the time this loads, and the design
+  // deliberately has no after-the-fact amendment path, so there's nothing to
+  // check off once it's out of his hands.
+  const reviewedBlock = document.getElementById('detailReviewedBlock');
+  if (reviewedBlock) {
+    reviewedBlock.style.display =
+      (window.__isSuperAdmin === true && inv.status !== 'Closed' && !inv.voided_at) ? '' : 'none';
+  }
+  renderReviewedStatus(inv);
   document.getElementById('detailStatus').value        = inv.status          || 'In Processing';
   document.getElementById('detailNotes').value         = inv.notes           || '';
 
@@ -1535,6 +1548,41 @@ async function restoreInvoice() {
     applyFilters();
   } catch (e) {
     showToast('Restore failed: ' + e.message, 'error');
+  }
+}
+
+// ── Operator spot-check marker ──────────────────────────────────
+// Purely a note to self: does not gate the customer, does not change status,
+// and nothing downstream reads it. Server-side it is POST
+// /api/admin/invoices/:id/reviewed, super-admin only — never the generic
+// PATCH, which strips reviewed_by/reviewed_at so a customer can't fake it.
+function renderReviewedStatus(inv) {
+  const el  = document.getElementById('detailReviewedStatus');
+  const btn = document.getElementById('detailReviewedBtn');
+  if (!el || !btn) return;
+  if (inv.reviewed_at) {
+    el.textContent = `Checked ${fmtDate((inv.reviewed_at || '').slice(0, 10))}${inv.reviewed_by ? ' by ' + inv.reviewed_by : ''}`;
+    btn.innerHTML = '<i class="fas fa-rotate-left"></i> Undo';
+  } else {
+    el.textContent = 'Not checked';
+    btn.innerHTML = '<i class="fas fa-check"></i> Mark checked';
+  }
+}
+
+async function toggleReviewed() {
+  const id  = document.getElementById('detailInvId').value;
+  const inv = allInvoices.find(i => i.id === id);
+  if (!id || !inv) return;
+  const checked = !inv.reviewed_at;
+  try {
+    const d = await apiPost(`admin/invoices/${id}/reviewed`, { checked });
+    // Server is the source of truth for who/when — use its response, not a guess.
+    inv.reviewed_by = d.reviewed_by;
+    inv.reviewed_at = d.reviewed_at;
+    renderReviewedStatus(inv);
+    showToast(checked ? 'Marked checked.' : 'Un-checked.', 'success');
+  } catch (e) {
+    showToast('Could not update: ' + e.message, 'error');
   }
 }
 

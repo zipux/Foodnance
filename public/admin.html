@@ -149,6 +149,19 @@
     .capcell .sub.near { color: #92400e; font-weight: 600; }
     .capcell .blocks { color: #991b1b; }
 
+    /* Self-serve spot-check queue. Same tabular/severity language as the cost
+       and cap columns, so all three read as one family of "figures worth
+       watching" rather than three different idioms. */
+    .waiting .sub { display: block; font-size: .7rem; color: var(--text-muted); margin-top: .1rem; }
+    .waiting .sub.near { color: #92400e; font-weight: 600; }  /* oldest > 3 days */
+    .waiting .sub.over { color: #991b1b; font-weight: 600; }  /* oldest > 7 days */
+    .waiting .newpill { background: #fef3c7; color: #92400e; margin-left: .3rem; }
+    .waiting-btn {
+      font-family: inherit; font-size: inherit; font-weight: 600; color: var(--text);
+      background: none; border: none; padding: 0; cursor: pointer; text-align: right;
+    }
+    .waiting-btn:hover .amt { text-decoration: underline; }
+
     /* Date-range filter above the table. */
     .rangebar {
       display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
@@ -512,7 +525,8 @@
             <thead><tr>
               <th>Name</th><th>Owner</th><th>Type</th><th>Plan</th><th>Status</th>
               <th>People</th><th style="text-align:right">AI cost (USD)</th>
-              <th style="text-align:right">Cap</th><th>Added</th><th></th>
+              <th style="text-align:right">Cap</th><th style="text-align:right">Waiting</th>
+              <th>Added</th><th></th>
             </tr></thead>
             <tbody>${rows.map(o => `
               <tr${o.archived_at ? ' style="opacity:.55"' : ''}>
@@ -524,6 +538,7 @@
                 <td>${o.user_count}</td>
                 ${aiCostCell(o)}
                 ${capCell(o, planCaps)}
+                ${waitingCell(o)}
                 <td>${esc((o.created_at || '').split(' ')[0])}</td>
                 <td class="actions">
                   <button class="btn btn-ghost" data-act="view"
@@ -580,6 +595,19 @@
             a monthly allowance can't be read over any other window. Over the cap,
             AI reading stops and they can still enter invoices by hand;
             <strong>blocked</strong> counts the refusals in the selected range.
+            <br>
+            <strong>Waiting</strong> is invoices the customer hasn't approved
+            yet — self-serve means they can approve the moment the AI has read
+            one, so this is visibility for spot-checks, never a gate. It's not
+            in their P&amp;L until they close it. Click the number to open their
+            invoices and check one; <strong>checked</strong> counts ones you've
+            already looked at (marking one checked is a note to yourself, not
+            an approval — the customer can still act on it any time), and
+            <strong>stub</strong> is a leftover invoice record from the manual
+            "add product entry" form that nobody will ever act on, kept
+            separate so it can't make the count look permanently stuck.
+            Restaurants in their first 30 days are flagged <strong>NEW</strong> —
+            that's when their catalogue is emptiest and the AI matches worst.
           </div>`;
 
         // Listeners rather than inline onclick="…('${name}')". esc() turns an
@@ -592,6 +620,7 @@
             const d = btn.dataset;
             switch (d.act) {
               case 'view':    return viewAs(d.id, d.name);
+              case 'queue':   return viewAs(d.id, d.name, d.open ? `/invoices?open=${encodeURIComponent(d.open)}` : '/invoices');
               case 'reset':   return resetOwnerPw(d.email, d.name);
               case 'suspend': return suspendOrg(d.id, d.name);
               case 'restore': return restoreOrg(d.id, d.name);
@@ -616,7 +645,11 @@
 
     // Look at a customer's data without their password. You stay signed in as
     // yourself the whole time — see the note on /api/admin/view-as.
-    async function viewAs(orgId, name) {
+    //
+    // `dest` defaults to /home so every existing "View" caller is unchanged;
+    // the Waiting queue passes '/invoices' to land straight on their invoice
+    // list instead of making a second click.
+    async function viewAs(orgId, name, dest) {
       try {
         const r = await fetch('/api/admin/view-as', {
           method: 'POST',
@@ -624,7 +657,7 @@
           body: JSON.stringify({ org_id: orgId }),
         });
         if (!r.ok) { msg('Could not switch view.', 'bad'); return; }
-        location.href = '/home';   // land in the app, now showing their data
+        location.href = dest || '/home';
       } catch (_) {
         msg('Could not reach the server.', 'bad');
       }
@@ -691,6 +724,55 @@
       const amt = cost > 0 && cost < 0.01 ? '&lt;$0.01' : '$' + cost.toFixed(2);
       return `<td class="cost"><span class="amt">${amt}</span>
         <span class="sub">${count} invoice${count === 1 ? '' : 's'}</span></td>`;
+    }
+
+    // "4h" / "3d" — coarse on purpose, this only has to say "fresh" vs "stale".
+    function ageLabel(iso) {
+      if (!iso) return '';
+      const ms = Date.now() - new Date(iso.replace(' ', 'T') + 'Z').getTime();
+      const hours = ms / 3600000;
+      if (hours < 24) return Math.max(1, Math.round(hours)) + 'h';
+      return Math.round(hours / 24) + 'd';
+    }
+
+    // Self-serve spot-check queue. Self-serve means the customer can approve
+    // an invoice the moment the AI has read it — this column exists so Simone
+    // can see what's piling up and reach it, not to gate anything.
+    //
+    // "Action Required" is the real, actionable backlog. "In Processing" is a
+    // separate orphaned-stub state (see ensure-invoice server-side) that no
+    // code ever advances, so it is shown apart as "stub" rather than folded
+    // into the headline count — a number that can never reach zero trains you
+    // to stop looking at the column.
+    function waitingCell(o) {
+      const unchecked = Number(o.waiting_unchecked) || 0;
+      const checked   = Number(o.waiting_checked) || 0;
+      const stub      = Number(o.waiting_stub) || 0;
+      if (!unchecked && !checked && !stub) {
+        return '<td class="cost waiting zero"><span class="amt">—</span></td>';
+      }
+
+      const age = ageLabel(o.waiting_oldest);
+      const hours = o.waiting_oldest ? (Date.now() - new Date(o.waiting_oldest.replace(' ', 'T') + 'Z').getTime()) / 3600000 : 0;
+      const cls = hours >= 168 ? 'over' : (hours >= 72 ? 'near' : '');
+
+      // New accounts get the most attention: their catalogue is empty and the
+      // AI matches worst, so flag every restaurant still inside its first 30
+      // days regardless of how small the count is.
+      const orgAgeDays = o.created_at ? (Date.now() - new Date(o.created_at.replace(' ', 'T') + 'Z').getTime()) / 86400000 : 999;
+      const newPill = orgAgeDays <= 30 ? '<span class="pill newpill" title="Restaurant created within the last 30 days">NEW</span>' : '';
+
+      const bits = [];
+      if (checked) bits.push(`${checked} checked`);
+      if (stub)    bits.push(`${stub} stub`);
+      const subText = [age ? `oldest ${age}` : '', ...bits].filter(Boolean).join(' · ');
+
+      return `<td class="cost waiting">
+        <button type="button" class="waiting-btn" data-act="queue" data-id="${esc(o.id)}"
+                data-name="${esc(o.name)}" data-open="${esc(o.waiting_oldest_id || '')}">
+          <span class="amt">${unchecked || '—'}</span>${newPill}
+        </button>
+        <span class="sub ${cls}">${subText}</span></td>`;
     }
 
     // Monthly AI invoice-parse allowance, and how much of it is gone.
