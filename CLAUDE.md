@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-DoughMeter — a business-management app for food/product businesses (products, suppliers, recipes, finished products, inventory, invoices, staff certifications). Runs on **Cloudflare Pages + Workers** with a **Hono** edge API, **D1** (SQLite) for structured data, and **R2** for file storage (invoice PDFs, certificates). Being built to sell commercially, so favor robust/professional choices over quick hacks.
+Foodnance — a business-management app for food/product businesses (products, suppliers, recipes, finished products, inventory, invoices, staff certifications). Runs on **Cloudflare Pages + Workers** with a **Hono** edge API, **D1** (SQLite) for structured data, and **R2** for file storage (invoice PDFs, certificates). Being built to sell commercially, so favor robust/professional choices over quick hacks.
 
 ## Commands
 

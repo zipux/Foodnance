@@ -1,7 +1,7 @@
-# DoughMeter — Production Cost, Inventory & Staff Certification Manager
+# Foodnance — Production Cost, Inventory & Staff Certification Manager
 
 ## Project Overview
-- **Name**: DoughMeter
+- **Name**: Foodnance
 - **Goal**: Full-featured business management platform for food/product businesses
 - **Backend**: Hono + Cloudflare Workers (edge API)
 - **Storage**: Cloudflare D1 (SQLite database) + Cloudflare R2 (file storage)

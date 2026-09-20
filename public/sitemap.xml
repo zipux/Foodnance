@@ -3,15 +3,14 @@
   Only the public marketing page belongs here. App pages are noindex and
   Disallow-ed in robots.txt, so listing them would send mixed signals.
 
-  ON DOMAIN LAUNCH: replace the host in <loc> with the real domain, and
-  refresh <lastmod> whenever the page's content materially changes.
+  Refresh <lastmod> whenever the page's content materially changes.
   Note the URL is extensionless — Cloudflare Pages 308s /index.html to /,
   so / is the canonical form and must be what appears here.
 -->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://webapp-g5y.pages.dev/</loc>
-    <lastmod>2026-07-26</lastmod>
+    <loc>https://foodnance.com/</loc>
+    <lastmod>2026-09-20</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>

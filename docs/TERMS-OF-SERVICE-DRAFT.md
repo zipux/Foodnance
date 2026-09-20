@@ -1,4 +1,4 @@
-# DoughMeter — Terms of Service (WORKING DRAFT)
+# Foodnance — Terms of Service (WORKING DRAFT)
 
 > **Status: draft, 2026-08-09. Not legal advice. Not signed, not published, not
 > enforceable.** This exists so the app can be built against a known set of
@@ -20,9 +20,9 @@
 
 These Terms of Service ("Terms") are between `[LEGAL ENTITY NAME]` ("we", "us"),
 a `[PROVINCE]` `[corporation / sole proprietorship]`, and the business that
-subscribes to DoughMeter ("Customer", "you").
+subscribes to Foodnance ("Customer", "you").
 
-DoughMeter is business software sold to businesses. It is **not** a consumer
+Foodnance is business software sold to businesses. It is **not** a consumer
 product, and you confirm you are subscribing for business purposes. Individuals
 who use the Service on your behalf ("Users") do so under your account and under
 these Terms; you are responsible for their acts and omissions.
@@ -32,7 +32,7 @@ agree to these Terms. If you do not agree, do not use the Service.
 
 ### 2. What the Service is
 
-DoughMeter is a hosted back-office application for food businesses. Depending on
+Foodnance is a hosted back-office application for food businesses. Depending on
 your plan it may include: supplier and product records, automated extraction of
 data from invoice documents, recipe and finished-product costing, inventory
 tracking, stock takes, import of point-of-sale sales data, profit-and-loss

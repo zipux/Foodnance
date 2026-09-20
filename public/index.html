@@ -3,20 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <!-- ══════════════════════════════════════════════════════════════════
-       DOMAIN SWAP CHECKLIST — every absolute URL below points at the
-       pages.dev deployment. On launch, replace the host in exactly four
-       places: canonical, og:url, og:image, twitter:image (plus the same
-       host in sitemap.xml and robots.txt), and DELETE the robots noindex
-       line directly underneath this block.
-       ══════════════════════════════════════════════════════════════════ -->
+  <!-- Indexable since foodnance.com went live (2026-09-20). Canonical, og:url
+       and the structured-data ids all use the bare domain; the pages.dev host
+       is an unredirected duplicate, which canonical is what tells crawlers to
+       ignore. See robots.txt for what stays out of search. -->
 
-  <!-- Held closed deliberately: see robots.txt. Delete this line on launch. -->
-  <meta name="robots" content="noindex, nofollow" />
-
-  <title>DoughMeter — Know your real food cost</title>
-  <meta name="description" content="DoughMeter turns a photo of your supplier invoice into true food cost, live recipe margins and a real P&amp;L. Built for independent restaurants, bakeries and commissaries." />
-  <link rel="canonical" href="https://webapp-g5y.pages.dev/" />
+  <title>Foodnance — Know your real food cost</title>
+  <meta name="description" content="Foodnance turns a photo of your supplier invoice into true food cost, live recipe margins and a real P&amp;L. Built for independent restaurants, bakeries and commissaries." />
+  <link rel="canonical" href="https://foodnance.com/" />
   <meta name="theme-color" content="#4f46e5" />
 
   <!-- Favicon. SVG covers every current browser; see README note on adding
@@ -26,23 +20,23 @@
 
   <!-- Open Graph: controls the preview when the link is shared -->
   <meta property="og:type" content="website" />
-  <meta property="og:site_name" content="DoughMeter" />
+  <meta property="og:site_name" content="Foodnance" />
   <meta property="og:locale" content="en_US" />
-  <meta property="og:url" content="https://webapp-g5y.pages.dev/" />
-  <meta property="og:title" content="DoughMeter — Know your real food cost" />
+  <meta property="og:url" content="https://foodnance.com/" />
+  <meta property="og:title" content="Foodnance — Know your real food cost" />
   <meta property="og:description" content="Photograph an invoice. Your recipe costs, margins and P&amp;L update themselves." />
   <!-- TODO: add og-image.png (1200x630) and uncomment. A real screenshot of
        Price Movers converts better than anything synthetic. Left commented
        rather than pointing at a missing file, which would break the preview.
-  <meta property="og:image" content="https://webapp-g5y.pages.dev/og-image.png" />
+  <meta property="og:image" content="https://foodnance.com/og-image.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
-  <meta property="og:image:alt" content="DoughMeter Price Movers, showing which supplier raised prices this month." />
+  <meta property="og:image:alt" content="Foodnance Price Movers, showing which supplier raised prices this month." />
   -->
 
   <!-- Twitter/X falls back to the OG tags for everything except card type. -->
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="DoughMeter — Know your real food cost" />
+  <meta name="twitter:title" content="Foodnance — Know your real food cost" />
   <meta name="twitter:description" content="Photograph an invoice. Your recipe costs, margins and P&amp;L update themselves." />
 
   <!-- Both CDNs are on the critical render path; warm the connections early. -->
@@ -63,13 +57,13 @@
     "@graph": [
       {
         "@type": "SoftwareApplication",
-        "@id": "https://webapp-g5y.pages.dev/#software",
-        "name": "DoughMeter",
+        "@id": "https://foodnance.com/#software",
+        "name": "Foodnance",
         "applicationCategory": "BusinessApplication",
         "applicationSubCategory": "Restaurant food cost and inventory management",
         "operatingSystem": "Web browser",
-        "url": "https://webapp-g5y.pages.dev/",
-        "description": "DoughMeter reads your supplier invoices and turns them into true food cost: live recipe and finished-product costing, per-vendor price comparison, stock takes with variance, and a P&L with true COGS.",
+        "url": "https://foodnance.com/",
+        "description": "Foodnance reads your supplier invoices and turns them into true food cost: live recipe and finished-product costing, per-vendor price comparison, stock takes with variance, and a P&L with true COGS.",
         "featureList": [
           "AI invoice line-item extraction",
           "Per-vendor price comparison and price-change alerts",
@@ -85,17 +79,17 @@
       },
       {
         "@type": "Organization",
-        "@id": "https://webapp-g5y.pages.dev/#org",
-        "name": "DoughMeter",
-        "url": "https://webapp-g5y.pages.dev/",
+        "@id": "https://foodnance.com/#org",
+        "name": "Foodnance",
+        "url": "https://foodnance.com/",
         "email": "simoneisonni@gmail.com"
       },
       {
         "@type": "WebSite",
-        "@id": "https://webapp-g5y.pages.dev/#website",
-        "url": "https://webapp-g5y.pages.dev/",
-        "name": "DoughMeter",
-        "publisher": { "@id": "https://webapp-g5y.pages.dev/#org" }
+        "@id": "https://foodnance.com/#website",
+        "url": "https://foodnance.com/",
+        "name": "Foodnance",
+        "publisher": { "@id": "https://foodnance.com/#org" }
       }
     ]
   }
@@ -341,12 +335,12 @@
 
   <header class="nav">
     <div class="nav-inner">
-      <a class="brand" href="#top"><i class="fas fa-receipt"></i> DoughMeter</a>
+      <a class="brand" href="#top"><i class="fas fa-receipt"></i> Foodnance</a>
       <div class="nav-spacer"></div>
       <a class="nav-link" href="#features">Features</a>
       <a class="nav-link" href="#how">How it works</a>
       <a class="nav-link" href="/login">Log in</a>
-      <a class="btn btn-primary" href="mailto:simoneisonni@gmail.com?subject=DoughMeter%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20DoughMeter.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
+      <a class="btn btn-primary" href="mailto:simoneisonni@gmail.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
         Request access
       </a>
     </div>
@@ -361,13 +355,13 @@
     <h1>Know your <span class="accent">real food cost</span></h1>
 
     <p class="sub">
-      Photograph a supplier invoice. DoughMeter reads every line, updates the cost of every
+      Photograph a supplier invoice. Foodnance reads every line, updates the cost of every
       recipe that uses those ingredients, and tells you which vendor just raised prices —
       before it quietly eats your margin.
     </p>
 
     <div class="cta-row">
-      <a class="btn btn-primary btn-lg" href="mailto:simoneisonni@gmail.com?subject=DoughMeter%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20DoughMeter.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
+      <a class="btn btn-primary btn-lg" href="mailto:simoneisonni@gmail.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
         <i class="fas fa-envelope"></i> Request access
       </a>
       <a class="btn btn-ghost btn-lg" href="/login"><i class="fas fa-arrow-right-to-bracket"></i> Log in</a>
@@ -440,7 +434,7 @@
     <div class="wrap">
       <div class="section-head">
         <h2>Everything downstream of an invoice, handled</h2>
-        <p>Most tools stop at bookkeeping. DoughMeter carries the number all the way through
+        <p>Most tools stop at bookkeeping. Foodnance carries the number all the way through
            to what a plate actually costs you.</p>
       </div>
 
@@ -538,7 +532,7 @@
         <h2>Find out what your food actually costs</h2>
         <p>We're onboarding the first businesses now, hands-on. Tell us a little about your
            operation and we'll set you up.</p>
-        <a class="btn btn-primary btn-lg" href="mailto:simoneisonni@gmail.com?subject=DoughMeter%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20DoughMeter.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
+        <a class="btn btn-primary btn-lg" href="mailto:simoneisonni@gmail.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
           <i class="fas fa-envelope"></i> Request access
         </a>
         <p class="cta-note" style="margin-top:1rem">No card, no commitment — a conversation first.</p>
@@ -548,9 +542,9 @@
 
   <footer>
     <div class="wrap foot-inner">
-      <a class="brand" href="#top" style="font-size:1rem"><i class="fas fa-receipt"></i> DoughMeter</a>
+      <a class="brand" href="#top" style="font-size:1rem"><i class="fas fa-receipt"></i> Foodnance</a>
       <div class="nav-spacer"></div>
-      <span>&copy; 2026 DoughMeter</span>
+      <span>&copy; 2026 Foodnance</span>
       <a href="mailto:simoneisonni@gmail.com">Contact</a>
     </div>
   </footer>

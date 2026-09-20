@@ -1,57 +1,54 @@
-# DoughMeter — crawler policy
+# Foodnance — crawler policy
 #
-# ── CURRENTLY CLOSED TO SEARCH ENGINES ──────────────────────────────
-# The site is only reachable on its *.pages.dev deployment URL, which is
-# not the domain we intend to rank. Cloudflare Pages does not 301 the
-# pages.dev host to a custom domain, so anything indexed now would linger
-# as a permanent duplicate competing with the real site.
+# Open to search engines since foodnance.com went live (2026-09-20).
+# Only the marketing page is meant to be found. The app pages are thin JS
+# shells with no search value and no reason to publish the feature map; they
+# also carry a `noindex` meta tag, which is the binding signal — robots.txt
+# only asks crawlers not to fetch.
 #
-# ON DOMAIN LAUNCH, do these three things:
-#   1. Delete the two "Disallow: /" lines in the block below and uncomment
-#      the LAUNCH block underneath it.
-#   2. Remove the `noindex` robots meta from public/index.html.
-#   3. Update every absolute URL to the real domain — canonical + og:url
-#      in index.html, and the <loc> entries in sitemap.xml.
-# ────────────────────────────────────────────────────────────────────
+# The old *.pages.dev host is not redirected to the custom domain (Cloudflare
+# does not do that), so it stays reachable as a duplicate. The canonical tag in
+# index.html is what tells crawlers which address counts.
 
 User-agent: *
-Disallow: /
+Allow: /
 
-# ── LAUNCH BLOCK — uncomment when the real domain is live ────────────
-# User-agent: *
-# Allow: /
-#
-# # Private application surface: thin JS shells with no search value, and
-# # no reason to publish the feature map. Also carry a noindex meta tag,
-# # which is the binding signal — robots.txt only asks crawlers not to fetch.
-# Disallow: /products.html
-# Disallow: /products
-# Disallow: /invoices
-# Disallow: /invoices.html
-# Disallow: /inventory
-# Disallow: /inventory.html
-# Disallow: /recipes
-# Disallow: /recipes.html
-# Disallow: /finished-products
-# Disallow: /finished-products.html
-# Disallow: /suppliers
-# Disallow: /suppliers.html
-# Disallow: /staff
-# Disallow: /staff.html
-# Disallow: /certifications
-# Disallow: /certifications.html
-# Disallow: /stock-take
-# Disallow: /stock-take.html
-# Disallow: /storage-layout
-# Disallow: /storage-layout.html
-# Disallow: /upload-invoice
-# Disallow: /upload-invoice.html
-# Disallow: /pnl
-# Disallow: /pnl.html
-# Disallow: /home
-# Disallow: /home.html
-# Disallow: /login
-# Disallow: /login.html
-# Disallow: /api/
-#
-# Sitemap: https://REPLACE-WITH-REAL-DOMAIN/sitemap.xml
+Disallow: /products.html
+Disallow: /products
+Disallow: /invoices
+Disallow: /invoices.html
+Disallow: /inventory
+Disallow: /inventory.html
+Disallow: /recipes
+Disallow: /recipes.html
+Disallow: /finished-products
+Disallow: /finished-products.html
+Disallow: /suppliers
+Disallow: /suppliers.html
+Disallow: /staff
+Disallow: /staff.html
+Disallow: /certifications
+Disallow: /certifications.html
+Disallow: /stock-take
+Disallow: /stock-take.html
+Disallow: /storage-layout
+Disallow: /storage-layout.html
+Disallow: /upload-invoice
+Disallow: /upload-invoice.html
+Disallow: /pnl
+Disallow: /pnl.html
+Disallow: /home
+Disallow: /home.html
+Disallow: /sales
+Disallow: /sales.html
+Disallow: /settings
+Disallow: /settings.html
+Disallow: /admin
+Disallow: /admin.html
+Disallow: /accept-invite
+Disallow: /accept-invite.html
+Disallow: /login
+Disallow: /login.html
+Disallow: /api/
+
+Sitemap: https://foodnance.com/sitemap.xml
