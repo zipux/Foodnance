@@ -3,10 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <!-- Indexable since foodnance.com went live (2026-09-20). Canonical, og:url
-       and the structured-data ids all use the bare domain; the pages.dev host
-       is an unredirected duplicate, which canonical is what tells crawlers to
-       ignore. See robots.txt for what stays out of search. -->
+  <!-- Held out of search on purpose while the landing page is finished:
+       foodnance.com is live and reachable, but not yet announced to Google.
+       TO LAUNCH: delete the robots meta line below, restore the Sitemap line
+       in robots.txt, then submit the site in Search Console. Canonical,
+       og:url and the structured-data ids already use the bare domain; the
+       pages.dev host is an unredirected duplicate, which canonical is what
+       tells crawlers to ignore. See robots.txt for what stays out of search. -->
+  <meta name="robots" content="noindex, nofollow" />
 
   <title>Foodnance — Know your real food cost</title>
   <meta name="description" content="Foodnance turns a photo of your supplier invoice into true food cost, live recipe margins and a real P&amp;L. Built for independent restaurants, bakeries and commissaries." />
@@ -90,6 +94,68 @@
         "url": "https://foodnance.com/",
         "name": "Foodnance",
         "publisher": { "@id": "https://foodnance.com/#org" }
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "https://foodnance.com/#faq",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "What is Foodnance?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Foodnance is a web app for independent restaurants, bakeries, cafés and commissaries. You send it your supplier invoices, and it turns them into the real cost of every ingredient, recipe and menu item, so you can see your food cost and margins as prices change."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How does Foodnance read my invoices?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Take a photo or upload a PDF. Foodnance uses AI to pull out every line: the product, pack size and price. You then check the lines, fix anything that looks wrong, and approve. If the lines don't add up to the invoice total, it flags the problem so a typo never turns into a wrong food cost."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Do I need to install anything?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. Foodnance runs in a web browser on a phone, tablet or computer. Stock takes also work on a phone, even offline if the walk-in has no signal."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How do my recipe costs stay up to date?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Recipe and menu-item costs are worked out from the prices on your invoices. When a supplier raises the price of flour, every recipe that uses it updates on its own, and Price Movers shows which items went up and which supplier is cheapest."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does it replace my accounting software?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. Foodnance focuses on food cost: what you buy, what it costs on the plate, and your margins. It includes a monthly profit and loss built from your real purchases, but it is not a full accounting system."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is my data kept private?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Every business has its own account, and your data is kept separate from every other customer's. Foodnance runs on Cloudflare's infrastructure."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How much does it cost?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "We're onboarding the first customers by hand, so pricing is agreed when we set up your account. There's no card and no commitment. It starts with a conversation."
+            }
+          }
+        ]
       }
     ]
   }
@@ -301,6 +367,23 @@
     }
     .who i { color: var(--primary); }
 
+    /* ===== FAQ ===== */
+    .faq { max-width: 760px; margin: 0 auto; display: grid; gap: .7rem; }
+    .faq-item { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); }
+    .faq-item summary {
+      cursor: pointer; list-style: none; padding: 1rem 1.2rem; font-weight: 600;
+      display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    }
+    .faq-item summary::-webkit-details-marker { display: none; }
+    .faq-item summary::after {
+      content: "+"; font-size: 1.3rem; font-weight: 500; line-height: 1;
+      color: var(--primary); flex-shrink: 0;
+    }
+    .faq-item[open] summary::after { content: "\2212"; }
+    .faq-item summary:hover { color: var(--primary-d); }
+    .faq-item summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: var(--radius); }
+    .faq-item p { padding: 0 1.2rem 1.1rem; color: var(--text-muted); font-size: .95rem; }
+
     /* ===== FINAL CTA ===== */
     .final {
       background: linear-gradient(135deg, var(--primary-d), var(--primary));
@@ -339,6 +422,7 @@
       <div class="nav-spacer"></div>
       <a class="nav-link" href="#features">Features</a>
       <a class="nav-link" href="#how">How it works</a>
+      <a class="nav-link" href="#faq">FAQ</a>
       <a class="nav-link" href="/login">Log in</a>
       <a class="btn btn-primary" href="mailto:simoneisonni@gmail.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
         Request access
@@ -521,6 +605,56 @@
         <span><i class="fas fa-warehouse"></i> Commissaries</span>
         <span><i class="fas fa-mug-hot"></i> Cafés</span>
         <span><i class="fas fa-pizza-slice"></i> Pizzerias</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ FAQ ══
+       Keep these questions and answers word-for-word identical to the FAQPage
+       block in the JSON-LD at the top of this file: Google ignores structured
+       data that doesn't match what visitors can see. -->
+  <section id="faq">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Frequently asked questions</h2>
+        <p>Short answers to what people ask before they sign up.</p>
+      </div>
+      <div class="faq">
+
+        <details class="faq-item">
+          <summary>What is Foodnance?</summary>
+          <p>Foodnance is a web app for independent restaurants, bakeries, cafés and commissaries. You send it your supplier invoices, and it turns them into the real cost of every ingredient, recipe and menu item, so you can see your food cost and margins as prices change.</p>
+        </details>
+
+        <details class="faq-item">
+          <summary>How does Foodnance read my invoices?</summary>
+          <p>Take a photo or upload a PDF. Foodnance uses AI to pull out every line: the product, pack size and price. You then check the lines, fix anything that looks wrong, and approve. If the lines don't add up to the invoice total, it flags the problem so a typo never turns into a wrong food cost.</p>
+        </details>
+
+        <details class="faq-item">
+          <summary>Do I need to install anything?</summary>
+          <p>No. Foodnance runs in a web browser on a phone, tablet or computer. Stock takes also work on a phone, even offline if the walk-in has no signal.</p>
+        </details>
+
+        <details class="faq-item">
+          <summary>How do my recipe costs stay up to date?</summary>
+          <p>Recipe and menu-item costs are worked out from the prices on your invoices. When a supplier raises the price of flour, every recipe that uses it updates on its own, and Price Movers shows which items went up and which supplier is cheapest.</p>
+        </details>
+
+        <details class="faq-item">
+          <summary>Does it replace my accounting software?</summary>
+          <p>No. Foodnance focuses on food cost: what you buy, what it costs on the plate, and your margins. It includes a monthly profit and loss built from your real purchases, but it is not a full accounting system.</p>
+        </details>
+
+        <details class="faq-item">
+          <summary>Is my data kept private?</summary>
+          <p>Yes. Every business has its own account, and your data is kept separate from every other customer's. Foodnance runs on Cloudflare's infrastructure.</p>
+        </details>
+
+        <details class="faq-item">
+          <summary>How much does it cost?</summary>
+          <p>We're onboarding the first customers by hand, so pricing is agreed when we set up your account. There's no card and no commitment. It starts with a conversation.</p>
+        </details>
       </div>
     </div>
   </section>
