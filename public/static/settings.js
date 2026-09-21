@@ -113,6 +113,12 @@ async function generateInvite() {
   const name = document.getElementById('inviteName').value.trim();
   const email = document.getElementById('inviteEmail').value.trim();
 
+  if (!name || !email.includes('@')) {
+    msgEl.textContent = !name ? 'Enter their name.' : 'Enter a valid email address.';
+    msgEl.className = 'msg show bad';
+    return;
+  }
+
   try {
     const d = await apiPost('team/invite', { name, email });
     const link = inviteLinkFor(d.token);

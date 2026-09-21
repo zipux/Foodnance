@@ -1444,7 +1444,8 @@ app.get('/api/team', async (c) => {
   return c.json({ users: users.results || [], invites: invites.results || [] })
 })
 
-// POST /api/team/invite  { email?, name? } — generate a copy-link.
+// POST /api/team/invite  { email, name } — generate a copy-link. Both are
+// required: the link is bound to that address at acceptance (see accept-invite).
 app.post('/api/team/invite', async (c) => {
   const org = orgOf(c)
   if (!org) return c.json({ error: 'No organization to manage.' }, 400)
@@ -1453,6 +1454,8 @@ app.post('/api/team/invite', async (c) => {
   const email = normalizeEmail(body.email)
   const name = String(body.name || '').trim()
   const me = c.get('user') as SessionUser
+  if (!name) return c.json({ error: 'A name is required.' }, 400)
+  if (!email.includes('@')) return c.json({ error: 'A valid email is required.' }, 400)
 
   const id = uid()
   const token = randomHex(32)
