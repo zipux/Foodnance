@@ -104,55 +104,87 @@
             "name": "What is Foodnance?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Foodnance is a web app for independent restaurants, bakeries, cafés and commissaries. You send it your supplier invoices, and it turns them into the real cost of every ingredient, recipe and menu item, so you can see your food cost and margins as prices change."
+              "text": "<p>Foodnance is food cost software for independent restaurants, bakeries and cafés. You photograph a supplier invoice, and Foodnance updates your recipe costs, dish margins and P&amp;L automatically. It was built by a restaurant manager with over ten years of kitchen experience.</p>"
             }
           },
           {
             "@type": "Question",
-            "name": "How does Foodnance read my invoices?",
+            "name": "How does Foodnance calculate my dish cost?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Take a photo or upload a PDF. Foodnance uses AI to pull out every line: the product, pack size and price. You then check the lines, fix anything that looks wrong, and approve. If the lines don't add up to the invoice total, it flags the problem so a typo never turns into a wrong food cost."
+              "text": "<p>Foodnance prices each ingredient from your most recent supplier invoice, then multiplies by the amount your recipe uses. Take a simple cheeseburger:</p><ul><li>Beef patty: ground beef is $11.00 per kg on your invoice, and a patty uses 150 g, so $1.65</li><li>Bun: $4.80 for a dozen, so $0.40 each</li><li>Cheese slice: $18.00 for a box of 120, so $0.15 each</li></ul><p>That makes the burger $2.20 to make. When a new invoice shows beef at $12.00 per kg, the patty goes to $1.80 and the burger to $2.35, without you recalculating anything.</p>"
             }
           },
           {
             "@type": "Question",
-            "name": "Do I need to install anything?",
+            "name": "Who is Foodnance for?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "No. Foodnance runs in a web browser on a phone, tablet or computer. Stock takes also work on a phone, even offline if the walk-in has no signal."
+              "text": "<p>Foodnance is for independent restaurants, bakeries, cafés and commissaries in Canada. It suits businesses that buy from several suppliers, where prices change often and working out the true cost of each dish by hand takes too much time. It is not designed for large chains.</p>"
             }
           },
           {
             "@type": "Question",
-            "name": "How do my recipe costs stay up to date?",
+            "name": "How is Foodnance different from a spreadsheet or competitor software like MarginEdge?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Recipe and menu-item costs are worked out from the prices on your invoices. When a supplier raises the price of flour, every recipe that uses it updates on its own, and Price Movers shows which items went up and which supplier is cheapest."
+              "text": "<p>With a spreadsheet, you re-type prices from every invoice and update each recipe yourself. With Foodnance, you photograph the invoice, check the lines it read, and your recipe costs update automatically, so you can see when a dish gets more expensive.</p><p>Compared with other invoice-based food cost tools, Foodnance is built for independent kitchens by a Canadian restaurant manager. It has two plans, so you only pay for stock counting and inventory tools if your team actually does them. Pricing is in Canadian dollars, so there is no exchange rate to worry about. Customer feature requests are welcome.</p>"
             }
           },
           {
             "@type": "Question",
-            "name": "Does it replace my accounting software?",
+            "name": "How does invoice scanning work?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "No. Foodnance focuses on food cost: what you buy, what it costs on the plate, and your margins. It includes a monthly profit and loss built from your real purchases, but it is not a full accounting system."
+              "text": "<p>You take a photo of a supplier invoice with your phone, or upload a PDF, PNG or JPG from your computer, and Foodnance reads it for you. It picks out each line item with its quantity, unit and price, then shows you the result to check before you confirm it.</p>"
             }
           },
           {
             "@type": "Question",
-            "name": "Is my data kept private?",
+            "name": "How accurate is the AI, and who checks it?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Yes. Every business has its own account, and your data is kept separate from every other customer's. Foodnance runs on Cloudflare's infrastructure."
+              "text": "<p>The AI reads most lines correctly, and it keeps improving as the technology improves. But it can make mistakes, so after an invoice has been read, it waits in the Invoices tab until someone at your restaurant checks it and confirms it. Nothing counts toward your costs until you do.</p>"
             }
           },
           {
             "@type": "Question",
-            "name": "How much does it cost?",
+            "name": "What happens when a supplier raises a price?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "We're onboarding the first customers by hand, so pricing is agreed when we set up your account. There's no card and no commitment. It starts with a conversation."
+              "text": "<p>Foodnance's Price Movers page shows which products changed price the most, as a percentage and per unit, such as per kg. Open any product to see its price history by supplier and tell a steady rise from a one-off spike. Recipes and dishes that use the product are re-costed from the new invoice automatically.</p>"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I compare prices between suppliers?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "<p>Yes. If you buy the same product from more than one supplier, Foodnance compares their prices side by side per unit, such as per kg, so different pack sizes are comparable. Vendor Compare shows which supplier is cheapest and how much you would save, which helps when you negotiate or switch suppliers.</p>"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Do I need to set up my suppliers and products first?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "<p>No. You can upload your first invoice straight away. Foodnance creates each new supplier and product from the invoice, and suggests a category for new products, which you can change. When a later invoice includes a product you already have, Foodnance matches it to that product and warns you if a new name looks like an existing one. To see dish costs, you then add your recipes using those products.</p>"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What if my invoice uses cases, pounds or other units?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "<p>Foodnance reads the unit and pack size on each line, such as pounds, kilograms, litres or a case of 6 × 2.5 kg, and converts between units so the price can be compared with what your recipe uses. You check these on the review screen, and Foodnance won't let you confirm an invoice with a unit it doesn't recognize. If it can't convert between two units, it shows the cost as unavailable instead of guessing.</p>"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How long does it take?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "<p>Foodnance reads a typical one-page invoice in about 30 seconds. You then check the lines, which usually takes a minute or two, and confirm. Longer, multi-page invoices take longer to read, and you can upload several at once.</p>"
             }
           }
         ]
@@ -382,7 +414,11 @@
     .faq-item[open] summary::after { content: "\2212"; }
     .faq-item summary:hover { color: var(--primary-d); }
     .faq-item summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: var(--radius); }
-    .faq-item p { padding: 0 1.2rem 1.1rem; color: var(--text-muted); font-size: .95rem; }
+    .faq-group { font-size: .8rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--primary); margin: 1.2rem 0 .1rem; }
+    .faq-group:first-child { margin-top: 0; }
+    .faq-answer { padding: 0 1.2rem 1.1rem; color: var(--text-muted); font-size: .95rem; }
+    .faq-answer p + p, .faq-answer p + ul, .faq-answer ul + p { margin-top: .7rem; }
+    .faq-answer ul { padding-left: 1.3rem; }
 
     /* ===== FINAL CTA ===== */
     .final {
@@ -620,40 +656,80 @@
         <p>Short answers to what people ask before they sign up.</p>
       </div>
       <div class="faq">
-
+        <h3 class="faq-group">About Foodnance</h3>
         <details class="faq-item">
           <summary>What is Foodnance?</summary>
-          <p>Foodnance is a web app for independent restaurants, bakeries, cafés and commissaries. You send it your supplier invoices, and it turns them into the real cost of every ingredient, recipe and menu item, so you can see your food cost and margins as prices change.</p>
+          <div class="faq-answer">
+            <p>Foodnance is food cost software for independent restaurants, bakeries and cafés. You photograph a supplier invoice, and Foodnance updates your recipe costs, dish margins and P&amp;L automatically. It was built by a restaurant manager with over ten years of kitchen experience.</p>
+          </div>
         </details>
-
         <details class="faq-item">
-          <summary>How does Foodnance read my invoices?</summary>
-          <p>Take a photo or upload a PDF. Foodnance uses AI to pull out every line: the product, pack size and price. You then check the lines, fix anything that looks wrong, and approve. If the lines don't add up to the invoice total, it flags the problem so a typo never turns into a wrong food cost.</p>
+          <summary>How does Foodnance calculate my dish cost?</summary>
+          <div class="faq-answer">
+            <p>Foodnance prices each ingredient from your most recent supplier invoice, then multiplies by the amount your recipe uses. Take a simple cheeseburger:</p>
+            <ul>
+              <li>Beef patty: ground beef is $11.00 per kg on your invoice, and a patty uses 150 g, so $1.65</li>
+              <li>Bun: $4.80 for a dozen, so $0.40 each</li>
+              <li>Cheese slice: $18.00 for a box of 120, so $0.15 each</li>
+            </ul>
+            <p>That makes the burger $2.20 to make. When a new invoice shows beef at $12.00 per kg, the patty goes to $1.80 and the burger to $2.35, without you recalculating anything.</p>
+          </div>
         </details>
-
         <details class="faq-item">
-          <summary>Do I need to install anything?</summary>
-          <p>No. Foodnance runs in a web browser on a phone, tablet or computer. Stock takes also work on a phone, even offline if the walk-in has no signal.</p>
+          <summary>Who is Foodnance for?</summary>
+          <div class="faq-answer">
+            <p>Foodnance is for independent restaurants, bakeries, cafés and commissaries in Canada. It suits businesses that buy from several suppliers, where prices change often and working out the true cost of each dish by hand takes too much time. It is not designed for large chains.</p>
+          </div>
         </details>
-
         <details class="faq-item">
-          <summary>How do my recipe costs stay up to date?</summary>
-          <p>Recipe and menu-item costs are worked out from the prices on your invoices. When a supplier raises the price of flour, every recipe that uses it updates on its own, and Price Movers shows which items went up and which supplier is cheapest.</p>
+          <summary>How is Foodnance different from a spreadsheet or competitor software like MarginEdge?</summary>
+          <div class="faq-answer">
+            <p>With a spreadsheet, you re-type prices from every invoice and update each recipe yourself. With Foodnance, you photograph the invoice, check the lines it read, and your recipe costs update automatically, so you can see when a dish gets more expensive.</p>
+            <p>Compared with other invoice-based food cost tools, Foodnance is built for independent kitchens by a Canadian restaurant manager. It has two plans, so you only pay for stock counting and inventory tools if your team actually does them. Pricing is in Canadian dollars, so there is no exchange rate to worry about. Customer feature requests are welcome.</p>
+          </div>
         </details>
-
+        <h3 class="faq-group">Invoices</h3>
         <details class="faq-item">
-          <summary>Does it replace my accounting software?</summary>
-          <p>No. Foodnance focuses on food cost: what you buy, what it costs on the plate, and your margins. It includes a monthly profit and loss built from your real purchases, but it is not a full accounting system.</p>
+          <summary>How does invoice scanning work?</summary>
+          <div class="faq-answer">
+            <p>You take a photo of a supplier invoice with your phone, or upload a PDF, PNG or JPG from your computer, and Foodnance reads it for you. It picks out each line item with its quantity, unit and price, then shows you the result to check before you confirm it.</p>
+          </div>
         </details>
-
         <details class="faq-item">
-          <summary>Is my data kept private?</summary>
-          <p>Yes. Every business has its own account, and your data is kept separate from every other customer's. Foodnance runs on Cloudflare's infrastructure.</p>
+          <summary>How accurate is the AI, and who checks it?</summary>
+          <div class="faq-answer">
+            <p>The AI reads most lines correctly, and it keeps improving as the technology improves. But it can make mistakes, so after an invoice has been read, it waits in the Invoices tab until someone at your restaurant checks it and confirms it. Nothing counts toward your costs until you do.</p>
+          </div>
         </details>
-
         <details class="faq-item">
-          <summary>How much does it cost?</summary>
-          <p>We're onboarding the first customers by hand, so pricing is agreed when we set up your account. There's no card and no commitment. It starts with a conversation.</p>
+          <summary>What happens when a supplier raises a price?</summary>
+          <div class="faq-answer">
+            <p>Foodnance's Price Movers page shows which products changed price the most, as a percentage and per unit, such as per kg. Open any product to see its price history by supplier and tell a steady rise from a one-off spike. Recipes and dishes that use the product are re-costed from the new invoice automatically.</p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary>Can I compare prices between suppliers?</summary>
+          <div class="faq-answer">
+            <p>Yes. If you buy the same product from more than one supplier, Foodnance compares their prices side by side per unit, such as per kg, so different pack sizes are comparable. Vendor Compare shows which supplier is cheapest and how much you would save, which helps when you negotiate or switch suppliers.</p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary>Do I need to set up my suppliers and products first?</summary>
+          <div class="faq-answer">
+            <p>No. You can upload your first invoice straight away. Foodnance creates each new supplier and product from the invoice, and suggests a category for new products, which you can change. When a later invoice includes a product you already have, Foodnance matches it to that product and warns you if a new name looks like an existing one. To see dish costs, you then add your recipes using those products.</p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary>What if my invoice uses cases, pounds or other units?</summary>
+          <div class="faq-answer">
+            <p>Foodnance reads the unit and pack size on each line, such as pounds, kilograms, litres or a case of 6 × 2.5 kg, and converts between units so the price can be compared with what your recipe uses. You check these on the review screen, and Foodnance won't let you confirm an invoice with a unit it doesn't recognize. If it can't convert between two units, it shows the cost as unavailable instead of guessing.</p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary>How long does it take?</summary>
+          <div class="faq-answer">
+            <p>Foodnance reads a typical one-page invoice in about 30 seconds. You then check the lines, which usually takes a minute or two, and confirm. Longer, multi-page invoices take longer to read, and you can upload several at once.</p>
+          </div>
         </details>
       </div>
     </div>
