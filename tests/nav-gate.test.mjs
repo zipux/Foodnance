@@ -43,7 +43,8 @@ function env({ stored, chipStored, storageThrows = false } = {}) {
     addEventListener() {}, querySelector: () => null, querySelectorAll: () => [], body: {},
   };
   const names = ['DM_NAV_GATED', 'dmNavCss', 'dmNavRecall', 'dmNavRemember', 'dmNavForget', 'dmNavDropProvisional',
-    'DM_NARROW_QUERY', 'dmChipCss', 'dmChipRecall', 'dmChipRemember'];
+    'DM_NARROW_QUERY', 'dmChipCss', 'dmChipRecall', 'dmChipRemember',
+    'dmChipIdentity', 'dmChipIdRemember', 'dmChipIdRecall', 'DM_CHIP_ID_KEY'];
   const api = loadBrowserModule(['nav-gate.js'], names, { localStorage, document });
   return { api, store, appended };
 }
@@ -197,6 +198,57 @@ for (const [label, bad] of [['null', null], ['no width', {}], ['a string', { w: 
     e.appended.find(x => x.id === 'dmNavGate').removed === true);
   t.check('no remembered width injects nothing (the stylesheet fallback applies)', !env().appended.some(x => x.id === 'dmChipW'));
   t.check('a corrupt remembered width injects nothing', !env({ chipStored: '{{' }).appended.some(x => x.id === 'dmChipW'));
+}
+
+// ── The chip's contents: drawn from memory, not after the network ──
+t.section('Drawing the account chip immediately');
+const CUSTOMER = { org_name: 'Pizza test', is_super_admin: false, email: 'owner@pizza.test', features: [] };
+t.check('a customer is remembered by business name', JSON.stringify(api.dmChipIdentity(CUSTOMER)) === '{"label":"Pizza test","sa":false}');
+t.check('the operator is remembered as "Admin"', JSON.stringify(api.dmChipIdentity({ org_name: null, is_super_admin: true, email: 'me@x.y' })) === '{"label":"Admin","sa":true}');
+t.check('the EMAIL is never part of what is remembered', !JSON.stringify(api.dmChipIdentity(CUSTOMER)).includes('@'));
+t.check('a customer with no business name is not remembered (their label would be their email)',
+  api.dmChipIdentity({ org_name: '', is_super_admin: false, email: 'a@b.c' }) === null && api.dmChipIdentity({ is_super_admin: false, email: 'a@b.c' }) === null);
+for (const [label, me] of [['null', null], ['blank name', { org_name: '   ' }], ['absurdly long name', { org_name: 'x'.repeat(81) }], ['a non-string name', { org_name: 42 }]]) {
+  t.check(`no identity for ${label}`, api.dmChipIdentity(me) === null);
+}
+{
+  const e = env();
+  e.api.dmNavRemember(CUSTOMER);
+  t.check('remembering a user stores the identity beside the feature list', !!e.store.get('dm_chip_id') && !!e.store.get('dm_nav_features'));
+  t.check('and the stored identity holds no email', !e.store.get('dm_chip_id').includes('@') && !e.store.get('dm_nav_features').includes('@'));
+  t.check('recall returns it', JSON.stringify(e.api.dmChipIdRecall()) === '{"label":"Pizza test","sa":false}');
+  e.api.dmNavForget();
+  t.check('sign-out forgets the name as well', e.api.dmChipIdRecall() === null && !e.store.has('dm_chip_id'));
+  for (const bad of ['not json', '{}', '{"label":"x"}', '{"label":"","sa":false}', '{"label":"x","sa":"no"}', 'null', '[]']) {
+    e.store.set('dm_chip_id', bad);
+    t.check(`a stored value shaped like ${JSON.stringify(bad)} is ignored`, e.api.dmChipIdRecall() === null);
+  }
+  const b = env({ storageThrows: true });
+  t.check('blocked storage never throws for the identity either', (() => { try { b.api.dmChipIdRemember(CUSTOMER); b.api.dmChipIdRecall(); return true; } catch (_) { return false; } })());
+}
+{
+  // The hazard of drawing from memory: showing the WRONG name. The server's answer must win.
+  const draw = utilsSrc.indexOf('\ndrawSessionChipFromMemory();');
+  const listener = utilsSrc.indexOf("document.addEventListener('DOMContentLoaded', renderSessionChip);");
+  t.check('utils.js draws from memory as soon as it loads, before the DOM-ready handler', draw > 0 && listener > draw);
+  t.check('the memory-drawn chip is marked as a draft, so it is never mistaken for a confirmed one',
+    /chip\.dataset\.draft = '1';\s*nav\.appendChild\(chip\)/.test(utilsSrc));
+  t.check('renderSessionChip still runs for a draft chip but skips a confirmed one',
+    /let chip = document\.getElementById\('sessionChip'\);\s*if \(chip && !chip\.dataset\.draft\) return;/.test(utilsSrc));
+  t.check('the server\'s answer corrects the draft in place and clears the flag',
+    /if \(chip\) \{\s*updateSessionChip\(chip, me\);\s*delete chip\.dataset\.draft;/.test(utilsSrc));
+  t.check('a signed-out answer removes the remembered chip and forgets the name',
+    /if \(!me\) \{[\s\S]{0,260}chip\.remove\(\);[\s\S]{0,120}dmNavForget\(\)/.test(utilsSrc));
+  t.check('an offline load keeps the chip it drew (the request failing is not "signed out")',
+    /catch \(_\) \{ return; \}\s*\/\/ offline: keep whatever was drawn/.test(utilsSrc));
+  t.check('the label is HTML-escaped wherever it is put in markup', /<span>\$\{esc\(label\)\}<\/span>/.test(utilsSrc) && !/<span>\$\{label\}<\/span>/.test(utilsSrc));
+  t.check('updateSessionChip writes the label with textContent, never as HTML',
+    /\.session-who > span'\)\.textContent =/.test(utilsSrc));
+  t.check('the tooltip email is only added once the server has answered',
+    /<span class="session-who"\$\{email \? ` title="\$\{esc\(email\)\}"` : ''\}>/.test(utilsSrc));
+  const gateSrc = read('static/nav-gate.js');
+  const idFn = gateSrc.slice(gateSrc.indexOf('function dmChipIdentity'), gateSrc.indexOf('function dmChipIdRemember'));
+  t.check('the code that decides what to remember never reads an email', !/email/.test(idFn), idFn.match(/.*email.*/)?.[0]);
 }
 
 // ── Wiring ────────────────────────────────────────────────────────

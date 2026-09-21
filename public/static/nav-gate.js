@@ -69,12 +69,56 @@ function dmNavRemember(me) {
       localStorage.setItem(DM_NAV_KEY, JSON.stringify({ features: me.features }));
     }
   } catch (_) { /* private mode, storage blocked: the nav just isn't pre-hidden */ }
+  dmChipIdRemember(me);
 }
 
 // Sign out: the next person to use this browser must not inherit the last
-// one's tabs.
+// one's tabs, or their name.
 function dmNavForget() {
-  try { localStorage.removeItem(DM_NAV_KEY); localStorage.removeItem(DM_CHIP_KEY); } catch (_) {}
+  try {
+    localStorage.removeItem(DM_NAV_KEY);
+    localStorage.removeItem(DM_CHIP_KEY);
+    localStorage.removeItem(DM_CHIP_ID_KEY);
+  } catch (_) {}
+}
+
+// ─── What the account chip says ───────────────────────────────
+// The chip (business name, settings, sign out) is filled in after /api/auth/me
+// answers, so it popped in a moment late on every page load — visible as a
+// flash on the right of the bar. utils.js now draws it straight away from what
+// this browser last saw, and the server's answer then confirms or corrects it.
+//
+// ONLY the business name and whether this is the operator's admin account are
+// kept. Never the email: it is personal, and the chip's tooltip that shows it is
+// added when the server answers. Someone with no business name and who is not an
+// admin gets no remembered chip at all (their label would be their email), and
+// the chip simply appears when the server answers, as before.
+const DM_CHIP_ID_KEY = 'dm_chip_id';
+const DM_CHIP_LABEL_MAX = 80;
+
+// The identity worth remembering from a user object, or null.
+function dmChipIdentity(me) {
+  if (!me) return null;
+  const label = me.org_name || (me.is_super_admin === true ? 'Admin' : '');
+  if (typeof label !== 'string' || !label.trim() || label.length > DM_CHIP_LABEL_MAX) return null;
+  return { label: label, sa: me.is_super_admin === true };
+}
+
+function dmChipIdRemember(me) {
+  const id = dmChipIdentity(me);
+  try {
+    if (id) localStorage.setItem(DM_CHIP_ID_KEY, JSON.stringify(id));
+  } catch (_) { /* blocked storage: the chip appears when the server answers */ }
+}
+
+// What was remembered, if it is still shaped like what we wrote.
+function dmChipIdRecall() {
+  try {
+    const o = JSON.parse(localStorage.getItem(DM_CHIP_ID_KEY));
+    if (o && typeof o.label === 'string' && o.label.trim() && o.label.length <= DM_CHIP_LABEL_MAX
+        && typeof o.sa === 'boolean') return { label: o.label, sa: o.sa };
+  } catch (_) {}
+  return null;
 }
 
 // ─── The account chip's width ─────────────────────────────────

@@ -303,19 +303,108 @@ function applyBatchWorkflowGating() {
   }
 }
 
+// The chip's markup and its two actions. `email` is only known once the server
+// has answered, so a chip drawn from memory has no tooltip until then.
+function buildSessionChip(label, superAdmin, email) {
+  const chip = document.createElement('div');
+  chip.id = 'sessionChip';
+  chip.className = 'session-chip';
+  chip.innerHTML = `
+    <span class="session-who"${email ? ` title="${esc(email)}"` : ''}>
+      <i class="fas fa-user-circle"></i>
+      <span>${esc(label)}</span>
+    </span>
+    ${superAdmin
+      ? '<a href="/admin" class="session-icon" title="Admin" aria-label="Admin"><i class="fas fa-gear"></i></a>'
+      : '<a href="/settings" class="session-icon" title="Settings" aria-label="Settings"><i class="fas fa-gear"></i></a>'}
+    <a href="#" id="navChangePw" class="session-icon" title="Change password" aria-label="Change password">
+      <i class="fas fa-key"></i>
+    </a>
+    <a href="#" id="navSignOut" class="session-signout" title="Sign out" aria-label="Sign out">
+      <i class="fas fa-arrow-right-from-bracket"></i><span>Sign out</span>
+    </a>`;
+
+  chip.querySelector('#navChangePw').addEventListener('click', (e) => {
+    e.preventDefault();
+    openChangePasswordModal();
+  });
+
+  const signOut = chip.querySelector('#navSignOut');
+  signOut.addEventListener('click', async (e) => {
+    e.preventDefault();
+    if (signOut.dataset.busy) return;
+    signOut.dataset.busy = '1';
+    // Only leave for /login once the cookie is actually cleared. Redirecting on a
+    // failed request would show the login screen with a live session behind it —
+    // on a shared kitchen terminal that reads as "signed out" when it isn't.
+    try {
+      const r = await fetch('/api/auth/logout', { method: 'POST' });
+      if (!r.ok) throw new Error('logout failed');
+      if (typeof dmNavForget === 'function') dmNavForget();
+      location.href = '/login';
+    } catch (_) {
+      delete signOut.dataset.busy;
+      showToast('Could not sign out — check your connection and try again.', 'error');
+    }
+  });
+  return chip;
+}
+
+// Correct a chip that was drawn from memory once the server has answered:
+// the name, the admin/settings link, and the tooltip. In place, so nothing
+// visibly changes when the memory was right, which is almost always.
+function updateSessionChip(chip, me) {
+  chip.querySelector('.session-who > span').textContent =
+    me.org_name || (me.is_super_admin ? 'Admin' : me.email);
+  chip.querySelector('.session-who').title = me.email || '';
+  const gear = chip.querySelector('.session-icon');   // first icon: settings/admin; the key follows
+  gear.href = me.is_super_admin ? '/admin' : '/settings';
+  gear.title = me.is_super_admin ? 'Admin' : 'Settings';
+  gear.setAttribute('aria-label', gear.title);
+}
+
+// Draw the chip immediately, from what this browser last saw, instead of
+// waiting for /api/auth/me. Before this the whole right-hand end of the bar
+// (business name, settings, key, Sign out) popped in a moment late on every page
+// load. Called as soon as utils.js runs — the nav is already parsed, above this
+// script — while the server call itself keeps its old timing (pages register
+// listeners around it). renderSessionChip() then confirms or corrects the chip.
+// Marked data-draft so it is never mistaken for a confirmed one.
+function drawSessionChipFromMemory() {
+  const nav = document.querySelector('.navbar');
+  if (!nav || document.getElementById('sessionChip') || typeof dmChipIdRecall !== 'function') return;
+  const id = dmChipIdRecall();
+  if (!id) return;
+  const chip = buildSessionChip(id.label, id.sa, '');
+  chip.dataset.draft = '1';
+  nav.appendChild(chip);
+  nav.classList.add('has-chip');
+}
+
 // Small "signed in as … / Sign out" chip, injected into the nav of whichever
 // app page is loaded. Done here rather than editing 13 HTML files, and it
 // gives every page a way to sign out.
 async function renderSessionChip() {
   const nav = document.querySelector('.navbar');
-  if (!nav || document.getElementById('sessionChip')) return;
+  if (!nav) return;
+  // A chip drawn from memory is still to be confirmed; a confirmed one is done.
+  let chip = document.getElementById('sessionChip');
+  if (chip && !chip.dataset.draft) return;
 
   let me = null, viewingAs = null;
   try {
     const r = await fetch('/api/auth/me');
     if (r.ok) { const d = await r.json(); me = d.user; viewingAs = d.viewing_as; }
-  } catch (_) { return; }
-  if (!me) return;
+  } catch (_) { return; }   // offline: keep whatever was drawn
+  if (!me) {
+    // Not signed in after all (session expired). Do not leave a name on screen.
+    if (chip) {
+      chip.remove();
+      nav.classList.remove('has-chip');
+      if (typeof dmNavForget === 'function') dmNavForget();
+    }
+    return;
+  }
 
   // Viewing a customer's data: make that impossible to miss. Without this an
   // operator could edit a customer's numbers believing they were their own.
@@ -356,24 +445,13 @@ async function renderSessionChip() {
   applyPlanGating(me);
   applyBatchWorkflowGating();
 
-  const chip = document.createElement('div');
-  chip.id = 'sessionChip';
-  chip.className = 'session-chip';
-  chip.innerHTML = `
-    <span class="session-who" title="${esc(me.email)}">
-      <i class="fas fa-user-circle"></i>
-      <span>${esc(me.org_name || (me.is_super_admin ? 'Admin' : me.email))}</span>
-    </span>
-    ${me.is_super_admin
-      ? '<a href="/admin" class="session-icon" title="Admin" aria-label="Admin"><i class="fas fa-gear"></i></a>'
-      : '<a href="/settings" class="session-icon" title="Settings" aria-label="Settings"><i class="fas fa-gear"></i></a>'}
-    <a href="#" id="navChangePw" class="session-icon" title="Change password" aria-label="Change password">
-      <i class="fas fa-key"></i>
-    </a>
-    <a href="#" id="navSignOut" class="session-signout" title="Sign out" aria-label="Sign out">
-      <i class="fas fa-arrow-right-from-bracket"></i><span>Sign out</span>
-    </a>`;
-  nav.appendChild(chip);
+  if (chip) {
+    updateSessionChip(chip, me);
+    delete chip.dataset.draft;
+  } else {
+    chip = buildSessionChip(me.org_name || (me.is_super_admin ? 'Admin' : me.email), me.is_super_admin, me.email);
+    nav.appendChild(chip);
+  }
 
   // The chip was not in the page until now, and the tabs are pushed right by the
   // room it leaves — so its arrival used to slide them ~300px on every page load.
@@ -384,30 +462,6 @@ async function renderSessionChip() {
   if (typeof dmChipRemember === 'function') {
     dmChipRemember(chip.getBoundingClientRect().width, matchMedia('(max-width: 768px)').matches);
   }
-
-  document.getElementById('navChangePw').addEventListener('click', (e) => {
-    e.preventDefault();
-    openChangePasswordModal();
-  });
-
-  const signOut = document.getElementById('navSignOut');
-  signOut.addEventListener('click', async (e) => {
-    e.preventDefault();
-    if (signOut.dataset.busy) return;
-    signOut.dataset.busy = '1';
-    // Only leave for /login once the cookie is actually cleared. Redirecting on a
-    // failed request would show the login screen with a live session behind it —
-    // on a shared kitchen terminal that reads as "signed out" when it isn't.
-    try {
-      const r = await fetch('/api/auth/logout', { method: 'POST' });
-      if (!r.ok) throw new Error('logout failed');
-      if (typeof dmNavForget === 'function') dmNavForget();
-      location.href = '/login';
-    } catch (_) {
-      delete signOut.dataset.busy;
-      showToast('Could not sign out — check your connection and try again.', 'error');
-    }
-  });
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -568,6 +622,8 @@ function renderViewingAsBar(org) {
   });
 }
 
+// Draw from memory now (the nav is already parsed), confirm with the server later.
+drawSessionChipFromMemory();
 document.addEventListener('DOMContentLoaded', renderSessionChip);
 
 // API helpers

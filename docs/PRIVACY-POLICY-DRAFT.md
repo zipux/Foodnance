@@ -116,12 +116,13 @@ We use **one essential cookie**, `dm_session`, which keeps you signed in. It is
 authorized to help a customer may also carry a second, internal support cookie
 that only applies to their own signed-in session.
 
-The app also keeps three small items in your browser's local storage: a display
+The app also keeps four small items in your browser's local storage: a display
 preference (your chosen profit-and-loss cost basis); the list of features your
 plan includes, so that menu tabs your plan doesn't have are hidden before the page
-is drawn; and the width of the account box in the menu bar, so the menu doesn't
-shift sideways as the page loads. The second and third are removed when you sign
-out. None of them is sent to us.
+is drawn; the name of your business (never your email address), so the account box
+in the menu bar is drawn straight away and doesn't pop in late; and that box's
+width, so the menu doesn't shift sideways as the page loads. All but the first are
+removed when you sign out. None of them is sent to us.
 
 We use **no analytics, advertising or cross-site tracking cookies**. Because
 nothing here tracks you across sites, there's nothing to switch off, and browser
@@ -313,7 +314,7 @@ Same purpose as Part 2 of the Terms draft: each promise above is a piece of work
 | §1/§5 AI disclosure | The same disclosure must appear **in the app**, on the upload screen, before the first invoice is sent — not only here. (Terms draft launch blocker #2) | ❌ nothing in the app says it |
 | §5 "not used to train" | Confirm the current Anthropic commercial API terms, and the API log retention period, and that we're on those terms rather than a consumer product | ⚠️ unverified — do this on publication day |
 | §2.3 consent | Terms + this policy linked from signup and from the owner-invite and accept-invite pages; record who accepted which version and when | ❌ no pages, no links, no acceptance record |
-| §2.4 local storage | Three keys now: `pnlBasis`, `dm_nav_features` (the plan's feature list) and `dm_chip_w` (the menu's account-box width, a number) — the last two added 2026-09-21, both cleared at sign-out. Re-check the count before publishing | ✅ |
+| §2.4 local storage | Four keys now: `pnlBasis`, `dm_nav_features` (the plan's feature list), `dm_chip_w` (the menu's account-box width, a number) and `dm_chip_id` (the business name shown in the menu, or "Admin" — never the email) — the last three added 2026-09-21, all cleared at sign-out. The business name is the only one that identifies anyone, and only the business. Re-check the count before publishing | ✅ |
 | §2.4 "no analytics" | True today (nothing found in `public/` or `src/`). **Stays true only if nobody adds a tracker** — re-check before every publish of this page | ✅ verified 2026-09-21 |
 | §2.1 "no IP logging" | True of application code and D1 tables. Cloudflare logs at its own layer | ✅ |
 | §2.4 second cookie | Wording covers the operator "view as organization" cookie. Confirm it's never set for customers | ⚠️ read `VIEW_ORG_COOKIE` path once more |

@@ -362,6 +362,17 @@ until utils.js adds `.has-chip`, and nav-gate.js sets that width from `localStor
 (measured last load, per layout, cleared at sign-out). Measured in a browser: 0px movement.
 Fallbacks are 240px desktop / 107px phone (first visit only).
 
+**The account chip is drawn from memory too, so it doesn't pop in late.** It used to be built
+only after `/me` answered — the right-hand end of the bar (business name, gear, key, Sign
+out) flashed in on every page. utils.js now calls `drawSessionChipFromMemory()` the moment it
+loads (the nav is already parsed), from `localStorage['dm_chip_id']` = `{label, sa}` — the
+business name (or "Admin") only, **never the email**, and nothing at all for someone whose
+label would be their email. The chip carries `data-draft`; `renderSessionChip()` (timing of the
+server call deliberately unchanged — pages register listeners around it) confirms or corrects it
+**in place** (same element, so no flicker), removes it and forgets everything if `/me` says
+signed out, and keeps it if the request merely failed. `buildSessionChip` / `updateSessionChip`
+are the pieces. Pinned by `tests/nav-gate.test.mjs`.
+
 ### Product categories
 Categories are **free-text** on `generic_products.category`. The managed master list is the **`categories` table** (migration `0018`, same shape as `units`: `id`/`name`/`sort_order`, integer PK), edited through the **Manage Categories** modal (`public/static/utils.js`, mirrors Manage Units) and picked in the product form, with "+ New category…" for inline adds. Deleting one only removes it from the picker — products keep their label (the DELETE is usage-checked, `?force=true` to override).
 
