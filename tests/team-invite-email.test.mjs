@@ -75,7 +75,8 @@ t.section('a refusal never blocks the invite');
 const create = handlerBody('post', '/api/team/invite') || '';
 t.check('the invite row is inserted before any email is attempted',
   create.indexOf('INSERT INTO invites') !== -1 && create.indexOf('INSERT INTO invites') < create.indexOf('emailTeamInvite('));
-t.check('emailing is opt-in per request (send_email must be exactly true)', /body\.send_email !== true/.test(create));
+t.check('every invite is emailed — there is no link-only path and no send_email switch',
+  /emailTeamInvite\(/.test(create) && !/send_email/.test(create) && !/send_email/.test(js) && !/send_email/.test(html));
 t.check('the response reports emailed + email_error so the page can fall back to the link',
   /emailed/.test(create) && /email_error/.test(create));
 
@@ -91,14 +92,40 @@ t.check('no /api/team* route was made public',
   !/'\/api\/team/.test((src.match(/const PUBLIC_API = new Set\(\[([\s\S]*?)\]\)/) || [, ''])[1]));
 
 t.section('the page');
-t.check('the modal has the email checkbox, ticked by default', /id="inviteSendEmail"[^>]*checked/.test(html));
+t.check('the modal has no "send by email" checkbox and no link-only button',
+  !/inviteSendEmail/.test(html) && !/inviteSendEmail/.test(js) && !/Create invite link|Generate invite link/.test(html + js));
+t.check('the one button sends the invite', /id="generateInviteBtn"[^>]*>[\s\S]*?Send invite/.test(html));
 t.check('it no longer says nothing is emailed automatically', !/nothing gets emailed automatically/.test(html));
-t.check('the script sends send_email with the request', /send_email:\s*sendEmail/.test(js));
+t.check('the link box starts hidden and is only revealed when the email fails',
+  /id="inviteResult"/.test(html) && /class="copybox hidden" id="inviteResult"/.test(html) &&
+  /else \{[\s\S]*?inviteResult'\)\.classList\.remove\('hidden'\)/.test(js));
 t.check('the button is disabled while the request runs (a double-click must not send two)',
   /btn\.disabled = true/.test(js) && /finally\s*\{[\s\S]*?btn\.disabled = false/.test(js));
 t.check('a failed email still shows the copy-link', /couldn't email it/.test(js));
 t.check('expired invites are labelled', /isExpired\(/.test(js) && /Expired/.test(js));
 t.check('the settings.js cache-buster was bumped past the old one', !/settings\.js\?v=20260810-1/.test(html));
+
+t.section('Plan & usage (GET /api/account/plan)');
+const planRoute = handlerBody('get', '/api/account/plan') || '';
+t.check('the route exists', !!planRoute);
+t.check('is org-scoped by hand', /orgOf\(c\)/.test(planRoute) && /WHERE id = \?/.test(planRoute));
+t.check('uses the SAME cap and usage helpers the parse-cap check uses (so the card cannot disagree with the block)',
+  /effectiveInvoiceCap\(/.test(planRoute) && /monthlyInvoiceParses\(/.test(planRoute));
+t.check('the commissary label comes from planLabel, not re-derived', /planLabel\(/.test(planRoute));
+t.check('is not made public and is not itself plan-gated',
+  !/'\/api\/account/.test((src.match(/const PUBLIC_API = new Set\(\[([\s\S]*?)\]\)/) || [, ''])[1]) &&
+  !/\/api\/account/.test((src.match(/const PRO_ONLY_TABLES[\s\S]*?\n\}/) || [''])[0]) &&
+  featureCheck());
+function featureCheck() {
+  const fn = src.slice(src.indexOf('function featureForPath'), src.indexOf('function featureForPath') + 900);
+  return !/account/.test(fn);
+}
+t.check('the card is on the page and loaded by the script',
+  /id="planBody"/.test(html) && /apiGet\('account\/plan'\)/.test(js));
+t.check('every Pro feature the server lists has a customer-facing label',
+  [...(src.match(/const PRO_FEATURES = \[([^\]]*)\]/) || [, ''])[1].matchAll(/'([a-z_]+)'/g)]
+    .every(m => new RegExp(`\\b${m[1]}:\\s*'`).test(js)));
+t.check('a customer at their limit is offered a way to ask, not a dead end', /Ask to raise your limit/.test(js));
 
 t.section('housekeeping');
 const migrations = readdirSync(join(ROOT, 'migrations')).filter(f => f.endsWith('.sql')).sort();

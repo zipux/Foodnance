@@ -1426,6 +1426,37 @@ app.post('/api/auth/change-password', async (c) => {
 // decision already made for password reset.
 // ══════════════════════════════════════════════════════════════
 
+// GET /api/account/plan — what this business is on and how much of it they have
+// used. Feeds the Plan & usage card in Settings. Read-only, org-scoped by hand, and
+// deliberately NOT plan-gated (an Essential customer is exactly who needs to see it).
+// `invoice_reads.cap` is 0 for "no monthly limit", the same convention as
+// effectiveInvoiceCap. `used` counts ai_parse_log rows — the same figure the cap
+// itself enforces — so the card can never disagree with the block.
+app.get('/api/account/plan', async (c) => {
+  const org = orgOf(c)
+  if (!org) return c.json({ error: 'No organization.' }, 400)
+
+  const row = await c.env.DB.prepare(
+    'SELECT plan, account_type, invoice_cap FROM organizations WHERE id = ?',
+  ).bind(org).first() as { plan: string | null; account_type: string | null; invoice_cap: number | null } | null
+  if (!row) return c.json({ error: 'No organization.' }, 404)
+
+  const plan = (row.plan || 'essential').toLowerCase()
+  const now = new Date()
+  const resets = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1))
+  return c.json({
+    plan,
+    label: planLabel(row.plan, row.account_type),
+    invoice_reads: {
+      used: await monthlyInvoiceParses(c.env.DB, org),
+      cap: effectiveInvoiceCap(row),
+      resets_on: resets.toISOString().slice(0, 10),
+    },
+    // What upgrading would add. Empty on Pro, so the card has nothing to sell.
+    pro_features: plan === 'pro' ? [] : [...PRO_FEATURES],
+  })
+})
+
 // GET /api/team — this org's active users and pending (unaccepted) invites.
 app.get('/api/team', async (c) => {
   const org = orgOf(c)
@@ -1444,11 +1475,12 @@ app.get('/api/team', async (c) => {
   return c.json({ users: users.results || [], invites: invites.results || [] })
 })
 
-// POST /api/team/invite  { email, name, send_email? } — generate a copy-link, and
-// optionally email it (see emailTeamInvite for the caps). Name and email are both
-// required: the link is bound to that address at acceptance (see accept-invite).
-// The invite is created either way; `emailed` says whether the mail went out and
-// `email_error` says why not, so the page can fall back to the copy-link.
+// POST /api/team/invite  { email, name } — invite a teammate BY EMAIL (see
+// emailTeamInvite for the caps). Name and email are both required: the link is
+// bound to that address at acceptance (see accept-invite). The invite row is
+// created BEFORE the send and kept if the send fails; `emailed` says whether the
+// mail went out and `email_error` says why not, so the page can offer the link as
+// a fallback instead of losing the invite.
 app.post('/api/team/invite', async (c) => {
   const org = orgOf(c)
   if (!org) return c.json({ error: 'No organization to manage.' }, 400)
@@ -1467,7 +1499,6 @@ app.post('/api/team/invite', async (c) => {
      VALUES (?, ?, ?, ?, 'owner', ?, ?, datetime('now', '+7 days'))`,
   ).bind(id, org, email, name, token, me.id).run()
 
-  if (body.send_email !== true) return c.json({ id, token, emailed: false }, 201)
   const sent = await emailTeamInvite(c, org, token, name, email)
   return c.json({ id, token, emailed: sent.ok, ...(sent.ok ? {} : { email_error: sent.error }) }, 201)
 })

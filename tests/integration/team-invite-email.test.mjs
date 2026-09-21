@@ -4,7 +4,7 @@
 //   npm run test:invite-email
 //
 // Proves the caps on emailed teammate invitations against a real database:
-//   · asking for an email never blocks the invite — the link comes back either way
+//   · every invite is emailed, and a refused email never blocks the invite — the link comes back either way
 //   · 3 emails per recipient address per day, across EVERY organization
 //   · 10 emails per organization per hour
 //   · revoking an invite does not give the allowance back
@@ -44,6 +44,12 @@ async function post(path, body, j) {
   return { status: res.status, data: await res.json().catch(() => null) };
 }
 
+async function fetchPlan(org) {
+  const cookie = Object.entries(org.j.cookies).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join('; ');
+  const res = await fetch(`${BASE}/api/account/plan`, { headers: { cookie } });
+  return { status: res.status, data: await res.json().catch(() => null) };
+}
+
 const t = suite('integration/team-invite-email');
 
 // ── Setup: two organizations, each with an owner ──────────────────
@@ -64,7 +70,7 @@ async function makeOrg(label) {
 const A = await makeOrg('a');
 const B = await makeOrg('b');
 const invite = (org, email, extra = {}) =>
-  post('/api/team/invite', { name: 'Maria', email, send_email: true, ...extra }, org.j);
+  post('/api/team/invite', { name: 'Maria', email, ...extra }, org.j);
 const tooMany = (r) => /Too many/.test(r.data?.email_error || '');
 const reserved = (r) => r.data?.emailed === false && !!r.data?.email_error && !tooMany(r);
 
@@ -73,15 +79,14 @@ t.check('no name → 400', (await post('/api/team/invite', { email: `x-${STAMP}@
 t.check('no email → 400', (await post('/api/team/invite', { name: 'Maria' }, A.j)).status === 400);
 t.check('an email without @ → 400', (await post('/api/team/invite', { name: 'Maria', email: 'nope' }, A.j)).status === 400);
 
-t.section('asking for an email never blocks the invite');
-const plain = await post('/api/team/invite', { name: 'Maria', email: `plain-${STAMP}@test.local` }, A.j);
-t.check('without send_email: 201, a token, emailed:false', plain.status === 201 && !!plain.data.token && plain.data.emailed === false);
-t.check('and it takes nothing from the allowance', ledger(`to_email = 'plain-${STAMP}@test.local'`) === 0);
+t.section('a refused or failed email never blocks the invite');
 const first = await invite(A, `same-${STAMP}@test.local`);
-t.check('with send_email: still 201 with a token (the invite exists even though nothing could be sent)',
-  first.status === 201 && !!first.data.token);
+t.check('201 with a token even though nothing could be sent', first.status === 201 && !!first.data.token);
 t.check('the reply says why no email went out', reserved(first), JSON.stringify(first.data));
 t.check('one slot was used', ledger(`to_email = 'same-${STAMP}@test.local'`) === 1);
+const noswitch = await invite(A, `noswitch-${STAMP}@test.local`, { send_email: false });
+t.check('there is no way to ask for a link-only invite: send_email:false is ignored and an email is still attempted',
+  noswitch.status === 201 && ledger(`to_email = 'noswitch-${STAMP}@test.local'`) === 1, JSON.stringify(noswitch.data));
 
 t.section('3 emails per address per day');
 const second = await invite(A, `same-${STAMP}@test.local`);
@@ -104,8 +109,8 @@ t.check('the ledger still says 3', ledger(`to_email = 'same-${STAMP}@test.local'
 t.check('so create → email → revoke is no way round the cap', tooMany(await invite(A, `same-${STAMP}@test.local`)));
 
 t.section('10 emails per organization per hour');
-// Org A has used 3 (the three above). Seven more distinct addresses fill it.
-for (let i = 0; i < 7; i++) {
+// Org A has used 4 (three to `same`, one to `noswitch`). Six more distinct addresses fill it.
+for (let i = 0; i < 6; i++) {
   const r = await invite(A, `fill${i}-${STAMP}@test.local`);
   if (!reserved(r)) t.check(`filler ${i} reserved`, false, JSON.stringify(r.data));
 }
@@ -133,6 +138,33 @@ sql(`UPDATE invite_emails SET created_at = datetime('now') WHERE to_email = 'lat
 sql(`INSERT INTO invite_emails (id, org_id, to_email) VALUES ('x${STAMP}1', 'zz', 'later-${STAMP}@test.local'), ('x${STAMP}2', 'zz', 'later-${STAMP}@test.local')`);
 const capped = await post(`/api/team/invites/${mine}/resend`, {}, A.j);
 t.check('resend is refused once the address is at its cap', capped.status === 429 && /Too many/.test(capped.data?.error || ''), JSON.stringify(capped.data));
+
+t.section('Plan & usage');
+const planA = await fetchPlan(A);
+t.check('an Essential account reads as Essential with the 150 default cap',
+  planA.status === 200 && planA.data.plan === 'essential' && planA.data.label === 'Essential' && planA.data.invoice_reads.cap === 150, JSON.stringify(planA.data));
+t.check('usage starts at 0 and the reset date is the 1st of next month',
+  planA.data.invoice_reads.used === 0 && /^\d{4}-\d{2}-01$/.test(planA.data.invoice_reads.resets_on));
+t.check('Essential is shown what Pro would add', planA.data.pro_features.includes('inventory_tools') && planA.data.pro_features.length >= 5);
+
+const logId = () => `plan${Math.random().toString(36).slice(2, 10)}`;
+for (let i = 0; i < 3; i++) sql(`INSERT INTO ai_parse_log (id, org_id, kind) VALUES ('${logId()}', '${A.orgId}', 'invoice')`);
+sql(`INSERT INTO ai_parse_log (id, org_id, kind) VALUES ('${logId()}', '${A.orgId}', 'category')`);
+sql(`INSERT INTO ai_parse_log (id, org_id, kind, created_at) VALUES ('${logId()}', '${A.orgId}', 'invoice', datetime('now', '-2 months'))`);
+t.check('used counts this month\'s invoice reads only — not category calls, not last month',
+  (await fetchPlan(A)).data.invoice_reads.used === 3, JSON.stringify((await fetchPlan(A)).data.invoice_reads));
+t.check("another business's usage is its own", (await fetchPlan(B)).data.invoice_reads.used === 0);
+
+sql(`UPDATE organizations SET invoice_cap = 3 WHERE id = '${A.orgId}'`);
+t.check("an operator's per-account cap override is what the card shows", (await fetchPlan(A)).data.invoice_reads.cap === 3);
+sql(`UPDATE organizations SET invoice_cap = 0 WHERE id = '${A.orgId}'`);
+t.check('cap 0 means no limit', (await fetchPlan(A)).data.invoice_reads.cap === 0);
+sql(`UPDATE organizations SET invoice_cap = NULL, plan = 'pro' WHERE id = '${A.orgId}'`);
+const pro = await fetchPlan(A);
+t.check('Pro is uncapped and has nothing to upsell', pro.data.plan === 'pro' && pro.data.label === 'Pro' && pro.data.invoice_reads.cap === 0 && pro.data.pro_features.length === 0, JSON.stringify(pro.data));
+sql(`UPDATE organizations SET account_type = 'commissary' WHERE id = '${A.orgId}'`);
+t.check('a commissary is labelled Production', (await fetchPlan(A)).data.label === 'Production');
+t.check('signed out gets 401', (await fetch(`${BASE}/api/account/plan`)).status === 401);
 
 t.section('cleanup');
 sql(`DELETE FROM invite_emails WHERE org_id = 'zz'`);

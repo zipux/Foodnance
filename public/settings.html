@@ -34,7 +34,18 @@
     .msg.show { display: block; }
     .msg.bad { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
     .msg.good { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
-    .send-row { display: flex; align-items: center; gap: .5rem; margin-bottom: 1rem; font-size: .9rem; }
+
+    /* Plan & usage */
+    .plan-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .35rem; }
+    .plan-badge { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; border-radius: 999px;
+                  padding: .15rem .7rem; font-weight: 600; font-size: .85rem; }
+    .meter { height: 8px; border-radius: 999px; background: #e2e8f0; overflow: hidden; margin: .5rem 0 .35rem; }
+    .meter > span { display: block; height: 100%; background: #4f46e5; border-radius: 999px; }
+    .meter.warn > span { background: #d97706; }
+    .meter.full > span { background: #dc2626; }
+    .usage-line { font-size: .9rem; }
+    .upsell { margin-top: 1rem; padding: .85rem; border-radius: var(--radius-sm); background: #f8fafc; border: 1px solid var(--border); font-size: .85rem; }
+    .upsell ul { margin: .4rem 0 .7rem 1.1rem; padding: 0; }
   </style>
   <script src="/static/nav-gate.js?v=20260921-3"></script>
 </head>
@@ -69,6 +80,15 @@
       </div>
     </section>
 
+    <section class="card" id="planCard">
+      <div class="card-header">
+        <h2><i class="fas fa-layer-group"></i> Plan &amp; usage</h2>
+      </div>
+      <div class="card-body" id="planBody">
+        <p class="team-sub"><i class="fas fa-spinner fa-spin"></i> Loading…</p>
+      </div>
+    </section>
+
     <section class="card">
       <div class="card-header">
         <h2><i class="fas fa-users"></i> Team</h2>
@@ -79,8 +99,8 @@
       <div class="card-body">
         <p class="team-sub">
           Anyone you invite has the exact same access you do — it's a
-          separate login, not a restricted one. Share the link however you
-          like, or let us email it for you from the invite window.
+          separate login, not a restricted one. We email them a link to set
+          their own password.
         </p>
         <div class="table-scroll">
           <table class="data-table">
@@ -119,8 +139,8 @@
       </div>
       <div class="modal-body">
         <p class="team-sub" style="margin-bottom:1rem">
-          Enter their name and email. The link only works for that email
-          address, and they choose their own password when they accept it.
+          We'll email them a link to join. It only works for that email
+          address, and they choose their own password.
         </p>
         <div class="form-group">
           <label>Name <span style="color:var(--danger,#dc2626)">*</span></label>
@@ -130,13 +150,9 @@
           <label>Email <span style="color:var(--danger,#dc2626)">*</span></label>
           <input type="email" id="inviteEmail" required autocomplete="off" placeholder="e.g. maria@example.com" />
         </div>
-        <label class="send-row">
-          <input type="checkbox" id="inviteSendEmail" checked />
-          <span>Email the invitation to this address</span>
-        </label>
         <div id="inviteMsg" class="msg"></div>
         <div class="copybox hidden" id="inviteResult">
-          <strong id="inviteResultTitle">Send this link to them</strong> — it works once and expires in 7 days.
+          <strong>Send them this link yourself</strong> — it works once and expires in 7 days.
           <code id="inviteLink"></code>
           <button type="button" class="btn btn-ghost" id="copyInviteLinkBtn" style="margin-top:.5rem">
             <i class="fas fa-copy"></i> Copy link
@@ -145,7 +161,7 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" id="cancelInviteModal">Close</button>
-        <button class="btn btn-success" id="generateInviteBtn"><i class="fas fa-paper-plane"></i> <span id="generateInviteLabel">Send invite</span></button>
+        <button class="btn btn-success" id="generateInviteBtn"><i class="fas fa-paper-plane"></i> Send invite</button>
       </div>
     </div>
   </div>
@@ -153,6 +169,6 @@
   <div id="toast" class="toast hidden"></div>
   <script src="/static/env-banner.js?v=20260807-2"></script>
   <script src="/static/utils.js?v=20260921-3"></script>
-  <script src="/static/settings.js?v=20260922-2"></script>
+  <script src="/static/settings.js?v=20260922-3"></script>
 </body>
 </html>

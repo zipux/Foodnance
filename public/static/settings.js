@@ -9,6 +9,7 @@ let currentUserId = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadAccount();
+  loadPlan();
   await loadTeam();
 
   document.getElementById('changePwBtn').addEventListener('click', () => {
@@ -21,11 +22,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('inviteMsg').className = 'msg';
     document.getElementById('inviteMsg').textContent = '';
     document.getElementById('inviteResult').classList.add('hidden');
-    document.getElementById('inviteSendEmail').checked = true;
-    syncInviteButton();
     openModal('inviteModal');
   });
-  document.getElementById('inviteSendEmail').addEventListener('change', syncInviteButton);
   document.getElementById('closeInviteModal').addEventListener('click', () => closeModal('inviteModal'));
   document.getElementById('cancelInviteModal').addEventListener('click', () => closeModal('inviteModal'));
   document.getElementById('generateInviteBtn').addEventListener('click', generateInvite);
@@ -42,6 +40,65 @@ async function loadAccount() {
       document.getElementById('myEmail').value = d.user.email || '';
     }
   } catch (_) { /* ignore — page still renders, just without the email filled in */ }
+}
+
+// ── Plan & usage ────────────────────────────────────────────
+const PRO_FEATURE_LABELS = {
+  inventory_tools: 'Inventory and stock adjustments',
+  stock_takes:     'Stock counts with variance',
+  storage_layout:  'Storage layout',
+  staff:           'Staff certifications',
+  true_cogs:       'True cost of goods on the P&L',
+  pos_sales:       'POS sales import',
+};
+
+function fmtResetDate(iso) {
+  const d = new Date(iso + 'T00:00:00Z');
+  return isNaN(d) ? iso : d.toLocaleDateString('en-CA', { month: 'long', day: 'numeric', timeZone: 'UTC' });
+}
+
+async function loadPlan() {
+  const body = document.getElementById('planBody');
+  try {
+    const p = await apiGet('account/plan');
+    const { used, cap, resets_on } = p.invoice_reads;
+
+    let usage;
+    if (cap > 0) {
+      const pct = Math.min(100, Math.round((used / cap) * 100));
+      const cls = used >= cap ? 'full' : pct >= 80 ? 'warn' : '';
+      usage = `
+        <div class="usage-line"><strong>${used}</strong> of <strong>${cap}</strong> invoice reads used this month</div>
+        <div class="meter ${cls}"><span style="width:${pct}%"></span></div>
+        <div class="team-sub">Resets on ${esc(fmtResetDate(resets_on))}.${used >= cap
+          ? ' You can still add invoices by hand until then.' : ''}</div>`;
+    } else {
+      usage = `
+        <div class="usage-line"><strong>${used}</strong> invoice read${used === 1 ? '' : 's'} this month</div>
+        <div class="team-sub">No monthly limit on your plan.</div>`;
+    }
+
+    const features = (p.pro_features || []).map(f => PRO_FEATURE_LABELS[f]).filter(Boolean);
+    const mailto = 'mailto:hello@foodnance.com?subject=' + encodeURIComponent(
+      cap > 0 && used >= cap ? 'Raise my invoice limit' : 'Upgrade to Pro');
+    const upsell = features.length ? `
+      <div class="upsell">
+        <strong>Pro also adds</strong>
+        <ul>${features.map(f => `<li>${esc(f)}</li>`).join('')}</ul>
+        <a class="btn btn-primary" href="${mailto}"><i class="fas fa-envelope"></i> Ask about Pro</a>
+      </div>` : (cap > 0 && used >= cap ? `
+      <div class="upsell"><a class="btn btn-primary" href="${mailto}"><i class="fas fa-envelope"></i> Ask to raise your limit</a></div>` : '');
+
+    body.innerHTML = `
+      <div class="plan-head"><span class="plan-badge">${esc(p.label)}</span><span class="team-sub">Your current plan</span></div>
+      ${usage}
+      ${upsell}`;
+  } catch (e) {
+    // A super-admin with no restaurant selected has nothing to show; anything
+    // else is a real failure worth saying so.
+    if (/No organization/i.test(e.message || '')) document.getElementById('planCard').classList.add('hidden');
+    else body.innerHTML = `<p class="team-sub">Could not load your plan — ${esc(e.message || 'try again')}</p>`;
+  }
 }
 
 async function loadTeam() {
@@ -116,19 +173,13 @@ function inviteLinkFor(token) {
   return `${location.origin}/accept-invite.html?token=${encodeURIComponent(token)}`;
 }
 
-// "Send invite" when the box is ticked, "Create invite link" when it isn't.
-function syncInviteButton() {
-  const emailIt = document.getElementById('inviteSendEmail').checked;
-  document.getElementById('generateInviteLabel').textContent = emailIt ? 'Send invite' : 'Create invite link';
-}
-
 async function generateInvite() {
   const msgEl = document.getElementById('inviteMsg');
   const btn = document.getElementById('generateInviteBtn');
   msgEl.className = 'msg'; msgEl.textContent = '';
+  document.getElementById('inviteResult').classList.add('hidden');
   const name = document.getElementById('inviteName').value.trim();
   const email = document.getElementById('inviteEmail').value.trim();
-  const sendEmail = document.getElementById('inviteSendEmail').checked;
 
   if (!name || !email.includes('@')) {
     msgEl.textContent = !name ? 'Enter their name.' : 'Enter a valid email address.';
@@ -136,24 +187,24 @@ async function generateInvite() {
     return;
   }
 
-  // Every click creates an invite (and possibly an email), so a double-click
-  // must not make two.
+  // Every click creates an invite and sends an email, so a double-click must
+  // not make two.
   btn.disabled = true;
   try {
-    const d = await apiPost('team/invite', { name, email, send_email: sendEmail });
-    document.getElementById('inviteLink').textContent = inviteLinkFor(d.token);
-    document.getElementById('inviteResult').classList.remove('hidden');
+    const d = await apiPost('team/invite', { name, email });
     if (d.emailed) {
-      msgEl.textContent = `Invitation emailed to ${email}. You can also copy the link below.`;
+      msgEl.textContent = `Invitation emailed to ${email}.`;
       msgEl.className = 'msg show good';
-      document.getElementById('inviteResultTitle').textContent = 'Or send this link yourself';
-    } else if (sendEmail) {
-      // The invite exists either way; only the email failed.
+      // Ready for the next person.
+      document.getElementById('inviteName').value = '';
+      document.getElementById('inviteEmail').value = '';
+    } else {
+      // The invite exists either way; only the email failed. The link is the
+      // fallback so it isn't lost — and it stays in the pending list below.
       msgEl.textContent = `The invite was created, but we couldn't email it. ${d.email_error || ''}`.trim();
       msgEl.className = 'msg show bad';
-      document.getElementById('inviteResultTitle').textContent = 'Send this link to them';
-    } else {
-      document.getElementById('inviteResultTitle').textContent = 'Send this link to them';
+      document.getElementById('inviteLink').textContent = inviteLinkFor(d.token);
+      document.getElementById('inviteResult').classList.remove('hidden');
     }
     await loadTeam();
   } catch (e) {

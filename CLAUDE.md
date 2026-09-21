@@ -242,12 +242,13 @@ session already open on another device.
 
 ### Emailed teammate invites (added 2026-09-22, migration `0052`)
 
-Settings → Team → **Invite someone** can email the link (`send_email: true`) as well
-as hand it back to copy; the invite row is created first either way, so a refused or
-failed email never blocks onboarding — the reply carries `emailed` + `email_error` and
-the page falls back to the copy-link. **Name and email are both required** (the link is
-bound to that address when accepted). `POST /api/team/invites/:id/resend` re-sends and
-restarts the 7 days.
+Settings → Team → **Invite someone** always **emails** the link — there is no link-only
+mode (removed 2026-09-22: name and email are required anyway, so a bare link had no
+use). The invite row is created first and kept if the send fails, so a refused or failed
+email never loses the invite: the reply carries `emailed` + `email_error`, and only then
+does the modal reveal the link as a fallback (it also stays in the pending list, with
+Resend). **Name and email are both required** (the link is bound to that address when
+accepted). `POST /api/team/invites/:id/resend` re-sends and restarts the 7 days.
 
 This makes the app email strangers on a customer's behalf from foodnance.com, so:
 **10 emails per organization per hour and 3 per recipient address per day across every
@@ -259,6 +260,12 @@ can't both squeeze under), **before** the send, so a failed send still spends it
 message), typed names go through `cleanLabel`, and the inviter's verified address is shown
 beside their typed name. **Apply `0052` before deploying**, by file, never `db:migrate:prod`.
 `tests/team-invite-email.test.mjs` (static) + `npm run test:invite-email` (needs the sandbox).
+**Settings → Plan & usage** (`GET /api/account/plan`, org-scoped, deliberately not
+plan-gated) shows the plan label (`planLabel`, so a commissary reads "Production"),
+this month's invoice reads against the cap, the reset date and — on Essential — what Pro
+adds, with an "Ask about Pro" mailto to `hello@` (no self-serve upgrade or billing exists
+yet). It calls the very helpers the parse cap uses (`effectiveInvoiceCap`,
+`monthlyInvoiceParses`), so the card can never disagree with the block; cap `0` = no limit.
 The local sandbox has no `RESEND_API_KEY`, so it only proves the caps; a real send was checked on staging 2026-09-22 (staging *does* hold `RESEND_API_KEY`): the email arrived in the inbox, not spam, and the link resolved.
 
 ### Tests
