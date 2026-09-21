@@ -54,6 +54,8 @@ Disallow: /admin
 Disallow: /admin.html
 Disallow: /accept-invite
 Disallow: /accept-invite.html
+Disallow: /reset-password
+Disallow: /reset-password.html
 Disallow: /login
 Disallow: /login.html
 Disallow: /api/

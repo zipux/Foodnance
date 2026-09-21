@@ -63,7 +63,7 @@ t.check('accept page locks the prefilled email', /em\.readOnly = true/.test(acce
 t.section('sending mail can never lose or block an account');
 const sendFn = src.match(/async function sendEmail\([\s\S]*?\n}\n/);
 t.check('sendEmail exists and calls Resend', !!sendFn && /api\.resend\.com\/emails/.test(sendFn[0]));
-t.check('sendEmail catches network failure instead of throwing', !!sendFn && /catch \(_\)/.test(sendFn[0]));
+t.check('sendEmail catches network failure instead of throwing', !!sendFn && /catch \(\w+\) \{[\s\S]*?return \{ ok: false/.test(sendFn[0]));
 t.check('sendEmail has a timeout', !!sendFn && /AbortSignal\.timeout/.test(sendFn[0]));
 t.check('a missing RESEND_API_KEY is a soft failure, not a crash',
   !!sendFn && /if \(!env\.RESEND_API_KEY\) return \{ ok: false/.test(sendFn[0]));

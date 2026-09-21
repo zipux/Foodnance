@@ -50,6 +50,9 @@ const PUBLIC_API = new Set([
   '/api/env',             // returns 'production'/'staging'; the URL already says as much
   '/api/invites/lookup',       // shows who's inviting before the visitor has a session
   '/api/auth/accept-invite',   // the one signup path — gated by a token, not by being public
+  '/api/auth/forgot-password', // by definition called without a session; answers identically for every address
+  '/api/auth/reset-lookup',    // is this emailed link still good? — gated by the token
+  '/api/auth/reset-password',  // sets a new password — gated by the emailed token
 ])
 
 // Still allowed while an account is suspended: everything about the session
@@ -146,6 +149,10 @@ function randomHex(bytes: number): string {
   const a = new Uint8Array(bytes)
   crypto.getRandomValues(a)
   return [...a].map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  return toHex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))
 }
 
 // Constant-time string compare. A plain === leaks how many leading characters
@@ -1028,7 +1035,8 @@ app.post('/api/inventory/:id/adjust', async (c) => {
 // that creates a user is reachable only via an unguessable single-use token —
 // one an owner copied out of their own Settings page, or one the super-admin's
 // "Add a restaurant" emailed to the new owner (sendOwnerInviteEmail). Email is
-// used for that one message; there is still no verification or reset mail.
+// used for that message and for the forgotten-password link (see "Forgotten
+// password" below); there is still no verification mail.
 
 const MIN_PASSWORD_LEN = 8
 
@@ -1109,7 +1117,7 @@ app.post('/api/auth/login', async (c) => {
   const password = String(body.password || '')
 
   const row = await c.env.DB.prepare(
-    `SELECT u.id, u.email, u.password_hash, u.password_salt, u.password_iter, u.role,
+    `SELECT u.id, u.email, u.name, u.password_hash, u.password_salt, u.password_iter, u.role,
             o.archived_at AS org_archived_at
        FROM users u
        LEFT JOIN organizations o ON o.id = u.org_id
@@ -1124,7 +1132,12 @@ app.post('/api/auth/login', async (c) => {
     return c.json({ error: 'Email or password is incorrect.' }, 401)
   }
   const ok = await verifyPassword(password, row.password_salt, row.password_hash, row.password_iter)
-  if (!ok) return c.json({ error: 'Email or password is incorrect.' }, 401)
+  if (!ok) {
+    await noteFailedLogin(c, row)
+    // Word-for-word the unknown-address answer above, so a fifth failure
+    // (which quietly emails the owner) is indistinguishable from any other.
+    return c.json({ error: 'Email or password is incorrect.' }, 401)
+  }
 
   // Closed account: say so. Checked only AFTER the password is verified, so
   // this can't be used to probe which addresses belong to closed accounts.
@@ -1139,7 +1152,8 @@ app.post('/api/auth/login', async (c) => {
   const expiresAt = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS
   const token = await signSession(c.env.SESSION_SECRET, row.id, expiresAt)
 
-  await c.env.DB.prepare(`UPDATE users SET last_login_at = datetime('now') WHERE id = ?`).bind(row.id).run()
+  // A good password ends the streak: "5 wrong in a row" must mean in a row.
+  await c.env.DB.prepare(`UPDATE users SET last_login_at = datetime('now'), failed_logins = 0 WHERE id = ?`).bind(row.id).run()
 
   c.header('Set-Cookie', sessionCookieHeader(token, c.req.url, SESSION_TTL_SECONDS))
 
@@ -1154,6 +1168,159 @@ app.post('/api/auth/login', async (c) => {
       WHERE u.id = ?`,
   ).bind(row.id).first<SessionUser>()
 
+  return c.json({ ok: true, user: me ? publicUser(me) : null })
+})
+
+// ── Forgotten password ────────────────────────────────────────
+// Two ways in, one mechanism: the customer clicks "Forgot password?" on the
+// sign-in page, or the fifth consecutive wrong password emails the account's
+// owner a link automatically. Both mint a single-use token, mail it, and let
+// /api/auth/reset-password consume it.
+//
+// The rules that keep this from becoming a weapon:
+//  · Every answer is identical whether or not the address has an account
+//    (login and forgot-password alike), so neither reveals who is a customer.
+//  · Emails are capped per user per hour — 3 in all, and an automatic
+//    lockout mail only when NO link went out in the last hour. Typing wrong
+//    passwords against someone else's address can therefore cost them at most
+//    one email an hour, and it never locks them out: a wrong password is
+//    refused, the right one still works.
+//  · The email is sent AFTER the response (waitUntil), so a known address
+//    doesn't answer measurably slower than an unknown one.
+//  · Only the token's SHA-256 is stored, and the link is never returned by the
+//    API — unlike invites there is no operator to hand it to.
+const RESET_MINUTES = 60
+const RESET_MAX_PER_HOUR = 3        // links per user per hour, however they were triggered
+const LOCKOUT_AFTER_FAILURES = 5    // consecutive wrong passwords → automatic link
+
+async function issuePasswordReset(
+  c: any,
+  user: { id: string; email: string; name?: string },
+  reason: 'requested' | 'lockout',
+): Promise<void> {
+  const recent = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM password_resets
+      WHERE user_id = ? AND created_at > datetime('now', '-1 hour')`,
+  ).bind(user.id).first() as { n: number } | null
+  const sentLastHour = recent?.n || 0
+  if (sentLastHour >= (reason === 'lockout' ? 1 : RESET_MAX_PER_HOUR)) return
+
+  const token = randomHex(32)
+  const tokenHash = await sha256Hex(token)
+  await c.env.DB.batch([
+    // Only the newest link works: mark any earlier unused ones spent. Rows stay —
+    // they are the rate-limit ledger above.
+    c.env.DB.prepare(
+      `UPDATE password_resets SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL`,
+    ).bind(user.id),
+    c.env.DB.prepare(
+      `INSERT INTO password_resets (id, user_id, token_hash, reason, expires_at)
+       VALUES (?, ?, ?, ?, datetime('now', '+${RESET_MINUTES} minutes'))`,
+    ).bind(uid(), user.id, tokenHash, reason),
+  ])
+
+  const base = String(c.env.PUBLIC_URL || new URL(c.req.url).origin).replace(/\/+$/, '')
+  const url = `${base}/reset-password?token=${token}`
+  const delivery = sendPasswordResetEmail(c.env, user.email, user.name || '', url, reason)
+  try { c.executionCtx.waitUntil(delivery) } catch (_) { await delivery }
+}
+
+// Counts a wrong password against the account and, on the fifth in a row,
+// emails a reset link. Fail-soft: this is a courtesy layered on the sign-in
+// path, and it must never turn a wrong password into a 500 — or, if the
+// migration hasn't reached a database yet, break signing in.
+async function noteFailedLogin(c: any, user: { id: string; email: string; name?: string }) {
+  try {
+    const r = await c.env.DB.prepare(
+      `UPDATE users SET failed_logins = failed_logins + 1 WHERE id = ? RETURNING failed_logins`,
+    ).bind(user.id).first() as { failed_logins: number } | null
+    if (!r || r.failed_logins < LOCKOUT_AFTER_FAILURES) return
+    await c.env.DB.prepare(`UPDATE users SET failed_logins = 0 WHERE id = ?`).bind(user.id).run()
+    await issuePasswordReset(c, user, 'lockout')
+  } catch (e) {
+    console.error('noteFailedLogin failed', e)
+  }
+}
+
+// POST /api/auth/forgot-password  { email } — PUBLIC.
+app.post('/api/auth/forgot-password', async (c) => {
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const email = normalizeEmail(body.email)
+  // Shape only. Anything that looks like an address gets the same answer.
+  if (!email.includes('@')) return c.json({ error: 'Enter the email address you sign in with.' }, 400)
+
+  // A closed account gets no link: it could not sign in afterwards anyway.
+  const user = await c.env.DB.prepare(
+    `SELECT u.id, u.email, u.name
+       FROM users u
+       LEFT JOIN organizations o ON o.id = u.org_id
+      WHERE u.email = ? AND u.archived_at IS NULL AND o.archived_at IS NULL`,
+  ).bind(email).first() as { id: string; email: string; name: string } | null
+  if (user) {
+    try { await issuePasswordReset(c, user, 'requested') }
+    catch (e) { console.error('forgot-password failed', e) }   // still answer generically
+  }
+  return c.json({ ok: true })
+})
+
+// Shared by lookup and reset: the row for a still-usable token, or null.
+async function findUsableReset(c: any, token: string) {
+  if (!token) return null
+  return await c.env.DB.prepare(
+    `SELECT r.id, r.user_id
+       FROM password_resets r
+       JOIN users u ON u.id = r.user_id
+       LEFT JOIN organizations o ON o.id = u.org_id
+      WHERE r.token_hash = ? AND r.used_at IS NULL AND r.expires_at > datetime('now')
+        AND u.archived_at IS NULL AND o.archived_at IS NULL`,
+  ).bind(await sha256Hex(token)).first() as { id: string; user_id: string } | null
+}
+
+// POST /api/auth/reset-lookup  { token } — PUBLIC. Lets the reset page say "this
+// link has expired" up front instead of after they've typed a password.
+app.post('/api/auth/reset-lookup', async (c) => {
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const found = await findUsableReset(c, String(body.token || ''))
+  if (!found) return c.json({ error: 'This reset link is no longer valid.' }, 404)
+  return c.json({ ok: true })
+})
+
+// POST /api/auth/reset-password  { token, password } — PUBLIC, token-gated.
+// Consumes the link, sets the password, and signs the caller straight in.
+app.post('/api/auth/reset-password', async (c) => {
+  if (!c.env.SESSION_SECRET) return c.json({ error: 'SESSION_SECRET is not configured on the server.' }, 500)
+
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const password = String(body.password || '')
+  // Re-validated here for real; the lookup above only shaped the page.
+  const found = await findUsableReset(c, String(body.token || ''))
+  if (!found) return c.json({ error: 'This reset link is no longer valid. Request a new one from the sign-in page.' }, 404)
+  if (password.length < MIN_PASSWORD_LEN) {
+    return c.json({ error: `Password must be at least ${MIN_PASSWORD_LEN} characters.` }, 400)
+  }
+
+  const salt = randomHex(16)
+  const hash = await hashPassword(password, salt)
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      `UPDATE users SET password_hash = ?, password_salt = ?, password_iter = ?, failed_logins = 0 WHERE id = ?`,
+    ).bind(hash, salt, PBKDF2_ITERATIONS, found.user_id),
+    // Spends this link and any sibling: one reset, one password.
+    c.env.DB.prepare(
+      `UPDATE password_resets SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL`,
+    ).bind(found.user_id),
+  ])
+
+  const expiresAt = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS
+  const sessionToken = await signSession(c.env.SESSION_SECRET, found.user_id, expiresAt)
+  c.header('Set-Cookie', sessionCookieHeader(sessionToken, c.req.url, SESSION_TTL_SECONDS))
+
+  const me = await c.env.DB.prepare(
+    `SELECT ${SESSION_USER_COLUMNS}
+       FROM users u
+       LEFT JOIN organizations o ON o.id = u.org_id
+      WHERE u.id = ?`,
+  ).bind(found.user_id).first<SessionUser>()
   return c.json({ ok: true, user: me ? publicUser(me) : null })
 })
 
@@ -1650,8 +1817,10 @@ async function sendEmail(
     })
     if (r.ok) return { ok: true }
     const detail = await r.json().catch(() => ({})) as { message?: string }
+    console.error('sendEmail: provider refused', r.status, detail.message)
     return { ok: false, error: detail.message || `Email provider answered ${r.status}.` }
-  } catch (_) {
+  } catch (e) {
+    console.error('sendEmail: could not reach provider', e)
     return { ok: false, error: 'Could not reach the email provider.' }
   }
 }
@@ -1694,6 +1863,40 @@ Foodnance`
   <p style="font-size:.9rem;color:#64748b">If you weren't expecting this, you can ignore this email.</p>
 </div>`
   return sendEmail(env, { to, subject: `Set up your Foodnance account for ${orgName}`, html, text })
+}
+
+// Sent to a person who may be locked out, so it stays short and says what
+// triggered it. The lockout variant explains itself: an unexpected reset mail
+// is alarming unless it says why it arrived.
+function sendPasswordResetEmail(env: Bindings, to: string, name: string, url: string, reason: 'requested' | 'lockout') {
+  const hello = name ? `Hi ${name},` : 'Hi,'
+  const why = reason === 'lockout'
+    ? 'The wrong password was entered several times in a row on your account, so we are sending this in case you have forgotten it.'
+    : 'We received a request to reset your password.'
+  const text =
+`${hello}
+
+${why}
+
+Choose a new password here:
+${url}
+
+The link works once and expires in ${RESET_MINUTES} minutes. Your current password keeps working until you use it.
+
+If this wasn't you, you can ignore this email — nobody can get in without your password.
+
+Foodnance`
+  const html =
+`<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:480px;margin:0 auto;color:#1e293b;line-height:1.55">
+  <p>${escHtml(hello)}</p>
+  <p>${escHtml(why)}</p>
+  <p style="margin:1.6rem 0"><a href="${escHtml(url)}" style="background:#4f46e5;color:#fff;text-decoration:none;font-weight:600;padding:.8rem 1.4rem;border-radius:8px;display:inline-block">Choose a new password</a></p>
+  <p style="font-size:.9rem;color:#64748b">The link works once and expires in ${RESET_MINUTES} minutes. Your current password keeps working until you use it.</p>
+  <p style="font-size:.9rem;color:#64748b">Button not working? Paste this into your browser:<br><span style="word-break:break-all">${escHtml(url)}</span></p>
+  <p style="font-size:.9rem;color:#64748b">If this wasn't you, you can ignore this email — nobody can get in without your password.</p>
+  <p style="font-size:.9rem;color:#64748b">Foodnance</p>
+</div>`
+  return sendEmail(env, { to, subject: 'Reset your Foodnance password', html, text })
 }
 
 // POST /api/admin/organizations

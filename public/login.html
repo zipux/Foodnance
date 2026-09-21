@@ -100,6 +100,14 @@
     .below { text-align: center; margin-top: 1.5rem; font-size: .88rem; color: var(--text-muted); }
     .below a { color: var(--primary); text-decoration: none; font-weight: 500; }
     .below a:hover { text-decoration: underline; }
+    .hidden { display: none !important; }
+    .hint { display: none; margin-bottom: 1rem; padding: .7rem .85rem; background: #eef2ff; border: 1px solid #c7d2fe;
+      border-radius: var(--radius-sm); font-size: .85rem; color: var(--primary-d); }
+    .hint.show { display: block; }
+    .ok { display: none; margin-bottom: 1rem; padding: .8rem .9rem; background: #f0fdf4; border: 1px solid #bbf7d0;
+      border-radius: var(--radius-sm); font-size: .88rem; color: #166534; }
+    .ok.show { display: block; }
+    button.linkbtn { background: none; border: none; font: inherit; cursor: pointer; padding: 0; }
     .back { display: block; text-align: center; margin-top: 1rem; font-size: .85rem; color: var(--text-muted); text-decoration: none; }
     .back:hover { color: var(--text); }
   </style>
@@ -110,12 +118,19 @@
     <a class="brand" href="/landing"><i class="fas fa-receipt"></i> Foodnance</a>
 
     <div class="card">
+      <div id="loginState">
       <h1>Log in</h1>
       <p class="lede">Welcome back. Pick up where you left off.</p>
 
       <div class="error" id="loginError">
         <i class="fas fa-circle-exclamation"></i>
         <span id="loginErrorText"></span>
+      </div>
+      <!-- After five wrong passwords in a row the server emails the account's
+           owner a reset link. It cannot say so per-account (that would reveal
+           which addresses exist), so this is worded as a maybe. -->
+      <div class="hint" id="lockoutHint">
+        Several wrong passwords in a row. If this address has an account, we've emailed it a link to choose a new one.
       </div>
 
       <form id="loginForm">
@@ -133,13 +148,41 @@
 
         <div class="row">
           <label class="remember"><input type="checkbox" id="remember" /> Remember me</label>
-          <a class="link" href="mailto:simoneisonni@gmail.com?subject=Foodnance%20—%20password%20help">Forgot password?</a>
+          <a class="link" href="#forgot" id="forgotLink">Forgot password?</a>
         </div>
 
         <button type="submit" class="submit">
           <i class="fas fa-arrow-right-to-bracket"></i> Log in
         </button>
       </form>
+      </div>
+
+      <div id="forgotState" class="hidden">
+        <h1>Reset your password</h1>
+        <p class="lede">Enter the email you sign in with and we'll send you a link to choose a new password.</p>
+
+        <div class="error" id="forgotError">
+          <i class="fas fa-circle-exclamation"></i>
+          <span id="forgotErrorText"></span>
+        </div>
+        <div class="ok" id="forgotSent">
+          <i class="fas fa-circle-check"></i>
+          If an account exists for <strong id="forgotSentTo"></strong>, we've emailed it a link.
+          It works for an hour. Nothing there? Check spam, or
+          <a class="link" href="mailto:simoneisonni@gmail.com?subject=Foodnance%20%E2%80%94%20password%20help">contact us</a>.
+        </div>
+
+        <form id="forgotForm">
+          <div class="field">
+            <label for="forgotEmail">Email</label>
+            <input type="email" id="forgotEmail" autocomplete="username" required placeholder="you@yourbusiness.com" />
+          </div>
+          <button type="submit" class="submit">
+            <i class="fas fa-paper-plane"></i> Email me a reset link
+          </button>
+        </form>
+        <a class="back" href="#login" id="backToLogin"><i class="fas fa-arrow-left"></i> Back to log in</a>
+      </div>
 
     </div>
 
@@ -200,6 +243,67 @@
       errBox.classList.add('show');
     }
 
+    // ── Forgot password ──────────────────────────────────────
+    const loginState  = document.getElementById('loginState');
+    const forgotState = document.getElementById('forgotState');
+    const forgotForm  = document.getElementById('forgotForm');
+    const forgotErr   = document.getElementById('forgotError');
+    const forgotSent  = document.getElementById('forgotSent');
+
+    function showPanel(which) {
+      loginState.classList.toggle('hidden', which !== 'login');
+      forgotState.classList.toggle('hidden', which !== 'forgot');
+      if (which === 'forgot') {
+        // Carry over whatever they already typed — they are mid-login.
+        const typed = document.getElementById('email').value.trim();
+        if (typed && !document.getElementById('forgotEmail').value) document.getElementById('forgotEmail').value = typed;
+        forgotErr.classList.remove('show');
+        forgotSent.classList.remove('show');
+      }
+    }
+    document.getElementById('forgotLink').addEventListener('click', function (e) { e.preventDefault(); showPanel('forgot'); });
+    document.getElementById('backToLogin').addEventListener('click', function (e) { e.preventDefault(); showPanel('login'); });
+    // The reset page links back here when its link has expired.
+    if (location.hash === '#forgot') showPanel('forgot');
+
+    forgotForm.addEventListener('submit', async function (e) {
+      e.preventDefault();
+      forgotErr.classList.remove('show');
+      forgotSent.classList.remove('show');
+      const fbtn = forgotForm.querySelector('button.submit');
+      const fbtnHtml = fbtn.innerHTML;
+      fbtn.disabled = true;
+      fbtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending…';
+      const email = document.getElementById('forgotEmail').value.trim();
+      try {
+        const resp = await fetch('/api/auth/forgot-password', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ email }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          document.getElementById('forgotErrorText').textContent = data.error || 'Could not send the link. Please try again.';
+          forgotErr.classList.add('show');
+          return;
+        }
+        document.getElementById('forgotSentTo').textContent = email;
+        forgotSent.classList.add('show');
+      } catch (_) {
+        document.getElementById('forgotErrorText').textContent = 'Could not reach the server. Check your connection and try again.';
+        forgotErr.classList.add('show');
+      } finally {
+        fbtn.disabled = false;
+        fbtn.innerHTML = fbtnHtml;
+      }
+    });
+
+    // Mirrors the server's five-in-a-row rule for the message only; the server
+    // is the one that counts and sends.
+    const LOCKOUT_AFTER = 5;
+    const hint = document.getElementById('lockoutHint');
+    let failures = 0, failuresFor = '';
+
     // Already signed in? Skip the form entirely.
     fetch('/api/auth/me')
       .then(r => r.ok ? r.json() : null)
@@ -209,6 +313,7 @@
     form.addEventListener('submit', async function (e) {
       e.preventDefault();
       errBox.classList.remove('show');
+      hint.classList.remove('show');
       btn.disabled = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Signing in…';
 
@@ -225,6 +330,12 @@
 
         if (!resp.ok) {
           showError(data.error || 'Could not sign in. Please try again.');
+          if (resp.status === 401) {
+            const who = document.getElementById('email').value.trim().toLowerCase();
+            failures = (who === failuresFor) ? failures + 1 : 1;
+            failuresFor = who;
+            if (failures >= LOCKOUT_AFTER) { hint.classList.add('show'); failures = 0; }
+          }
           return;
         }
         // Back to where they were if the session expired mid-task, else

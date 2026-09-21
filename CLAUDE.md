@@ -101,8 +101,9 @@ the live deployment kept serving the secrets it was built with. After any secret
 change, `secret list` and check the whole set, not just the one you touched.
 
 **Email (Resend) — optional, added 2026-09-21.** `RESEND_API_KEY` is a third,
-*optional* secret. It sends exactly one message today: the owner-invite email from
-**Add a restaurant** (`sendOwnerInviteEmail`). Sender is `MAIL_FROM` (default
+*optional* secret. It sends two messages today: the owner-invite email from
+**Add a restaurant** (`sendOwnerInviteEmail`) and the password-reset link
+(`sendPasswordResetEmail`, below). Sender is `MAIL_FROM` (default
 `Foodnance <hello@foodnance.com>`; the domain must be verified in Resend), links use
 `PUBLIC_URL` (production var, so they never point at pages.dev; unset on staging so
 staging links stay on staging; add `PUBLIC_URL=http://localhost:3000` to `.dev.vars`
@@ -220,6 +221,25 @@ migration, exactly what had happened locally (0033 had its column but not its
 index, 0035 was half-applied; neither noticed for weeks). Local has since been
 repaired and `npm run db:migrate:local` works normally.
 
+### Forgotten password (added 2026-09-21, migration `0051`)
+
+Sign-in page → **Forgot password?** emails a single-use link to `/reset-password`;
+the **fifth consecutive wrong password** emails one automatically
+(`users.failed_logins`, reset by any successful login or reset). Both go through
+`issuePasswordReset()`; three public endpoints (`forgot-password`, `reset-lookup`,
+`reset-password`) are in `PUBLIC_API`. Read before touching it: every answer is
+identical for known and unknown addresses (login too — the wrong-password and
+unknown-address messages must stay word-for-word equal); links are capped at 3 per
+user per hour and an *automatic* one only fires when none went out in the last hour,
+so wrong passwords typed at someone else's address cost them at most one email an
+hour and never lock them out; only the token's SHA-256 is stored and the link is
+never returned by the API (no operator handoff, unlike invites); the email is sent
+via `waitUntil` so a known address isn't slower. `noteFailedLogin` is fail-soft so a
+missing column can never break sign-in — but **apply `0051` before deploying**.
+`tests/password-reset.test.mjs` (static) + `npm run test:reset` (needs the sandbox).
+Known limit: sessions are stateless signed cookies, so a reset does not sign out a
+session already open on another device.
+
 ### Tests
 
 ```bash
@@ -228,6 +248,7 @@ npm run test:pos       # POS sales import  — needs `npm run dev:sandbox` runni
 npm run test:isolation # tenant isolation  — needs the sandbox; the pre-launch gate
 npm run test:lifecycle # account lifecycle — needs the sandbox
 npm run test:merge     # product merge/group — needs the sandbox
+npm run test:reset     # forgotten-password flow — needs the sandbox
 ```
 
 Plain Node, no framework, no dependencies. `tests/helpers/browser-module.mjs`
