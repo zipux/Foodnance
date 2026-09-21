@@ -1444,8 +1444,11 @@ app.get('/api/team', async (c) => {
   return c.json({ users: users.results || [], invites: invites.results || [] })
 })
 
-// POST /api/team/invite  { email, name } — generate a copy-link. Both are
+// POST /api/team/invite  { email, name, send_email? } — generate a copy-link, and
+// optionally email it (see emailTeamInvite for the caps). Name and email are both
 // required: the link is bound to that address at acceptance (see accept-invite).
+// The invite is created either way; `emailed` says whether the mail went out and
+// `email_error` says why not, so the page can fall back to the copy-link.
 app.post('/api/team/invite', async (c) => {
   const org = orgOf(c)
   if (!org) return c.json({ error: 'No organization to manage.' }, 400)
@@ -1464,7 +1467,34 @@ app.post('/api/team/invite', async (c) => {
      VALUES (?, ?, ?, ?, 'owner', ?, ?, datetime('now', '+7 days'))`,
   ).bind(id, org, email, name, token, me.id).run()
 
-  return c.json({ id, token }, 201)
+  if (body.send_email !== true) return c.json({ id, token, emailed: false }, 201)
+  const sent = await emailTeamInvite(c, org, token, name, email)
+  return c.json({ id, token, emailed: sent.ok, ...(sent.ok ? {} : { email_error: sent.error }) }, 201)
+})
+
+// POST /api/team/invites/:id/resend — email a pending invite again. Counts against
+// the same caps. It also restarts the 7 days, since the usual reason to resend is
+// that the first email went unread until it was too late.
+app.post('/api/team/invites/:id/resend', async (c) => {
+  const org = orgOf(c)
+  if (!org) return c.json({ error: 'No organization to manage.' }, 400)
+  const { id } = c.req.param()
+
+  const invite = await c.env.DB.prepare(
+    `SELECT id, email, name, token FROM invites WHERE id = ? AND org_id = ? AND accepted_at IS NULL`,
+  ).bind(id, org).first() as { id: string; email: string; name: string; token: string } | null
+  if (!invite) return c.json({ error: 'Invite not found.' }, 404)
+  if (!invite.email.includes('@')) {
+    return c.json({ error: 'This invite has no email address. Copy the link and send it yourself.' }, 400)
+  }
+
+  const sent = await emailTeamInvite(c, org, invite.token, invite.name, invite.email)
+  if (sent.ok) {
+    await c.env.DB.prepare(
+      `UPDATE invites SET expires_at = datetime('now', '+${INVITE_DAYS} days') WHERE id = ? AND org_id = ?`,
+    ).bind(id, org).run()
+  }
+  return c.json({ ok: sent.ok, ...(sent.ok ? {} : { error: sent.error }) }, sent.ok ? 200 : 429)
 })
 
 // POST /api/team/invites/:id/revoke — cancel a not-yet-accepted invite.
@@ -1866,6 +1896,85 @@ Foodnance`
   <p style="font-size:.9rem;color:#64748b">If you weren't expecting this, you can ignore this email.</p>
 </div>`
   return sendEmail(env, { to, subject: `Set up your Foodnance account for ${orgName}`, html, text })
+}
+
+// A colleague's invitation from Settings → Team. The names in it are typed by
+// customers, and the mail goes out from OUR domain — so the body is fixed text
+// (no free-form message to smuggle a phishing pitch through), the typed names are
+// cleaned and length-capped, and the inviter's *verified* email address is shown
+// beside their typed name.
+function cleanLabel(s: unknown, max: number): string {
+  return String(s || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max)
+}
+
+function sendTeamInviteEmail(
+  env: Bindings, to: string, inviteeName: string,
+  inviter: { name: string; email: string }, orgName: string, url: string,
+) {
+  const hello = inviteeName ? `Hi ${cleanLabel(inviteeName, 60)},` : 'Hi,'
+  const who = cleanLabel(inviter.name, 60) || 'A colleague'
+  const org = cleanLabel(orgName, 80) || 'their business'
+  const from = `${who} (${inviter.email})`
+  const text =
+`${hello}
+
+${from} invited you to join ${org} on Foodnance, food cost software for restaurants and bakeries.
+
+Choose your password here:
+${url}
+
+The link works once and expires in ${INVITE_DAYS} days. You pick the password yourself, so nobody at Foodnance ever sees it.
+
+If you weren't expecting this, you can ignore this email.
+
+Foodnance`
+  const html =
+`<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:480px;margin:0 auto;color:#1e293b;line-height:1.55">
+  <p>${escHtml(hello)}</p>
+  <p><strong>${escHtml(who)}</strong> (${escHtml(inviter.email)}) invited you to join <strong>${escHtml(org)}</strong> on Foodnance, food cost software for restaurants and bakeries.</p>
+  <p style="margin:1.6rem 0"><a href="${escHtml(url)}" style="background:#4f46e5;color:#fff;text-decoration:none;font-weight:600;padding:.8rem 1.4rem;border-radius:8px;display:inline-block">Choose your password</a></p>
+  <p style="font-size:.9rem;color:#64748b">The link works once and expires in ${INVITE_DAYS} days. You pick the password yourself, so nobody at Foodnance ever sees it.</p>
+  <p style="font-size:.9rem;color:#64748b">Button not working? Paste this into your browser:<br><span style="word-break:break-all">${escHtml(url)}</span></p>
+  <p style="font-size:.9rem;color:#64748b">If you weren't expecting this, you can ignore this email.</p>
+</div>`
+  return sendEmail(env, { to, subject: `${who} invited you to ${org} on Foodnance`, html, text })
+}
+
+// Caps on invitation emails. Every refusal leaves the invite itself intact — the
+// customer just falls back to copying the link — so a limit can slow a spammer
+// but never blocks someone from onboarding a colleague.
+const INVITE_EMAILS_PER_ORG_PER_HOUR = 10
+const INVITE_EMAILS_PER_ADDRESS_PER_DAY = 3   // across ALL organizations: one stranger's inbox
+
+// Reserves a slot in the ledger and sends. The reservation is ONE statement
+// (INSERT ... SELECT ... WHERE both counts are under their limit), so two
+// simultaneous requests cannot both squeeze under the cap. A failed send still
+// uses its slot, which stops a broken address being retried in a loop. Fails
+// CLOSED: if the ledger is unreadable (migration not applied) nothing is sent.
+async function emailTeamInvite(
+  c: any, orgId: string, token: string, inviteeName: string, to: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const me = c.get('user') as SessionUser
+  try {
+    const slot = await c.env.DB.prepare(
+      `INSERT INTO invite_emails (id, org_id, to_email)
+       SELECT ?, ?, ?
+        WHERE (SELECT COUNT(*) FROM invite_emails
+                WHERE org_id = ? AND created_at > datetime('now', '-1 hour')) < ?
+          AND (SELECT COUNT(*) FROM invite_emails
+                WHERE to_email = ? AND created_at > datetime('now', '-1 day')) < ?`,
+    ).bind(uid(), orgId, to, orgId, INVITE_EMAILS_PER_ORG_PER_HOUR, to, INVITE_EMAILS_PER_ADDRESS_PER_DAY).run()
+    if (!slot.meta.changes) {
+      return { ok: false, error: 'Too many invitation emails have been sent recently. Copy the link and send it yourself.' }
+    }
+  } catch (e) {
+    console.error('emailTeamInvite: ledger unavailable, not sending', e)
+    return { ok: false, error: 'Email invitations are not available right now. Copy the link and send it yourself.' }
+  }
+  const org = await c.env.DB.prepare('SELECT name FROM organizations WHERE id = ?')
+    .bind(orgId).first() as { name: string } | null
+  return sendTeamInviteEmail(c.env, to, inviteeName, { name: me.name, email: me.email },
+    org?.name || me.org_name || '', inviteUrl(c, token))
 }
 
 // Sent to a person who may be locked out, so it stays short and says what
@@ -2357,6 +2466,7 @@ app.delete('/api/admin/organizations/:id', async (c) => {
         c.env.DB.prepare(`DELETE FROM ${table} WHERE org_id IS ?`).bind(id)),
       c.env.DB.prepare(
         'DELETE FROM password_resets WHERE user_id IN (SELECT id FROM users WHERE org_id = ?)').bind(id),
+      c.env.DB.prepare('DELETE FROM invite_emails WHERE org_id = ?').bind(id),
       c.env.DB.prepare('DELETE FROM invites WHERE org_id = ?').bind(id),
       c.env.DB.prepare('DELETE FROM users WHERE org_id = ?').bind(id),
     ])

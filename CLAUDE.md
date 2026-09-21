@@ -187,7 +187,7 @@ from 0024 on — org scoping, plans, suspension, the invoice cap, POS sales impo
 — was applied **by hand and never recorded**, so the command would try to replay
 0024 onward.
 
-**`migrations/` now runs to `0046_recurring_expense_dates.sql`.** 0044–0046
+**`migrations/` now runs to `0052_invite_emails.sql`** (0047–0051 landed after this note was written; 0052 is not on prod yet). It first ran to `0046_recurring_expense_dates.sql`: 0044–0046
 landed after that audit: 0044 is recorded as applied on 2026-08-04, 0045 and 0046
 are unconfirmed either way. Re-verify against live D1 — do not read the 0043
 figure as current.
@@ -240,6 +240,27 @@ missing column can never break sign-in — but **apply `0051` before deploying**
 Known limit: sessions are stateless signed cookies, so a reset does not sign out a
 session already open on another device.
 
+### Emailed teammate invites (added 2026-09-22, migration `0052`)
+
+Settings → Team → **Invite someone** can email the link (`send_email: true`) as well
+as hand it back to copy; the invite row is created first either way, so a refused or
+failed email never blocks onboarding — the reply carries `emailed` + `email_error` and
+the page falls back to the copy-link. **Name and email are both required** (the link is
+bound to that address when accepted). `POST /api/team/invites/:id/resend` re-sends and
+restarts the 7 days.
+
+This makes the app email strangers on a customer's behalf from foodnance.com, so:
+**10 emails per organization per hour and 3 per recipient address per day across every
+organization**, counted in `invite_emails` — *not* on `invites`, because revoke
+hard-deletes those and create → email → revoke would reset the count. The slot is
+reserved by one `INSERT ... SELECT ... WHERE counts < limits` (two simultaneous requests
+can't both squeeze under), **before** the send, so a failed send still spends it, and it
+**fails closed**: unreadable ledger = nothing sent. The body is fixed text (no free-form
+message), typed names go through `cleanLabel`, and the inviter's verified address is shown
+beside their typed name. **Apply `0052` before deploying**, by file, never `db:migrate:prod`.
+`tests/team-invite-email.test.mjs` (static) + `npm run test:invite-email` (needs the sandbox).
+The sandbox has no `RESEND_API_KEY`, so a real send has only been checked by reading the code.
+
 ### Tests
 
 ```bash
@@ -249,6 +270,7 @@ npm run test:isolation # tenant isolation  — needs the sandbox; the pre-launch
 npm run test:lifecycle # account lifecycle — needs the sandbox
 npm run test:merge     # product merge/group — needs the sandbox
 npm run test:reset     # forgotten-password flow — needs the sandbox
+npm run test:invite-email # emailed invite caps — needs the sandbox (and `db:migrate:local` for 0052)
 npm run test:purge     # account purge: leaves nothing behind, touches no other customer — needs the sandbox
 ```
 

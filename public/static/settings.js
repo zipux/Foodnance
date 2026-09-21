@@ -21,8 +21,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('inviteMsg').className = 'msg';
     document.getElementById('inviteMsg').textContent = '';
     document.getElementById('inviteResult').classList.add('hidden');
+    document.getElementById('inviteSendEmail').checked = true;
+    syncInviteButton();
     openModal('inviteModal');
   });
+  document.getElementById('inviteSendEmail').addEventListener('change', syncInviteButton);
   document.getElementById('closeInviteModal').addEventListener('click', () => closeModal('inviteModal'));
   document.getElementById('cancelInviteModal').addEventListener('click', () => closeModal('inviteModal'));
   document.getElementById('generateInviteBtn').addEventListener('click', generateInvite);
@@ -77,8 +80,11 @@ async function loadTeam() {
           <td>${esc(i.name || '—')}</td>
           <td>${esc(i.email || '—')}</td>
           <td>${fmtDate(i.created_at)}</td>
-          <td>${i.expires_at ? fmtDate(i.expires_at) : '—'}</td>
+          <td>${isExpired(i.expires_at) ? '<strong>Expired</strong>' : (i.expires_at ? fmtDate(i.expires_at) : '—')}</td>
           <td class="actions">
+            ${i.email ? `<button class="btn btn-ghost" data-act="resend" data-id="${esc(i.id)}" data-email="${esc(i.email)}" title="Email this invitation again">
+              <i class="fas fa-paper-plane"></i> Resend
+            </button>` : ''}
             <button class="btn btn-ghost" data-act="copy" data-token="${esc(i.token)}" title="Copy the link again">
               <i class="fas fa-copy"></i>
             </button>
@@ -90,6 +96,9 @@ async function loadTeam() {
 
       pendingBody.querySelectorAll('button[data-act="copy"]').forEach(btn => {
         btn.addEventListener('click', () => copyText(inviteLinkFor(btn.dataset.token), 'Link copied.'));
+      });
+      pendingBody.querySelectorAll('button[data-act="resend"]').forEach(btn => {
+        btn.addEventListener('click', () => resendInvite(btn, btn.dataset.id, btn.dataset.email));
       });
       pendingBody.querySelectorAll('button[data-act="revoke"]').forEach(btn => {
         btn.addEventListener('click', () => revokeInvite(btn.dataset.id));
@@ -107,11 +116,19 @@ function inviteLinkFor(token) {
   return `${location.origin}/accept-invite.html?token=${encodeURIComponent(token)}`;
 }
 
+// "Send invite" when the box is ticked, "Create invite link" when it isn't.
+function syncInviteButton() {
+  const emailIt = document.getElementById('inviteSendEmail').checked;
+  document.getElementById('generateInviteLabel').textContent = emailIt ? 'Send invite' : 'Create invite link';
+}
+
 async function generateInvite() {
   const msgEl = document.getElementById('inviteMsg');
+  const btn = document.getElementById('generateInviteBtn');
   msgEl.className = 'msg'; msgEl.textContent = '';
   const name = document.getElementById('inviteName').value.trim();
   const email = document.getElementById('inviteEmail').value.trim();
+  const sendEmail = document.getElementById('inviteSendEmail').checked;
 
   if (!name || !email.includes('@')) {
     msgEl.textContent = !name ? 'Enter their name.' : 'Enter a valid email address.';
@@ -119,15 +136,31 @@ async function generateInvite() {
     return;
   }
 
+  // Every click creates an invite (and possibly an email), so a double-click
+  // must not make two.
+  btn.disabled = true;
   try {
-    const d = await apiPost('team/invite', { name, email });
-    const link = inviteLinkFor(d.token);
-    document.getElementById('inviteLink').textContent = link;
+    const d = await apiPost('team/invite', { name, email, send_email: sendEmail });
+    document.getElementById('inviteLink').textContent = inviteLinkFor(d.token);
     document.getElementById('inviteResult').classList.remove('hidden');
+    if (d.emailed) {
+      msgEl.textContent = `Invitation emailed to ${email}. You can also copy the link below.`;
+      msgEl.className = 'msg show good';
+      document.getElementById('inviteResultTitle').textContent = 'Or send this link yourself';
+    } else if (sendEmail) {
+      // The invite exists either way; only the email failed.
+      msgEl.textContent = `The invite was created, but we couldn't email it. ${d.email_error || ''}`.trim();
+      msgEl.className = 'msg show bad';
+      document.getElementById('inviteResultTitle').textContent = 'Send this link to them';
+    } else {
+      document.getElementById('inviteResultTitle').textContent = 'Send this link to them';
+    }
     await loadTeam();
   } catch (e) {
     msgEl.textContent = e.message || 'Could not create the invite.';
     msgEl.className = 'msg show bad';
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -141,6 +174,25 @@ async function copyText(text, okMessage) {
     showToast(okMessage, 'success');
   } catch (_) {
     showToast('Could not copy — select and copy the link manually.', 'error');
+  }
+}
+
+// invites.expires_at is UTC 'YYYY-MM-DD HH:MM:SS' (SQLite datetime('now')).
+function isExpired(expiresAt) {
+  if (!expiresAt) return false;
+  const t = Date.parse(String(expiresAt).replace(' ', 'T') + 'Z');
+  return !isNaN(t) && t < Date.now();
+}
+
+async function resendInvite(btn, id, email) {
+  btn.disabled = true;
+  try {
+    await apiPost(`team/invites/${id}/resend`, {});
+    showToast(`Invitation emailed to ${email}.`, 'success');
+    await loadTeam();
+  } catch (e) {
+    showToast(e.message || 'Could not send the email.', 'error');
+    btn.disabled = false;
   }
 }
 

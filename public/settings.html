@@ -33,6 +33,8 @@
     .msg { margin-bottom: 1rem; padding: .7rem .85rem; border-radius: var(--radius-sm); font-size: .85rem; display: none; }
     .msg.show { display: block; }
     .msg.bad { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+    .msg.good { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
+    .send-row { display: flex; align-items: center; gap: .5rem; margin-bottom: 1rem; font-size: .9rem; }
   </style>
   <script src="/static/nav-gate.js?v=20260921-3"></script>
 </head>
@@ -78,7 +80,7 @@
         <p class="team-sub">
           Anyone you invite has the exact same access you do — it's a
           separate login, not a restricted one. Share the link however you
-          like; nothing gets emailed automatically.
+          like, or let us email it for you from the invite window.
         </p>
         <div class="table-scroll">
           <table class="data-table">
@@ -128,9 +130,13 @@
           <label>Email <span style="color:var(--danger,#dc2626)">*</span></label>
           <input type="email" id="inviteEmail" required autocomplete="off" placeholder="e.g. maria@example.com" />
         </div>
+        <label class="send-row">
+          <input type="checkbox" id="inviteSendEmail" checked />
+          <span>Email the invitation to this address</span>
+        </label>
         <div id="inviteMsg" class="msg"></div>
         <div class="copybox hidden" id="inviteResult">
-          <strong>Send this link to them</strong> — it works once and expires in 7 days.
+          <strong id="inviteResultTitle">Send this link to them</strong> — it works once and expires in 7 days.
           <code id="inviteLink"></code>
           <button type="button" class="btn btn-ghost" id="copyInviteLinkBtn" style="margin-top:.5rem">
             <i class="fas fa-copy"></i> Copy link
@@ -139,7 +145,7 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" id="cancelInviteModal">Close</button>
-        <button class="btn btn-success" id="generateInviteBtn"><i class="fas fa-link"></i> Generate invite link</button>
+        <button class="btn btn-success" id="generateInviteBtn"><i class="fas fa-paper-plane"></i> <span id="generateInviteLabel">Send invite</span></button>
       </div>
     </div>
   </div>
@@ -147,6 +153,6 @@
   <div id="toast" class="toast hidden"></div>
   <script src="/static/env-banner.js?v=20260807-2"></script>
   <script src="/static/utils.js?v=20260921-3"></script>
-  <script src="/static/settings.js?v=20260922-1"></script>
+  <script src="/static/settings.js?v=20260922-2"></script>
 </body>
 </html>
