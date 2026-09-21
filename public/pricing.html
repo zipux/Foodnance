@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en-CA">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Held out of search on purpose, exactly like index.html: reachable, not
+       announced. TO LAUNCH: delete the robots meta line below together with the
+       one in index.html (see the checklist in robots.txt), then add this page to
+       the sitemap submission in Search Console. -->
+  <meta name="robots" content="noindex, nofollow" />
+
+  <title>Foodnance Pricing — From $79 a Month in Canadian Dollars</title>
+  <meta name="description" content="Foodnance food cost software costs $79 a month (Essentials) or $150 a month (Pro), in Canadian dollars per location, with no setup fee." />
+  <link rel="canonical" href="https://foodnance.com/pricing" />
+  <meta name="theme-color" content="#4f46e5" />
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="mask-icon" href="/favicon.svg" color="#4f46e5" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Foodnance" />
+  <meta property="og:locale" content="en_CA" />
+  <meta property="og:url" content="https://foodnance.com/pricing" />
+  <meta property="og:title" content="Foodnance Pricing — From $79 a Month in Canadian Dollars" />
+  <meta property="og:description" content="Two plans, priced per location per month in Canadian dollars, with no setup fee." />
+  <!-- og:image goes here once the shared 1200x630 image exists (see index.html). -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Foodnance Pricing — From $79 a Month in Canadian Dollars" />
+  <meta name="twitter:description" content="Two plans, priced per location per month in Canadian dollars, with no setup fee." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..800&display=swap" rel="stylesheet" />
+
+  <!-- Structured data. The Offers must match the prices visible on this page and
+       in the FAQ on the homepage: change all three together. Deliberately no
+       aggregateRating (there are no reviews) and no trial/overage terms (not
+       offered yet). -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebPage",
+        "@id": "https://foodnance.com/pricing#page",
+        "url": "https://foodnance.com/pricing",
+        "name": "Foodnance pricing",
+        "isPartOf": { "@id": "https://foodnance.com/#website" },
+        "about": { "@id": "https://foodnance.com/#software" },
+        "breadcrumb": { "@id": "https://foodnance.com/pricing#breadcrumb" }
+      },
+      {
+        "@type": "BreadcrumbList",
+        "@id": "https://foodnance.com/pricing#breadcrumb",
+        "itemListElement": [
+          { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://foodnance.com/" },
+          { "@type": "ListItem", "position": 2, "name": "Pricing", "item": "https://foodnance.com/pricing" }
+        ]
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://foodnance.com/#software",
+        "name": "Foodnance",
+        "url": "https://foodnance.com/",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "Web browser",
+        "offers": [
+          {
+            "@type": "Offer",
+            "name": "Essentials",
+            "description": "Invoice reading, price history and price-change alerts, recipe and dish costing, and a monthly P&L.",
+            "url": "https://foodnance.com/pricing",
+            "price": "79.00",
+            "priceCurrency": "CAD",
+            "priceSpecification": {
+              "@type": "UnitPriceSpecification",
+              "price": "79.00",
+              "priceCurrency": "CAD",
+              "unitText": "per location per month"
+            }
+          },
+          {
+            "@type": "Offer",
+            "name": "Pro",
+            "description": "Everything in Essentials, plus inventory and stock counts.",
+            "url": "https://foodnance.com/pricing",
+            "price": "150.00",
+            "priceCurrency": "CAD",
+            "priceSpecification": {
+              "@type": "UnitPriceSpecification",
+              "price": "150.00",
+              "priceCurrency": "CAD",
+              "unitText": "per location per month"
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+
+  <style>
+    /* Standalone like index.html: no shared stylesheet, tokens copied from it. */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary:    #4f46e5;
+      --primary-d:  #3730a3;
+      --bg:         #ffffff;
+      --bg-alt:     #f8fafc;
+      --border:     #e2e8f0;
+      --text:       #1e293b;
+      --text-muted: #64748b;
+      --radius:     12px;
+      --radius-sm:  8px;
+      --shadow:     0 2px 16px rgba(0,0,0,.08);
+      --shadow-lg:  0 18px 48px rgba(15,23,42,.14);
+      --maxw:       1080px;
+    }
+
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      color: var(--text); background: var(--bg);
+      font-size: 16px; line-height: 1.6; -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 1.25rem; }
+    .ic { height: 1em; fill: currentColor; vertical-align: -.125em; flex: none; }
+
+    /* ===== NAV (same as index.html) ===== */
+    header.nav {
+      position: sticky; top: 0; z-index: 50;
+      background: rgba(255,255,255,.86); backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: var(--maxw); margin: 0 auto; padding: .85rem 1.25rem;
+      display: flex; align-items: center; gap: 1rem;
+    }
+    .brand {
+      display: flex; align-items: center; gap: .55rem;
+      font-weight: 800; font-size: 1.15rem; letter-spacing: -.01em;
+      color: var(--text); text-decoration: none;
+    }
+    .brand .ic { color: var(--primary); }
+    .nav-spacer { flex: 1; }
+    .nav-link {
+      color: var(--text-muted); text-decoration: none; font-size: .92rem;
+      font-weight: 500; padding: .4rem .6rem; border-radius: 6px;
+      white-space: nowrap;
+    }
+    .nav-link:hover { color: var(--text); background: var(--bg-alt); }
+    .nav-link[aria-current="page"] { color: var(--text); font-weight: 600; }
+
+    /* ===== BUTTONS ===== */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+      font-family: inherit; font-size: .95rem; font-weight: 600;
+      padding: .7rem 1.25rem; border-radius: var(--radius-sm);
+      text-decoration: none; border: 1px solid transparent; cursor: pointer;
+      transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
+      white-space: nowrap;
+    }
+    .btn-primary {
+      background: linear-gradient(180deg, var(--primary), var(--primary-d));
+      color: #fff; box-shadow: 0 2px 10px rgba(79,70,229,.28);
+    }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(79,70,229,.34); }
+    .btn-ghost { background: #fff; color: var(--text); border-color: var(--border); }
+    .btn-ghost:hover { background: var(--bg-alt); }
+    .btn-lg { font-size: 1rem; padding: .85rem 1.6rem; }
+    .btn:focus-visible, .nav-link:focus-visible, .brand:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+    /* ===== HERO ===== */
+    .hero { padding: 4rem 0 2.2rem; text-align: center; }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: .45rem;
+      font-size: .8rem; font-weight: 600; letter-spacing: .02em;
+      color: var(--primary); background: #eef2ff; border: 1px solid #e0e7ff;
+      border-radius: 999px; padding: .35rem .8rem; margin-bottom: 1.3rem;
+    }
+    h1 {
+      font-size: clamp(2rem, 5vw, 3rem); line-height: 1.12; letter-spacing: -.03em;
+      font-weight: 800; max-width: 22ch; margin: 0 auto 1rem;
+    }
+    h1 .accent {
+      background: linear-gradient(120deg, var(--primary), #7c6cf0);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .sub { font-size: clamp(1rem, 2.2vw, 1.15rem); color: var(--text-muted); max-width: 54ch; margin: 0 auto; }
+
+    /* ===== PLANS ===== */
+    .plans {
+      display: grid; gap: 1.1rem; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+      max-width: 820px; margin: 0 auto;
+    }
+    .plan {
+      background: #fff; border: 1px solid var(--border); border-radius: 16px;
+      padding: 1.8rem; display: flex; flex-direction: column; box-shadow: var(--shadow);
+    }
+    .plan h2 { font-size: 1.25rem; letter-spacing: -.01em; margin-bottom: .2rem; }
+    .plan .tag { color: var(--text-muted); font-size: .92rem; min-height: 2.9em; }
+    .price { font-size: 2.9rem; font-weight: 800; letter-spacing: -.035em; line-height: 1.1; margin: 1.1rem 0 .1rem; }
+    .price .cur { font-size: 1.15rem; font-weight: 600; color: var(--text-muted); letter-spacing: 0; }
+    .per { font-size: .86rem; color: var(--text-muted); }
+    .ticks { list-style: none; display: grid; gap: .65rem; margin: 1.3rem 0 1.7rem; font-size: .95rem; }
+    .ticks li { display: flex; gap: .65rem; align-items: flex-start; }
+    .ticks .ic { color: var(--primary); margin-top: .3em; }
+    .plan .btn { margin-top: auto; }
+    .plans-note { text-align: center; color: var(--text-muted); font-size: .88rem; margin-top: 1.1rem; }
+
+    /* ===== SECTIONS ===== */
+    section { padding: 3.5rem 0; }
+    .section-alt { background: var(--bg-alt); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    .section-head { text-align: center; max-width: 60ch; margin: 0 auto 2.2rem; }
+    h2.section-title {
+      font-size: clamp(1.5rem, 3.4vw, 2.1rem); letter-spacing: -.02em;
+      font-weight: 800; line-height: 1.2; margin-bottom: .7rem;
+    }
+    .section-head p { color: var(--text-muted); font-size: 1.02rem; }
+
+    .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+    .card { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 1.4rem; }
+    .card h3 { font-size: 1.04rem; font-weight: 700; margin-bottom: .4rem; letter-spacing: -.01em; }
+    .card p { font-size: .93rem; color: var(--text-muted); }
+
+    .facts { max-width: 640px; margin: 0 auto; display: grid; gap: .8rem; list-style: none; }
+    .facts li {
+      display: flex; gap: .8rem; align-items: flex-start;
+      background: #fff; border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 1rem 1.2rem;
+    }
+    .facts .ic { color: var(--primary); margin-top: .3em; }
+    .facts strong { display: block; }
+    .facts span { color: var(--text-muted); font-size: .93rem; }
+
+    /* ===== FINAL CTA ===== */
+    .final {
+      background: linear-gradient(135deg, var(--primary-d), var(--primary));
+      color: #fff; border-radius: 16px; padding: 3rem 1.5rem; text-align: center;
+    }
+    .final h2 { font-size: clamp(1.5rem, 3.4vw, 2.1rem); letter-spacing: -.02em; font-weight: 800; line-height: 1.2; margin-bottom: .7rem; }
+    .final p { color: rgba(255,255,255,.88); max-width: 52ch; margin: 0 auto 1.6rem; }
+    .final .btn-primary { background: #fff; color: var(--primary-d); box-shadow: 0 4px 16px rgba(15,23,42,.2); }
+    .final .more { margin: 1rem 0 0; font-size: .88rem; }
+    .final .more a { color: #fff; font-weight: 600; }
+
+    /* ===== FOOTER ===== */
+    footer { border-top: 1px solid var(--border); padding: 2rem 0; font-size: .87rem; color: var(--text-muted); }
+    .foot-inner { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    footer a { color: var(--text-muted); text-decoration: none; }
+    footer a:hover { color: var(--text); text-decoration: underline; }
+
+    @media (max-width: 640px) {
+      .hero { padding: 2.8rem 0 1.6rem; }
+      section { padding: 2.5rem 0; }
+      .nav-inner { padding: .7rem 1rem; gap: .4rem; }
+      .brand { font-size: 1.05rem; }
+      .nav-anchor { display: none; }
+      .nav-inner .btn { padding: .5rem .85rem; font-size: .88rem; }
+      .plan { padding: 1.4rem; }
+      .plan .tag { min-height: 0; }
+    }
+    @media (max-width: 359px) {
+      .nav-login { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Icons: Font Awesome Free 6.4.0 by @fontawesome, https://fontawesome.com/license/free
+       (icons CC BY 4.0). Inlined so the page loads no icon font. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="i-receipt" viewBox="0 0 384 512"><path d="M14 2.2C22.5-1.7 32.5-.3 39.6 5.8L80 40.4 120.4 5.8c9-7.7 22.3-7.7 31.2 0L192 40.4 232.4 5.8c9-7.7 22.3-7.7 31.2 0L304 40.4 344.4 5.8c7.1-6.1 17.1-7.5 25.6-3.6s14 12.4 14 21.8V488c0 9.4-5.5 17.9-14 21.8s-18.5 2.5-25.6-3.6L304 471.6l-40.4 34.6c-9 7.7-22.3 7.7-31.2 0L192 471.6l-40.4 34.6c-9 7.7-22.3 7.7-31.2 0L80 471.6 39.6 506.2c-7.1 6.1-17.1 7.5-25.6 3.6S0 497.4 0 488V24C0 14.6 5.5 6.1 14 2.2zM96 144c-8.8 0-16 7.2-16 16s7.2 16 16 16H288c8.8 0 16-7.2 16-16s-7.2-16-16-16H96zM80 352c0 8.8 7.2 16 16 16H288c8.8 0 16-7.2 16-16s-7.2-16-16-16H96c-8.8 0-16 7.2-16 16zM96 240c-8.8 0-16 7.2-16 16s7.2 16 16 16H288c8.8 0 16-7.2 16-16s-7.2-16-16-16H96z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 448 512"><path d="M438.6 105.4c12.5 12.5 12.5 32.8 0 45.3l-256 256c-12.5 12.5-32.8 12.5-45.3 0l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L160 338.7 393.4 105.4c12.5-12.5 32.8-12.5 45.3 0z"/></symbol>
+  </svg>
+
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="/"><svg class="ic" style="width:.75em" aria-hidden="true" focusable="false"><use href="#i-receipt"/></svg> Foodnance</a>
+      <div class="nav-spacer"></div>
+      <a class="nav-link nav-anchor" href="/#features">Features</a>
+      <a class="nav-link nav-anchor" href="/#how">How it works</a>
+      <a class="nav-link nav-anchor" href="/pricing" aria-current="page">Pricing</a>
+      <a class="nav-link nav-anchor" href="/#faq">FAQ</a>
+      <a class="nav-link nav-login" href="/login">Log in</a>
+      <a class="btn btn-primary" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">Request access</a>
+    </div>
+  </header>
+
+  <main>
+  <!-- ══ HERO ══ -->
+  <div class="hero wrap">
+    <div class="eyebrow">Simple pricing</div>
+    <h1>Two plans. <span class="accent">Priced in Canadian dollars.</span></h1>
+    <p class="sub">Priced per location, per month, with no setup fee. You can see what Foodnance costs without booking a call.</p>
+  </div>
+
+  <!-- ══ PLANS ══ -->
+  <section style="padding-top:.8rem" aria-labelledby="plans-label">
+    <div class="wrap">
+      <h2 id="plans-label" style="position:absolute;left:-9999px">Plans and prices</h2>
+      <div class="plans">
+        <div class="plan">
+          <h2>Essentials</h2>
+          <p class="tag">Stop typing invoices. Know what every dish costs.</p>
+          <div class="price">$79 <span class="cur">CAD</span></div>
+          <div class="per">per location, per month</div>
+          <ul class="ticks">
+            <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> Invoice reading from a photo or PDF</li>
+            <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> Product and price history</li>
+            <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> Price-change alerts and supplier price comparison</li>
+            <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> Recipe and dish costing that updates itself</li>
+            <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> Monthly P&amp;L</li>
+          </ul>
+          <a class="btn btn-ghost btn-lg" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">Request access</a>
+        </div>
+
+        <div class="plan">
+          <h2>Pro</h2>
+          <p class="tag">Everything in Essentials, plus what is on your shelves.</p>
+          <div class="price">$150 <span class="cur">CAD</span></div>
+          <div class="per">per location, per month</div>
+          <ul class="ticks">
+            <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> Everything in Essentials</li>
+            <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> Inventory, so you know what you have</li>
+            <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> Stock counts that show what a variance cost you</li>
+          </ul>
+          <a class="btn btn-primary btn-lg" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">Request access</a>
+        </div>
+      </div>
+      <p class="plans-note">All prices are in Canadian dollars. No setup fee on either plan.</p>
+    </div>
+  </section>
+
+  <!-- ══ THE DETAILS ══ -->
+  <section class="section-alt">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 class="section-title">The details</h2>
+        <p>What you pay, and nothing hidden behind it.</p>
+      </div>
+      <ul class="facts">
+        <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> <div><strong>Per location, per month</strong><span>Each kitchen you run is priced on its own.</span></div></li>
+        <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> <div><strong>In Canadian dollars</strong><span>The price is in CAD, so there is no exchange rate to work out.</span></div></li>
+        <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> <div><strong>No setup fee</strong><span>We don't charge to get you started.</span></div></li>
+        <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> <div><strong>Monthly or a year, same price</strong><span>The price is the same whether you pay month to month or commit for a year.</span></div></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ WHY THIS PRICE ══ -->
+  <section>
+    <div class="wrap">
+      <div class="section-head">
+        <h2 class="section-title">Why it is priced this way</h2>
+        <p>Four choices, and the reason behind each.</p>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <h3>Made for one kitchen, not a head office</h3>
+          <p>Many food cost tools are priced for restaurant groups, often with a setup fee and a price you only get after a sales call. Foodnance is for independent restaurants, bakeries and cafés, so the price is on this page.</p>
+        </div>
+        <div class="card">
+          <h3>You pay for inventory only if you use it</h3>
+          <p>Reading invoices and costing your recipes is what most kitchens need first. Counting stock is extra work for your team, so it sits in Pro instead of being built into everyone's price.</p>
+        </div>
+        <div class="card">
+          <h3>One price, no tricks</h3>
+          <p>No setup fee, and the same price whether you pay monthly or commit for a year. There is no discount to chase and nothing to work out.</p>
+        </div>
+        <div class="card">
+          <h3>Canadian dollars, Canadian kitchens</h3>
+          <p>Foodnance was built by a Canadian restaurant manager for Canadian independents, and it is priced the way you already do your books: in CAD.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ HOW IT IS DIFFERENT ══ -->
+  <section class="section-alt">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 class="section-title">How Foodnance is different</h2>
+        <p>Compared with a spreadsheet, and with tools built for bigger businesses.</p>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <h3>Invoice in, costs out</h3>
+          <p>With a spreadsheet, you re-type prices from every invoice and update each recipe yourself. With Foodnance you photograph the invoice, and your recipe costs, dish margins and P&amp;L update automatically.</p>
+        </div>
+        <div class="card">
+          <h3>You check it before it counts</h3>
+          <p>The AI reads each line, and it can make mistakes. Every invoice waits for someone at your kitchen to check and confirm it, and nothing counts toward your costs until you do.</p>
+        </div>
+        <div class="card">
+          <h3>Built by someone who ran the kitchen</h3>
+          <p>Foodnance comes from a restaurant manager with over ten years of kitchen experience, and customer feature requests are welcome.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ FINAL CTA ══ -->
+  <section>
+    <div class="wrap">
+      <div class="final">
+        <h2>Find out what your food actually costs</h2>
+        <p>We're onboarding the first businesses now, hands-on. Tell us a little about your operation and we'll set you up.</p>
+        <a class="btn btn-primary btn-lg" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">Request access</a>
+        <p class="more">Questions first? <a href="/#faq">Read the FAQ</a></p>
+      </div>
+    </div>
+  </section>
+  </main>
+
+  <footer>
+    <div class="wrap foot-inner">
+      <a class="brand" href="/" style="font-size:1rem"><svg class="ic" style="width:.75em" aria-hidden="true" focusable="false"><use href="#i-receipt"/></svg> Foodnance</a>
+      <div class="nav-spacer"></div>
+      <span>&copy; 2026 Foodnance</span>
+      <a href="/">Home</a>
+      <a href="/login">Log in</a>
+      <a href="mailto:hello@foodnance.com">Contact</a>
+    </div>
+  </footer>
+
+  <script src="/static/env-banner.js?v=20260807-2"></script>
+</body>
+</html>

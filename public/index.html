@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <!-- Held out of search on purpose while the landing page is finished:
        foodnance.com is live and reachable, but not yet announced to Google.
-       TO LAUNCH: delete the robots meta line below, restore the Sitemap line
+       TO LAUNCH: delete the robots meta line below (and the one in pricing.html), restore the Sitemap line
        in robots.txt, then submit the site in Search Console. Canonical,
        og:url and the structured-data ids already use the bare domain; the
        pages.dev host is an unredirected duplicate, which canonical is what
@@ -120,6 +120,14 @@
             "acceptedAnswer": {
               "@type": "Answer",
               "text": "<p>Foodnance is for independent restaurants, bakeries, cafés and commissaries in Canada. It suits businesses that buy from several suppliers, where prices change often and working out the true cost of each dish by hand takes too much time. It is not designed for large chains.</p>"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How much does Foodnance cost?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "<p>Foodnance has two plans, priced in Canadian dollars per location per month, with no setup fee. Essentials is $79 a month and covers invoice reading, price history and price-change alerts, recipe and dish costing, and a monthly P&amp;L. Pro is $150 a month and adds inventory and stock counts. The price is the same whether you pay monthly or commit for a year.</p><p><a href=\"https://foodnance.com/pricing\">See the full pricing details</a>.</p>"
             }
           },
           {
@@ -430,6 +438,8 @@
     .faq-answer { padding: 0 1.2rem 1.1rem; color: var(--text-muted); font-size: .95rem; }
     .faq-answer p + p, .faq-answer p + ul, .faq-answer ul + p { margin-top: .7rem; }
     .faq-answer ul { padding-left: 1.3rem; }
+    .faq-answer a { color: var(--primary); font-weight: 600; text-decoration: none; }
+    .faq-answer a:hover { text-decoration: underline; }
 
     /* ===== FINAL CTA ===== */
     .final {
@@ -499,6 +509,7 @@
       <div class="nav-spacer"></div>
       <a class="nav-link nav-anchor" href="#features">Features</a>
       <a class="nav-link nav-anchor" href="#how">How it works</a>
+      <a class="nav-link nav-anchor" href="/pricing">Pricing</a>
       <a class="nav-link nav-anchor" href="#faq">FAQ</a>
       <a class="nav-link nav-login" href="/login">Log in</a>
       <a class="btn btn-primary" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
@@ -725,6 +736,13 @@
           </div>
         </details>
         <details class="faq-item">
+          <summary>How much does Foodnance cost?</summary>
+          <div class="faq-answer">
+            <p>Foodnance has two plans, priced in Canadian dollars per location per month, with no setup fee. Essentials is $79 a month and covers invoice reading, price history and price-change alerts, recipe and dish costing, and a monthly P&amp;L. Pro is $150 a month and adds inventory and stock counts. The price is the same whether you pay monthly or commit for a year.</p>
+            <p><a href="/pricing">See the full pricing details</a>.</p>
+          </div>
+        </details>
+        <details class="faq-item">
           <summary>How is Foodnance different from a spreadsheet or competitor software like MarginEdge?</summary>
           <div class="faq-answer">
             <p>With a spreadsheet, you re-type prices from every invoice and update each recipe yourself. With Foodnance, you photograph the invoice, check the lines it read, and your recipe costs update automatically, so you can see when a dish gets more expensive.</p>
@@ -798,6 +816,7 @@
       <a class="brand" href="#top" style="font-size:1rem"><svg class="ic" style="width:.75em" aria-hidden="true" focusable="false"><use href="#i-receipt"/></svg> Foodnance</a>
       <div class="nav-spacer"></div>
       <span>&copy; 2026 Foodnance</span>
+      <a href="/pricing">Pricing</a>
       <a href="/login">Log in</a>
       <a href="mailto:hello@foodnance.com">Contact</a>
     </div>
