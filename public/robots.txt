@@ -6,7 +6,7 @@
 # robots.txt can never see the noindex, and would keep any URL it already knew.
 # There is deliberately no Sitemap line, so nothing invites crawlers in.
 #
-# TO LAUNCH: delete the `noindex` meta line in index.html, add back
+# TO LAUNCH: delete the `noindex` meta line in index.html AND pricing.html, add back
 #   Sitemap: https://foodnance.com/sitemap.xml
 # at the bottom of this file, then submit the site in Search Console.
 #

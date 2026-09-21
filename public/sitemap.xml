@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Only the public marketing page belongs here. App pages are noindex and
+  Only the public marketing pages belong here. App pages are noindex and
   Disallow-ed in robots.txt, so listing them would send mixed signals.
 
-  Refresh <lastmod> whenever the page's content materially changes.
-  Note the URL is extensionless — Cloudflare Pages 308s /index.html to /,
-  so / is the canonical form and must be what appears here.
+  Refresh <lastmod> whenever a page's content materially changes.
+  Note the URLs are extensionless — Cloudflare Pages 308s /index.html to /
+  and /pricing.html to /pricing, so those are the canonical forms and must be
+  what appears here.
 -->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
@@ -13,5 +14,11 @@
     <lastmod>2026-09-21</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://foodnance.com/pricing</loc>
+    <lastmod>2026-09-21</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
   </url>
 </urlset>
