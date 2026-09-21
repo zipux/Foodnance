@@ -126,6 +126,10 @@ t.check('every Pro feature the server lists has a customer-facing label',
   [...(src.match(/const PRO_FEATURES = \[([^\]]*)\]/) || [, ''])[1].matchAll(/'([a-z_]+)'/g)]
     .every(m => new RegExp(`\\b${m[1]}:\\s*'`).test(js)));
 t.check('a customer at their limit is offered a way to ask, not a dead end', /Ask to raise your limit/.test(js));
+// Found on staging: one button said "Ask about Pro" but its email was titled "Raise my invoice limit".
+t.check('each button says what its email will say (raise-limit button ↔ raise-limit subject, Pro button ↔ upgrade subject)',
+  /mail\('Raise my invoice limit'\)[^>]*>\s*<i[^>]*><\/i>\s*Ask to raise your limit/.test(js) &&
+  /mail\('Upgrade to Pro'\)[^>]*>\s*<i[^>]*><\/i>\s*Ask about Pro/.test(js));
 
 t.section('housekeeping');
 const migrations = readdirSync(join(ROOT, 'migrations')).filter(f => f.endsWith('.sql')).sort();

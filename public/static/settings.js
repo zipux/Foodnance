@@ -78,20 +78,27 @@ async function loadPlan() {
         <div class="team-sub">No monthly limit on your plan.</div>`;
     }
 
+    const atCap = cap > 0 && used >= cap;
+    const mail = (subject) => 'mailto:hello@foodnance.com?subject=' + encodeURIComponent(subject);
     const features = (p.pro_features || []).map(f => PRO_FEATURE_LABELS[f]).filter(Boolean);
-    const mailto = 'mailto:hello@foodnance.com?subject=' + encodeURIComponent(
-      cap > 0 && used >= cap ? 'Raise my invoice limit' : 'Upgrade to Pro');
+    // Two separate asks, each with a button that says what the email will say:
+    // more reads on this plan, or the plan that has no monthly limit.
+    const raise = atCap ? `
+      <div class="upsell">
+        <strong>Need more reads this month?</strong>
+        <div style="margin-top:.6rem"><a class="btn btn-primary" href="${mail('Raise my invoice limit')}"><i class="fas fa-envelope"></i> Ask to raise your limit</a></div>
+      </div>` : '';
     const upsell = features.length ? `
       <div class="upsell">
         <strong>Pro also adds</strong>
         <ul>${features.map(f => `<li>${esc(f)}</li>`).join('')}</ul>
-        <a class="btn btn-primary" href="${mailto}"><i class="fas fa-envelope"></i> Ask about Pro</a>
-      </div>` : (cap > 0 && used >= cap ? `
-      <div class="upsell"><a class="btn btn-primary" href="${mailto}"><i class="fas fa-envelope"></i> Ask to raise your limit</a></div>` : '');
+        <a class="btn ${atCap ? 'btn-ghost' : 'btn-primary'}" href="${mail('Upgrade to Pro')}"><i class="fas fa-envelope"></i> Ask about Pro</a>
+      </div>` : '';
 
     body.innerHTML = `
       <div class="plan-head"><span class="plan-badge">${esc(p.label)}</span><span class="team-sub">Your current plan</span></div>
       ${usage}
+      ${raise}
       ${upsell}`;
   } catch (e) {
     // A super-admin with no restaurant selected has nothing to show; anything
