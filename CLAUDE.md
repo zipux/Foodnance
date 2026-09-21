@@ -341,6 +341,18 @@ showing a control that is then hidden is recoverable where the reverse is not.
 Presentation only, with the same limit as plan gating.
 `tests/account-type-gating.test.mjs` pins the whole matrix.
 
+**Nav tabs are hidden before first paint, from a remembered list** (`static/nav-gate.js`,
+loaded synchronously in every app page's `<head>`). Each page is its own document with
+the full nav in its HTML, and the plan is only learnt from `/api/auth/me` — so without
+this an Essential customer saw the Pro tabs flash on every click. `utils.js` writes the
+feature list to `localStorage['dm_nav_features']` after each `/me` (login.html seeds it
+too, sign-out clears it); the head script injects a `<style>` hiding the matching links;
+`applyPlanGating()` removes that style when the server answers, so the server always
+wins. It **fails open** (nothing remembered or unreadable = every tab shows). Its list of
+gated paths must equal `PLAN_GATED_PAGES` in utils.js (`tests/nav-gate.test.mjs`). Nav
+links only: a gated page reached by URL still swaps in its upgrade panel after `/me`.
+Adding a nav page means adding the `<script>` line to its `<head>` (the test checks).
+
 ### Product categories
 Categories are **free-text** on `generic_products.category`. The managed master list is the **`categories` table** (migration `0018`, same shape as `units`: `id`/`name`/`sort_order`, integer PK), edited through the **Manage Categories** modal (`public/static/utils.js`, mirrors Manage Units) and picked in the product form, with "+ New category…" for inline adds. Deleting one only removes it from the picker — products keep their label (the DELETE is usage-checked, `?force=true` to override).
 

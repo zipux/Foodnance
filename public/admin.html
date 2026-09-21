@@ -186,6 +186,7 @@
     .gate { max-width: 420px; margin: 4rem auto; text-align: center; }
     .gate a { color: var(--primary); }
   </style>
+  <script src="/static/nav-gate.js?v=20260921-1"></script>
 </head>
 <body>
 
@@ -357,6 +358,7 @@
 
     $('logoutBtn').addEventListener('click', async () => {
       await fetch('/api/auth/logout', { method: 'POST' });
+      if (typeof dmNavForget === 'function') dmNavForget();
       location.href = '/login';
     });
 

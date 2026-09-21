@@ -143,6 +143,10 @@ function applySuspensionGating() {
 function applyPlanGating(me) {
   const features = new Set(me.features || []);
 
+  // The server has answered, so the provisional hiding nav-gate.js did from this
+  // browser's memory is no longer needed: drop it and apply the real list below.
+  if (typeof dmNavDropProvisional === 'function') dmNavDropProvisional();
+
   document.querySelectorAll('.nav-links a[href]').forEach(a => {
     const gate = PLAN_GATED_PAGES[_planPagePath(a.getAttribute('href'))];
     if (gate && !features.has(gate.feature)) a.style.display = 'none';
@@ -338,6 +342,9 @@ async function renderSessionChip() {
   // in flight is FALSE, not "show it": a control shown then hidden is
   // recoverable, but a cost figure shown then hidden has already been read.
   window.__isSuperAdmin = me.is_super_admin === true;
+  // Remember which tabs this plan has, so the NEXT page load hides the rest
+  // before it is drawn (nav-gate.js) instead of flashing them.
+  if (typeof dmNavRemember === 'function') dmNavRemember(me);
   window.dispatchEvent(new CustomEvent('dm:plan-known', { detail: window.__accountPlan }));
   if (me.suspended) {
     renderSuspendedBar(me.suspend_reason);
@@ -384,6 +391,7 @@ async function renderSessionChip() {
     try {
       const r = await fetch('/api/auth/logout', { method: 'POST' });
       if (!r.ok) throw new Error('logout failed');
+      if (typeof dmNavForget === 'function') dmNavForget();
       location.href = '/login';
     } catch (_) {
       delete signOut.dataset.busy;
