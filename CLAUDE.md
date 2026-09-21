@@ -92,13 +92,24 @@ credential against production. Staging has had its own `ANTHROPIC_API_KEY` since
 2026-08-08, verified end-to-end with a live `parse-recipe` call — so parses there
 spend real money (~$0.15 an invoice).
 
-Each environment should hold exactly `ANTHROPIC_API_KEY` + `SESSION_SECRET`
+Each environment should hold `ANTHROPIC_API_KEY` + `SESSION_SECRET` (plus `RESEND_API_KEY` once email is set up)
 (preview also carries `APP_ENV`, managed from `wrangler.jsonc`). **Editing a
 dashboard row renames it**, so adding a key by editing the existing row replaces
 `SESSION_SECRET` instead of adding beside it — that happened on 2026-08-08 and
 would have locked everyone out of staging at the next deploy, invisibly, because
 the live deployment kept serving the secrets it was built with. After any secret
 change, `secret list` and check the whole set, not just the one you touched.
+
+**Email (Resend) — optional, added 2026-09-21.** `RESEND_API_KEY` is a third,
+*optional* secret. It sends exactly one message today: the owner-invite email from
+**Add a restaurant** (`sendOwnerInviteEmail`). Sender is `MAIL_FROM` (default
+`Foodnance <hello@foodnance.com>`; the domain must be verified in Resend), links use
+`PUBLIC_URL` (production var, so they never point at pages.dev; unset on staging so
+staging links stay on staging; add `PUBLIC_URL=http://localhost:3000` to `.dev.vars`
+for local runs). **With no key nothing breaks**: the organization and invite are
+still created and the API returns `invite_url` for the operator to send by hand —
+the link comes back **only** when the email failed. Like every Pages secret it binds
+at deploy time, so redeploy after `wrangler pages secret put RESEND_API_KEY`.
 
 **Pages binds secrets at DEPLOY time, not runtime** — setting one does nothing to
 already-live deployments; ship a new deployment after. This has caused two

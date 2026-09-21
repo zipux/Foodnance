@@ -12,7 +12,11 @@
 	// but the literal "staging" means production, so the banner can never appear
 	// over live data by accident.
 	"vars": {
-		"APP_ENV": "production"
+		"APP_ENV": "production",
+		// Origin used in emailed links (owner invites), so they can never point at
+		// the pages.dev duplicate. Deliberately NOT set under env.preview: there the
+		// request's own origin is used, which keeps staging links on staging.
+		"PUBLIC_URL": "https://foodnance.com"
 	},
 	"d1_databases": [
 		{

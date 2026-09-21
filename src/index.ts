@@ -12,6 +12,16 @@ type Bindings = {
   // the banner on staging (harmless: you stay careful) and never show a
   // "safe to break" banner over live customer data.
   APP_ENV?: string
+  // Transactional email through Resend (https://resend.com). All optional: with
+  // no RESEND_API_KEY the app still works and the super-admin is handed the
+  // invite link to send by hand, so a missing key can never block onboarding.
+  RESEND_API_KEY?: string       // secret — per environment, like ANTHROPIC_API_KEY
+  MAIL_FROM?: string            // e.g. 'Foodnance <hello@foodnance.com>' — the domain must be verified in Resend
+  MAIL_REPLY_TO?: string        // where a customer's reply lands
+  // Origin used in links we email out. Set on production only, so a link can't
+  // point at the pages.dev duplicate; anywhere it is unset the request's own
+  // origin is used, which keeps staging links on staging.
+  PUBLIC_URL?: string
 }
 
 const app = new Hono<{ Bindings: Bindings; Variables: { user: SessionUser } }>()
@@ -1009,15 +1019,16 @@ app.post('/api/inventory/:id/adjust', async (c) => {
 // ══════════════════════════════════════════════════════════════
 // AUTH ROUTES  (declared before the generic CRUD — Hono matches in order)
 // ══════════════════════════════════════════════════════════════
-// There is deliberately NO signup endpoint. Accounts are created by the
+// There is deliberately NO open signup endpoint. Accounts are created by the
 // super-admin on /api/admin/organizations after an actual conversation with
-// the customer — see the accounts plan. That removes the whole email
-// dependency: no verification mail, no password-reset mail, no bot defence.
+// the customer — see the accounts plan. That removes verification mail and bot
+// defence entirely.
 //
-// The one exception is invite acceptance (below, near /api/team) — an owner
-// generates a copy-link inside their own account and shares it however they
-// like, so the "account-creating" endpoint is reachable only via a token an
-// authenticated owner chose to hand out, not by anyone who finds the URL.
+// The one exception is invite acceptance (below, near /api/team): the endpoint
+// that creates a user is reachable only via an unguessable single-use token —
+// one an owner copied out of their own Settings page, or one the super-admin's
+// "Add a restaurant" emailed to the new owner (sendOwnerInviteEmail). Email is
+// used for that one message; there is still no verification or reset mail.
 
 const MIN_PASSWORD_LEN = 8
 
@@ -1377,10 +1388,17 @@ app.post('/api/auth/accept-invite', async (c) => {
   // Re-validate for real — the client's earlier /api/invites/lookup call is
   // not trusted, it only shaped the form.
   const invite = await c.env.DB.prepare(
-    `SELECT id, org_id FROM invites WHERE token = ? AND accepted_at IS NULL
+    `SELECT id, org_id, email FROM invites WHERE token = ? AND accepted_at IS NULL
        AND (expires_at IS NULL OR expires_at > datetime('now'))`,
-  ).bind(token).first<{ id: string; org_id: string }>()
+  ).bind(token).first<{ id: string; org_id: string; email: string }>()
   if (!invite) return invalid()
+
+  // A link that was emailed to someone is for that address. Without this, whoever
+  // gets hold of the link (forwarded mail, a shared inbox) could register any
+  // other address as the account's owner.
+  if (invite.email && email !== normalizeEmail(invite.email)) {
+    return c.json({ error: 'Please use the email address this invite was sent to.' }, 400)
+  }
 
   if (!email.includes('@')) return c.json({ error: 'A valid email is required.' }, 400)
   if (password.length < MIN_PASSWORD_LEN) {
@@ -1481,6 +1499,14 @@ app.get('/api/admin/organizations', async (c) => {
             (SELECT COUNT(*) FROM users u WHERE u.org_id = o.id AND u.archived_at IS NULL) AS user_count,
             (SELECT email FROM users u WHERE u.org_id = o.id AND u.role = 'owner'
               ORDER BY u.created_at LIMIT 1) AS owner_email,
+            -- An owner who was emailed a link but hasn't chosen a password yet has
+            -- no users row, so without these the account would show no owner at
+            -- all. Latest unaccepted invite; "expired" so the row can offer Resend.
+            (SELECT i.email FROM invites i WHERE i.org_id = o.id AND i.accepted_at IS NULL
+              ORDER BY i.created_at DESC LIMIT 1) AS pending_invite_email,
+            (SELECT (i.expires_at IS NOT NULL AND i.expires_at <= datetime('now'))
+               FROM invites i WHERE i.org_id = o.id AND i.accepted_at IS NULL
+              ORDER BY i.created_at DESC LIMIT 1) AS pending_invite_expired,
             -- Anthropic spend, from the per-call log rather than from invoices:
             -- a parse the customer abandoned still cost money, and a multi-page
             -- invoice is several calls. Voided invoices are likewise still
@@ -1598,18 +1624,102 @@ app.post('/api/admin/invoices/:id/reviewed', async (c) => {
   return c.json({ id, checked: !!checked, reviewed_by: reviewedBy, reviewed_at: reviewedAt })
 })
 
+// ── Outbound email ────────────────────────────────────────────
+// One HTTP call to Resend (Workers can't open SMTP sockets). Never throws: the
+// callers have already written their rows, and a mail outage must not undo an
+// account or hide it from the operator — they get {ok:false} and fall back to
+// handing over the link.
+async function sendEmail(
+  env: Bindings,
+  msg: { to: string; subject: string; html: string; text: string },
+): Promise<{ ok: boolean; error?: string }> {
+  if (!env.RESEND_API_KEY) return { ok: false, error: 'Email is not set up yet (no RESEND_API_KEY).' }
+  try {
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${env.RESEND_API_KEY}` },
+      body: JSON.stringify({
+        from: env.MAIL_FROM || 'Foodnance <hello@foodnance.com>',
+        to: [msg.to],
+        subject: msg.subject,
+        html: msg.html,
+        text: msg.text,
+        ...(env.MAIL_REPLY_TO ? { reply_to: env.MAIL_REPLY_TO } : {}),
+      }),
+      signal: AbortSignal.timeout(8000),
+    })
+    if (r.ok) return { ok: true }
+    const detail = await r.json().catch(() => ({})) as { message?: string }
+    return { ok: false, error: detail.message || `Email provider answered ${r.status}.` }
+  } catch (_) {
+    return { ok: false, error: 'Could not reach the email provider.' }
+  }
+}
+
+function escHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+const INVITE_DAYS = 7
+
+function inviteUrl(c: any, token: string): string {
+  const base = String(c.env.PUBLIC_URL || new URL(c.req.url).origin).replace(/\/+$/, '')
+  return `${base}/accept-invite?token=${token}`
+}
+
+// The customer's first contact with the product, so it says plainly who it is
+// from, what the link does, and that nobody else ever sees the password.
+function sendOwnerInviteEmail(env: Bindings, to: string, ownerName: string, orgName: string, url: string) {
+  const hello = ownerName ? `Hi ${ownerName},` : 'Hi,'
+  const text =
+`${hello}
+
+Your Foodnance account for ${orgName} is ready.
+
+Choose your password here:
+${url}
+
+The link works once and expires in ${INVITE_DAYS} days. You pick the password yourself, so nobody at Foodnance ever sees it.
+
+If you weren't expecting this, you can ignore this email.
+
+Foodnance`
+  const html =
+`<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:480px;margin:0 auto;color:#1e293b;line-height:1.55">
+  <p>${escHtml(hello)}</p>
+  <p>Your Foodnance account for <strong>${escHtml(orgName)}</strong> is ready.</p>
+  <p style="margin:1.6rem 0"><a href="${escHtml(url)}" style="background:#4f46e5;color:#fff;text-decoration:none;font-weight:600;padding:.8rem 1.4rem;border-radius:8px;display:inline-block">Choose your password</a></p>
+  <p style="font-size:.9rem;color:#64748b">The link works once and expires in ${INVITE_DAYS} days. You pick the password yourself, so nobody at Foodnance ever sees it.</p>
+  <p style="font-size:.9rem;color:#64748b">Button not working? Paste this into your browser:<br><span style="word-break:break-all">${escHtml(url)}</span></p>
+  <p style="font-size:.9rem;color:#64748b">If you weren't expecting this, you can ignore this email.</p>
+</div>`
+  return sendEmail(env, { to, subject: `Set up your Foodnance account for ${orgName}`, html, text })
+}
+
+// POST /api/admin/organizations
+//   { name, owner_email, owner_name?, account_type? }        → emails the owner an invite
+//   { ..., owner_password }                                  → legacy: sets the password for them
+//
+// Without a password the owner is EMAILED a single-use link and chooses their
+// own, so the operator never knows or transmits it. The organization row exists
+// immediately — it shows in the admin list and can be opened with View at once —
+// but the owner's `users` row is created only when they accept, so an unopened
+// invite leaves no half-usable login behind (users.password_hash is NOT NULL).
 app.post('/api/admin/organizations', async (c) => {
-  if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)
+  const me = await requireSuperAdmin(c)
+  if (!me) return c.json({ error: 'Not authorized.' }, 403)
 
   const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
   const name = String(body.name || '').trim()
+  const ownerName = String(body.owner_name || '').trim()
   const email = normalizeEmail(body.owner_email)
   const password = String(body.owner_password || '')
+  const inviting = password === ''
   const accountType = String(body.account_type || 'restaurant')
 
   if (!name) return c.json({ error: 'Restaurant name is required.' }, 400)
   if (!email.includes('@')) return c.json({ error: 'A valid owner email is required.' }, 400)
-  if (password.length < MIN_PASSWORD_LEN) {
+  if (!inviting && password.length < MIN_PASSWORD_LEN) {
     return c.json({ error: `Password must be at least ${MIN_PASSWORD_LEN} characters.` }, 400)
   }
   if (!['restaurant', 'commissary'].includes(accountType)) {
@@ -1621,8 +1731,8 @@ app.post('/api/admin/organizations', async (c) => {
 
   const orgId = uid()
   const userId = uid()
-  const salt = randomHex(16)
-  const hash = await hashPassword(password, salt)
+  const inviteId = uid()
+  const token = randomHex(32)
 
   // A commissary is sold one tier — Production — which is the Pro feature set.
   // Set it here rather than leaving the column default: an Essential commissary
@@ -1631,15 +1741,28 @@ app.post('/api/admin/organizations', async (c) => {
   // then count, adjust or reconcile. See planLabel().
   const plan = accountType === 'commissary' ? 'pro' : 'essential'
 
+  // The owner's way in: either a ready-made login (legacy) or an invite.
+  let ownerStatement: D1PreparedStatement
+  if (inviting) {
+    ownerStatement = c.env.DB.prepare(
+      `INSERT INTO invites (id, org_id, email, name, role, token, created_by, expires_at)
+       VALUES (?, ?, ?, ?, 'owner', ?, ?, datetime('now', '+${INVITE_DAYS} days'))`,
+    ).bind(inviteId, orgId, email, ownerName, token, me.id)
+  } else {
+    const salt = randomHex(16)
+    const hash = await hashPassword(password, salt)
+    ownerStatement = c.env.DB.prepare(
+      `INSERT INTO users (id, org_id, email, password_hash, password_salt, password_iter, role, name)
+       VALUES (?, ?, ?, ?, ?, ?, 'owner', ?)`,
+    ).bind(userId, orgId, email, hash, salt, PBKDF2_ITERATIONS, ownerName)
+  }
+
   // All inserts in one batch so a failure can't leave an organization with
-  // no owner (D1 runs a batch as a transaction).
+  // no owner or invite (D1 runs a batch as a transaction).
   await c.env.DB.batch([
     c.env.DB.prepare(`INSERT INTO organizations (id, name, account_type, plan) VALUES (?, ?, ?, ?)`)
       .bind(orgId, name, accountType, plan),
-    c.env.DB.prepare(
-      `INSERT INTO users (id, org_id, email, password_hash, password_salt, password_iter, role, name)
-       VALUES (?, ?, ?, ?, ?, ?, 'owner', ?)`,
-    ).bind(userId, orgId, email, hash, salt, PBKDF2_ITERATIONS, String(body.owner_name || '')),
+    ownerStatement,
     // Seed the unit master list. /api/tables/units is strictly org-scoped with
     // no fallback to the NULL-org rows, so without this a brand-new account has
     // an empty unit picker — which first bites during invoice import, exactly
@@ -1655,10 +1778,72 @@ app.post('/api/admin/organizations', async (c) => {
         .bind(cat.name, i + 1, cat.type, orgId)),
   ])
 
-  return c.json({ ok: true,
-                  organization: { id: orgId, name, account_type: accountType, plan,
-                                  plan_label: planLabel(plan, accountType) },
-                  owner: { id: userId, email } })
+  const organization = { id: orgId, name, account_type: accountType, plan,
+                         plan_label: planLabel(plan, accountType) }
+
+  if (!inviting) return c.json({ ok: true, organization, owner: { id: userId, email } })
+
+  // The account exists whatever happens next. Only when the email did NOT go
+  // out is the link returned, so the operator can send it by hand; when it did,
+  // the link stays in the customer's inbox and nowhere else.
+  const url = inviteUrl(c, token)
+  const sent = await sendOwnerInviteEmail(c.env, email, ownerName, name, url)
+  return c.json({
+    ok: true, organization, invited: { email },
+    email_sent: sent.ok,
+    ...(sent.ok ? {} : { email_error: sent.error, invite_url: url }),
+  }, 201)
+})
+
+// POST /api/admin/organizations/:id/resend-invite   { email? }
+//
+// For an account whose owner hasn't accepted yet: the link expired, the mail
+// landed in spam, or the address had a typo (pass a corrected `email`). Any
+// older link is revoked first so only the newest one works. Refused once
+// somebody has signed up — from then on the recovery path is Reset.
+app.post('/api/admin/organizations/:id/resend-invite', async (c) => {
+  const me = await requireSuperAdmin(c)
+  if (!me) return c.json({ error: 'Not authorized.' }, 403)
+  const id = c.req.param('id')
+
+  const org = await c.env.DB.prepare(`SELECT id, name, archived_at FROM organizations WHERE id = ?`)
+    .bind(id).first<{ id: string; name: string; archived_at: string | null }>()
+  if (!org) return c.json({ error: 'Restaurant not found.' }, 404)
+  if (org.archived_at) return c.json({ error: 'This account is closed.' }, 409)
+
+  const active = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM users WHERE org_id = ? AND archived_at IS NULL`,
+  ).bind(id).first<{ n: number }>()
+  if (active && active.n > 0) {
+    return c.json({ error: 'This restaurant already has a login. Use Reset if they are locked out.' }, 409)
+  }
+
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const previous = await c.env.DB.prepare(
+    `SELECT email, name FROM invites WHERE org_id = ? AND accepted_at IS NULL ORDER BY created_at DESC LIMIT 1`,
+  ).bind(id).first<{ email: string; name: string }>()
+
+  const email = normalizeEmail(body.email || previous?.email)
+  if (!email.includes('@')) return c.json({ error: 'A valid owner email is required.' }, 400)
+  const clash = await c.env.DB.prepare(`SELECT id FROM users WHERE email = ?`).bind(email).first()
+  if (clash) return c.json({ error: 'That email already has an account.' }, 409)
+
+  const ownerName = previous?.name || ''
+  const token = randomHex(32)
+  await c.env.DB.batch([
+    c.env.DB.prepare(`DELETE FROM invites WHERE org_id = ? AND accepted_at IS NULL`).bind(id),
+    c.env.DB.prepare(
+      `INSERT INTO invites (id, org_id, email, name, role, token, created_by, expires_at)
+       VALUES (?, ?, ?, ?, 'owner', ?, ?, datetime('now', '+${INVITE_DAYS} days'))`,
+    ).bind(uid(), id, email, ownerName, token, me.id),
+  ])
+
+  const url = inviteUrl(c, token)
+  const sent = await sendOwnerInviteEmail(c.env, email, ownerName, org.name, url)
+  return c.json({
+    ok: true, invited: { email }, email_sent: sent.ok,
+    ...(sent.ok ? {} : { email_error: sent.error, invite_url: url }),
+  })
 })
 
 // ── Account lifecycle: suspend / restore / archive / purge ────

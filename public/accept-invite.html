@@ -179,7 +179,13 @@
         if (!r.ok) return showInvalid();
 
         document.getElementById('orgNameText').textContent = data.org_name || '';
-        if (data.email) document.getElementById('email').value = data.email;
+        // An invite sent to an address is for that address — the server enforces
+        // it, so lock the field rather than let them find out on submit.
+        if (data.email) {
+          const em = document.getElementById('email');
+          em.value = data.email;
+          em.readOnly = true;
+        }
         if (data.name)  document.getElementById('name').value  = data.name;
 
         loadingState.classList.add('hidden');

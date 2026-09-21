@@ -215,8 +215,9 @@
         <!-- ── Create a customer account ── -->
         <div class="card">
           <h2>Add a restaurant</h2>
-          <p class="lede">Creates the business and its owner login together. Give the owner
-             these details directly — the app never emails anyone.</p>
+          <p class="lede">Creates the business and emails the owner a link to choose their
+             own password. You never see or send the password. The restaurant appears in
+             the list below straight away, so you can open it with View before they sign up.</p>
 
           <div class="msg" id="formMsg"></div>
 
@@ -230,17 +231,8 @@
               <input type="text" id="ownerName" placeholder="Maria Rossi" />
             </div>
             <div class="field">
-              <label for="ownerEmail">Owner's email (this is their login)</label>
+              <label for="ownerEmail">Owner's email (the invite is sent here, and it becomes their login)</label>
               <input type="email" id="ownerEmail" required placeholder="maria@bellas.com" />
-            </div>
-            <div class="field">
-              <label for="ownerPassword">Temporary password</label>
-              <div class="row">
-                <input type="text" id="ownerPassword" required minlength="8" placeholder="at least 8 characters" />
-                <button type="button" class="btn btn-ghost" id="genPw" title="Generate a random password">
-                  <i class="fas fa-dice"></i> Generate
-                </button>
-              </div>
             </div>
             <div class="field">
               <label for="accountType">Type of business</label>
@@ -254,17 +246,18 @@
               <small class="hint" id="accountTypePlanHint"></small>
             </div>
             <button type="submit" class="btn btn-primary" id="createBtn">
-              <i class="fas fa-plus"></i> Create account
+              <i class="fas fa-paper-plane"></i> Create &amp; send invite
             </button>
           </form>
 
+          <!-- Only shown when the email could NOT be sent. Otherwise the link lives
+               in the customer's inbox and nowhere else. -->
           <div class="handoff" id="handoff" style="display:none">
-            <h3>Send these to the owner</h3>
+            <h3>Email not sent — send this link yourself</h3>
             <code id="handoffUrl"></code>
-            <code id="handoffEmail"></code>
-            <code id="handoffPw"></code>
             <div style="color:var(--text-muted);font-size:.8rem;margin-top:.4rem">
-              Shown once. The password can't be looked up later — only reset.
+              <span id="handoffWhy"></span> The link works once and expires in 7 days.
+              It only lets them choose a password — it isn't a password.
             </div>
           </div>
         </div>
@@ -368,17 +361,13 @@
     });
 
     // Readable random password — no ambiguous characters to misread over the
-    // phone (no O/0, l/1/I). Shared by the create form and the reset button.
+    // phone (no O/0, l/1/I). Used by the reset button.
     function randomPassword() {
       const alphabet = 'abcdefghijkmnpqrstuvwxyzACDEFGHJKLMNPQRSTUVWXYZ23456789';
       const bytes = new Uint8Array(14);
       crypto.getRandomValues(bytes);
       return [...bytes].map(b => alphabet[b % alphabet.length]).join('');
     }
-
-    $('genPw').addEventListener('click', () => {
-      $('ownerPassword').value = randomPassword();
-    });
 
     // Which plan the account will be created on. The server decides this from
     // the account type (a commissary is created on Production); this only says
@@ -397,14 +386,13 @@
       const btn = $('createBtn');
       const prev = btn.innerHTML;
       btn.disabled = true;
-      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating…';
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending…';
       $('handoff').style.display = 'none';
 
       const payload = {
         name:           $('name').value.trim(),
         owner_name:     $('ownerName').value.trim(),
         owner_email:    $('ownerEmail').value.trim(),
-        owner_password: $('ownerPassword').value,
         account_type:   $('accountType').value,
       };
 
@@ -417,11 +405,7 @@
         const data = await r.json().catch(() => ({}));
         if (!r.ok) { msg(data.error || 'Could not create the account.', 'bad'); return; }
 
-        msg(`${payload.name} created.`, 'ok');
-        $('handoffUrl').textContent   = location.origin + '/login';
-        $('handoffEmail').textContent = payload.owner_email;
-        $('handoffPw').textContent    = payload.owner_password;
-        $('handoff').style.display    = 'block';
+        showInviteResult(data, payload.name, payload.owner_email);
         $('orgForm').reset();
         syncPlanHint();   // reset() puts the type back to Restaurant
         loadOrgs();
@@ -432,6 +416,21 @@
         btn.innerHTML = prev;
       }
     });
+
+    // One place for "what happened to the invite", shared by Add and Resend.
+    // The link is only ever shown when the email failed; otherwise the customer
+    // is the only one who has it.
+    function showInviteResult(data, name, email) {
+      if (data.email_sent) {
+        msg(`${name}: invite emailed to ${email}. They choose their own password.`, 'ok');
+        $('handoff').style.display = 'none';
+        return;
+      }
+      msg(`${name} was created, but the email did not go out.`, 'bad');
+      $('handoffUrl').textContent = data.invite_url || '';
+      $('handoffWhy').textContent = data.email_error || '';
+      $('handoff').style.display  = 'block';
+    }
 
     // ── AI-usage date range ───────────────────────────────────
     // Only the cost/parse columns respond to this. Empty strings mean all time.
@@ -531,7 +530,7 @@
             <tbody>${rows.map(o => `
               <tr${o.archived_at ? ' style="opacity:.55"' : ''}>
                 <td><strong>${esc(o.name)}</strong></td>
-                <td class="owner">${esc(o.owner_email || '—')}</td>
+                <td class="owner">${ownerCell(o)}</td>
                 <td><span class="pill">${esc(o.account_type)}</span></td>
                 <td>${planPicker(o)}</td>
                 <td>${statusPill(o)}</td>
@@ -546,6 +545,12 @@
                           title="See their data — you stay signed in as yourself">
                     <i class="fas fa-eye"></i> View
                   </button>
+                  ${isPendingOwner(o) && !o.archived_at ? `
+                  <button class="btn btn-ghost" data-act="resend"
+                          data-id="${esc(o.id)}" data-name="${esc(o.name)}" data-email="${esc(o.pending_invite_email)}"
+                          title="Email them a fresh link — the old one stops working">
+                    <i class="fas fa-paper-plane"></i> Resend
+                  </button>` : ''}
                   ${o.owner_email ? `
                   <button class="btn btn-ghost" data-act="reset"
                           data-email="${esc(o.owner_email)}" data-name="${esc(o.name)}"
@@ -622,6 +627,7 @@
               case 'view':    return viewAs(d.id, d.name);
               case 'queue':   return viewAs(d.id, d.name, d.open ? `/invoices?open=${encodeURIComponent(d.open)}` : '/invoices');
               case 'reset':   return resetOwnerPw(d.email, d.name);
+              case 'resend':  return resendInvite(d.id, d.name, d.email);
               case 'suspend': return suspendOrg(d.id, d.name);
               case 'restore': return restoreOrg(d.id, d.name);
               case 'archive': return archiveOrg(d.id, d.name);
@@ -658,6 +664,26 @@
         });
         if (!r.ok) { msg('Could not switch view.', 'bad'); return; }
         location.href = dest || '/home';
+      } catch (_) {
+        msg('Could not reach the server.', 'bad');
+      }
+    }
+
+    // Fresh invite for an owner who never signed up. Offers the address so a typo
+    // can be fixed in the same step; the old link is revoked server-side.
+    async function resendInvite(orgId, orgName, currentEmail) {
+      const entered = prompt(`Send a new invite for ${orgName} to:`, currentEmail || '');
+      if (entered === null) return;
+      try {
+        const r = await fetch(`/api/admin/organizations/${encodeURIComponent(orgId)}/resend-invite`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ email: entered.trim() }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) { msg(data.error || 'Could not resend the invite.', 'bad'); return; }
+        showInviteResult(data, orgName, data.invited.email);
+        loadOrgs();
       } catch (_) {
         msg('Could not reach the server.', 'bad');
       }
@@ -711,7 +737,22 @@
         const why = o.suspend_reason ? ` title="${esc(o.suspend_reason)}"` : '';
         return `<span class="pill" style="background:#fee2e2;color:#991b1b"${why}>Paused</span>`;
       }
+      if (isPendingOwner(o)) {
+        return o.pending_invite_expired
+          ? '<span class="pill" style="background:#fee2e2;color:#991b1b" title="The invite link has expired — press Resend">Invite expired</span>'
+          : '<span class="pill" style="background:#fef3c7;color:#92400e" title="Invite emailed — waiting for them to choose a password">Invited</span>';
+      }
       return '<span class="pill" style="background:#ecfdf5;color:#065f46">Active</span>';
+    }
+
+    // No login yet, but an invite is out. The restaurant is fully usable via View.
+    function isPendingOwner(o) {
+      return !o.owner_email && !o.user_count && !!o.pending_invite_email;
+    }
+    function ownerCell(o) {
+      if (o.owner_email) return esc(o.owner_email);
+      if (o.pending_invite_email) return esc(o.pending_invite_email) + ' <small style="color:var(--text-muted)">(not signed up yet)</small>';
+      return '—';
     }
 
     // Anthropic spend on this customer's invoice parsing. Sub-cent totals would
