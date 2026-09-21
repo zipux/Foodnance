@@ -259,7 +259,7 @@ can't both squeeze under), **before** the send, so a failed send still spends it
 message), typed names go through `cleanLabel`, and the inviter's verified address is shown
 beside their typed name. **Apply `0052` before deploying**, by file, never `db:migrate:prod`.
 `tests/team-invite-email.test.mjs` (static) + `npm run test:invite-email` (needs the sandbox).
-The sandbox has no `RESEND_API_KEY`, so a real send has only been checked by reading the code.
+The local sandbox has no `RESEND_API_KEY`, so it only proves the caps; a real send was checked on staging 2026-09-22 (staging *does* hold `RESEND_API_KEY`): the email arrived in the inbox, not spam, and the link resolved.
 
 ### Tests
 
