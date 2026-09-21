@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en-CA">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Cloudflare Pages serves this file, with a real 404 status, for any
+       address that isn't a page or a file. Without it Pages treats the site as a
+       single-page app and answers every wrong address with the homepage and a
+       200, which search engines read as thousands of duplicate homepages.
+       Standalone on purpose, like index.html: no shared CSS, no scripts. -->
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Page not found — Foodnance</title>
+  <meta name="theme-color" content="#4f46e5" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --primary: #4f46e5; --primary-d: #3730a3;
+      --border: #e2e8f0; --text: #1e293b; --text-muted: #64748b; --bg-alt: #f8fafc;
+    }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      color: var(--text); background: #fff; line-height: 1.6;
+      min-height: 100vh; display: flex; flex-direction: column;
+      -webkit-font-smoothing: antialiased;
+    }
+    header { border-bottom: 1px solid var(--border); padding: .85rem 1.25rem; }
+    .brand { font-weight: 800; font-size: 1.15rem; letter-spacing: -.01em; color: var(--text); text-decoration: none; }
+    main {
+      flex: 1; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; text-align: center; padding: 3rem 1.25rem;
+    }
+    .code {
+      font-size: clamp(4rem, 14vw, 7rem); font-weight: 800; line-height: 1; letter-spacing: -.04em;
+      background: linear-gradient(120deg, var(--primary), #7c6cf0);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+      margin-bottom: 1rem;
+    }
+    h1 { font-size: clamp(1.4rem, 4vw, 1.9rem); font-weight: 800; letter-spacing: -.02em; margin-bottom: .6rem; }
+    p { color: var(--text-muted); max-width: 44ch; margin: 0 auto 1.6rem; }
+    .btn {
+      display: inline-block; font-weight: 600; font-size: .95rem; text-decoration: none;
+      color: #fff; padding: .75rem 1.4rem; border-radius: 8px;
+      background: linear-gradient(180deg, var(--primary), var(--primary-d));
+      box-shadow: 0 2px 10px rgba(79,70,229,.28);
+    }
+    .btn:hover { box-shadow: 0 6px 18px rgba(79,70,229,.34); }
+    .btn:focus-visible { outline: 2px solid var(--primary-d); outline-offset: 2px; }
+    .login { display: block; margin-top: 1rem; font-size: .9rem; color: var(--primary); font-weight: 600; text-decoration: none; }
+    .login:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <header><a class="brand" href="/">Foodnance</a></header>
+  <main>
+    <div class="code">404</div>
+    <h1>Page not found</h1>
+    <p>The page you were looking for doesn't exist, or it has moved. Check the address, or head back to the homepage.</p>
+    <a class="btn" href="/">Back to the homepage</a>
+    <a class="login" href="/login">Log in to your account</a>
+  </main>
+</body>
+</html>

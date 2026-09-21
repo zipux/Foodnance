@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en-CA">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -12,8 +12,8 @@
        tells crawlers to ignore. See robots.txt for what stays out of search. -->
   <meta name="robots" content="noindex, nofollow" />
 
-  <title>Foodnance — Know your real food cost</title>
-  <meta name="description" content="Foodnance turns a photo of your supplier invoice into true food cost, live recipe margins and a real P&amp;L. Built for independent restaurants, bakeries and commissaries." />
+  <title>Foodnance — Food Cost Software for Canadian Restaurants</title>
+  <meta name="description" content="Food cost software for independent Canadian restaurants and bakeries. Photograph a supplier invoice; recipe costs, margins and your P&amp;L update themselves." />
   <link rel="canonical" href="https://foodnance.com/" />
   <meta name="theme-color" content="#4f46e5" />
 
@@ -25,10 +25,10 @@
   <!-- Open Graph: controls the preview when the link is shared -->
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Foodnance" />
-  <meta property="og:locale" content="en_US" />
+  <meta property="og:locale" content="en_CA" />
   <meta property="og:url" content="https://foodnance.com/" />
-  <meta property="og:title" content="Foodnance — Know your real food cost" />
-  <meta property="og:description" content="Photograph an invoice. Your recipe costs, margins and P&amp;L update themselves." />
+  <meta property="og:title" content="Foodnance — Food Cost Software for Canadian Restaurants" />
+  <meta property="og:description" content="Food cost software for independent Canadian restaurants and bakeries. Photograph an invoice; your recipe costs, margins and P&amp;L update themselves." />
   <!-- TODO: add og-image.png (1200x630) and uncomment. A real screenshot of
        Price Movers converts better than anything synthetic. Left commented
        rather than pointing at a missing file, which would break the preview.
@@ -40,16 +40,14 @@
 
   <!-- Twitter/X falls back to the OG tags for everything except card type. -->
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Foodnance — Know your real food cost" />
-  <meta name="twitter:description" content="Photograph an invoice. Your recipe costs, margins and P&amp;L update themselves." />
+  <meta name="twitter:title" content="Foodnance — Food Cost Software for Canadian Restaurants" />
+  <meta name="twitter:description" content="Food cost software for independent Canadian restaurants and bakeries. Photograph an invoice; your recipe costs, margins and P&amp;L update themselves." />
 
-  <!-- Both CDNs are on the critical render path; warm the connections early. -->
-  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+  <!-- Google Fonts is on the critical render path; warm the connection early. -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..800&display=swap" rel="stylesheet" />
 
   <!-- Structured data. SoftwareApplication is the right type for a SaaS tool
        and is what powers rich results for software queries. Deliberately no
@@ -67,6 +65,7 @@
         "applicationSubCategory": "Restaurant food cost and inventory management",
         "operatingSystem": "Web browser",
         "url": "https://foodnance.com/",
+        "areaServed": { "@type": "Country", "name": "Canada" },
         "description": "Foodnance reads your supplier invoices and turns them into true food cost: live recipe and finished-product costing, per-vendor price comparison, stock takes with variance, and a P&L with true COGS.",
         "featureList": [
           "AI invoice line-item extraction",
@@ -86,7 +85,7 @@
         "@id": "https://foodnance.com/#org",
         "name": "Foodnance",
         "url": "https://foodnance.com/",
-        "email": "simoneisonni@gmail.com"
+        "email": "hello@foodnance.com"
       },
       {
         "@type": "WebSite",
@@ -229,6 +228,10 @@
     }
     .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 1.25rem; }
 
+    /* Inline SVG icons (sprite at the top of <body>). Height follows the text;
+       each icon carries its own width so it keeps Font Awesome's proportions. */
+    .ic { height: 1em; fill: currentColor; vertical-align: -.125em; flex: none; }
+
     /* ===== NAV ===== */
     header.nav {
       position: sticky; top: 0; z-index: 50;
@@ -245,11 +248,12 @@
       font-weight: 800; font-size: 1.15rem; letter-spacing: -.01em;
       color: var(--text); text-decoration: none;
     }
-    .brand i { color: var(--primary); }
+    .brand .ic { color: var(--primary); }
     .nav-spacer { flex: 1; }
     .nav-link {
       color: var(--text-muted); text-decoration: none; font-size: .92rem;
       font-weight: 500; padding: .4rem .6rem; border-radius: 6px;
+      white-space: nowrap;
     }
     .nav-link:hover { color: var(--text); background: var(--bg-alt); }
 
@@ -289,12 +293,19 @@
       background: linear-gradient(120deg, var(--primary), #7c6cf0);
       -webkit-background-clip: text; background-clip: text; color: transparent;
     }
+    .def {
+      font-size: clamp(1.02rem, 2.3vw, 1.2rem); font-weight: 600;
+      max-width: 50ch; margin: 0 auto .8rem;
+    }
     .sub {
       font-size: clamp(1rem, 2.2vw, 1.18rem); color: var(--text-muted);
       max-width: 56ch; margin: 0 auto 2rem;
     }
     .cta-row { display: flex; gap: .7rem; justify-content: center; flex-wrap: wrap; }
     .cta-note { font-size: .84rem; color: var(--text-muted); margin-top: .9rem; }
+    .cta-note + .cta-note { margin-top: .25rem; }
+    .cta-note a { color: var(--primary); font-weight: 600; text-decoration: none; }
+    .cta-note a:hover { text-decoration: underline; }
 
     /* ===== PRODUCT PREVIEW ===== */
     .preview {
@@ -397,7 +408,7 @@
       padding: .45rem 1rem; font-size: .9rem; font-weight: 500;
       display: inline-flex; align-items: center; gap: .45rem;
     }
-    .who i { color: var(--primary); }
+    .who .ic { color: var(--primary); }
 
     /* ===== FAQ ===== */
     .faq { max-width: 760px; margin: 0 auto; display: grid; gap: .7rem; }
@@ -445,22 +456,52 @@
     @media (max-width: 640px) {
       .hero { padding: 3rem 0 2rem; }
       section { padding: 2.5rem 0; }
-      .nav-inner { padding: .7rem 1rem; }
+      .nav-inner { padding: .7rem 1rem; gap: .4rem; }
       .brand { font-size: 1.05rem; }
+      /* The three in-page links don't fit beside the brand, Log in and the
+         button on a phone, and the page is one scroll anyway. */
+      .nav-anchor { display: none; }
+      .nav-inner .btn { padding: .5rem .85rem; font-size: .88rem; }
+    }
+    /* Narrow phones (measured: brand + Log in + button stop fitting below 360px).
+       The hero and footer both carry a Log in link, so nobody loses the way in. */
+    @media (max-width: 359px) {
+      .nav-login { display: none; }
     }
   </style>
 </head>
 <body>
 
+  <!-- Icons: Font Awesome Free 6.4.0 by @fontawesome, https://fontawesome.com/license/free
+       (icons CC BY 4.0). Inlined so the page loads no icon font. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="i-arrow-down" viewBox="0 0 384 512"><path d="M169.4 470.6c12.5 12.5 32.8 12.5 45.3 0l160-160c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L224 370.8 224 64c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 306.7L54.6 265.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l160 160z"/></symbol>
+    <symbol id="i-arrow-trend-up" viewBox="0 0 576 512"><path d="M384 160c-17.7 0-32-14.3-32-32s14.3-32 32-32H544c17.7 0 32 14.3 32 32V288c0 17.7-14.3 32-32 32s-32-14.3-32-32V205.3L342.6 374.6c-12.5 12.5-32.8 12.5-45.3 0L192 269.3 54.6 406.6c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3l160-160c12.5-12.5 32.8-12.5 45.3 0L320 306.7 466.7 160H384z"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 448 512"><path d="M349.4 44.6c5.9-13.7 1.5-29.7-10.6-38.5s-28.6-8-39.9 1.8l-256 224c-10 8.8-13.6 22.9-8.9 35.3S50.7 288 64 288H175.5L98.6 467.4c-5.9 13.7-1.5 29.7 10.6 38.5s28.6 8 39.9-1.8l256-224c10-8.8 13.6-22.9 8.9-35.3s-16.6-20.7-30-20.7H272.5L349.4 44.6z"/></symbol>
+    <symbol id="i-book-open" viewBox="0 0 576 512"><path d="M249.6 471.5c10.8 3.8 22.4-4.1 22.4-15.5V78.6c0-4.2-1.6-8.4-5-11C247.4 52 202.4 32 144 32C93.5 32 46.3 45.3 18.1 56.1C6.8 60.5 0 71.7 0 83.8V454.1c0 11.9 12.8 20.2 24.1 16.5C55.6 460.1 105.5 448 144 448c33.9 0 79 14 105.6 23.5zm76.8 0C353 462 398.1 448 432 448c38.5 0 88.4 12.1 119.9 22.6c11.3 3.8 24.1-4.6 24.1-16.5V83.8c0-12.1-6.8-23.3-18.1-27.6C529.7 45.3 482.5 32 432 32c-58.4 0-103.4 20-123 35.6c-3.3 2.6-5 6.8-5 11V456c0 11.4 11.7 19.3 22.4 15.5z"/></symbol>
+    <symbol id="i-boxes-stacked" viewBox="0 0 576 512"><path d="M248 0H208c-26.5 0-48 21.5-48 48V160c0 35.3 28.7 64 64 64H352c35.3 0 64-28.7 64-64V48c0-26.5-21.5-48-48-48H328V80c0 8.8-7.2 16-16 16H264c-8.8 0-16-7.2-16-16V0zM64 256c-35.3 0-64 28.7-64 64V448c0 35.3 28.7 64 64 64H224c35.3 0 64-28.7 64-64V320c0-35.3-28.7-64-64-64H184v80c0 8.8-7.2 16-16 16H120c-8.8 0-16-7.2-16-16V256H64zM352 512H512c35.3 0 64-28.7 64-64V320c0-35.3-28.7-64-64-64H472v80c0 8.8-7.2 16-16 16H408c-8.8 0-16-7.2-16-16V256H352c-15 0-28.8 5.1-39.7 13.8c4.9 10.4 7.7 22 7.7 34.2V464c0 12.2-2.8 23.8-7.7 34.2C323.2 506.9 337 512 352 512z"/></symbol>
+    <symbol id="i-bread-slice" viewBox="0 0 512 512"><path d="M256 32C192 32 0 64 0 192c0 35.3 28.7 64 64 64V432c0 26.5 21.5 48 48 48H400c26.5 0 48-21.5 48-48V256c35.3 0 64-28.7 64-64C512 64 320 32 256 32z"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 512 512"><path d="M149.1 64.8L138.7 96H64C28.7 96 0 124.7 0 160V416c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V160c0-35.3-28.7-64-64-64H373.3L362.9 64.8C356.4 45.2 338.1 32 317.4 32H194.6c-20.7 0-39 13.2-45.5 32.8zM256 192a96 96 0 1 1 0 192 96 96 0 1 1 0-192z"/></symbol>
+    <symbol id="i-chart-line" viewBox="0 0 512 512"><path d="M64 64c0-17.7-14.3-32-32-32S0 46.3 0 64V400c0 44.2 35.8 80 80 80H480c17.7 0 32-14.3 32-32s-14.3-32-32-32H80c-8.8 0-16-7.2-16-16V64zm406.6 86.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L320 210.7l-57.4-57.4c-12.5-12.5-32.8-12.5-45.3 0l-112 112c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L240 221.3l57.4 57.4c12.5 12.5 32.8 12.5 45.3 0l128-128z"/></symbol>
+    <symbol id="i-chart-pie" viewBox="0 0 576 512"><path d="M304 240V16.6c0-9 7-16.6 16-16.6C443.7 0 544 100.3 544 224c0 9-7.6 16-16.6 16H304zM32 272C32 150.7 122.1 50.3 239 34.3c9.2-1.3 17 6.1 17 15.4V288L412.5 444.5c6.7 6.7 6.2 17.7-1.5 23.1C371.8 495.6 323.8 512 272 512C139.5 512 32 404.6 32 272zm526.4 16c9.3 0 16.6 7.8 15.4 17c-7.7 55.9-34.6 105.6-73.9 142.3c-6 5.6-15.4 5.2-21.2-.7L320 288H558.4z"/></symbol>
+    <symbol id="i-envelope" viewBox="0 0 512 512"><path d="M48 64C21.5 64 0 85.5 0 112c0 15.1 7.1 29.3 19.2 38.4L236.8 313.6c11.4 8.5 27 8.5 38.4 0L492.8 150.4c12.1-9.1 19.2-23.3 19.2-38.4c0-26.5-21.5-48-48-48H48zM0 176V384c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V176L294.4 339.2c-22.8 17.1-54 17.1-76.8 0L0 176z"/></symbol>
+    <symbol id="i-id-card" viewBox="0 0 576 512"><path d="M0 96l576 0c0-35.3-28.7-64-64-64H64C28.7 32 0 60.7 0 96zm0 32V416c0 35.3 28.7 64 64 64H512c35.3 0 64-28.7 64-64V128H0zM64 405.3c0-29.5 23.9-53.3 53.3-53.3H234.7c29.5 0 53.3 23.9 53.3 53.3c0 5.9-4.8 10.7-10.7 10.7H74.7c-5.9 0-10.7-4.8-10.7-10.7zM176 192a64 64 0 1 1 0 128 64 64 0 1 1 0-128zm176 16c0-8.8 7.2-16 16-16H496c8.8 0 16 7.2 16 16s-7.2 16-16 16H368c-8.8 0-16-7.2-16-16zm0 64c0-8.8 7.2-16 16-16H496c8.8 0 16 7.2 16 16s-7.2 16-16 16H368c-8.8 0-16-7.2-16-16zm0 64c0-8.8 7.2-16 16-16H496c8.8 0 16 7.2 16 16s-7.2 16-16 16H368c-8.8 0-16-7.2-16-16z"/></symbol>
+    <symbol id="i-mug-hot" viewBox="0 0 512 512"><path d="M88 0C74.7 0 64 10.7 64 24c0 38.9 23.4 59.4 39.1 73.1l1.1 1C120.5 112.3 128 119.9 128 136c0 13.3 10.7 24 24 24s24-10.7 24-24c0-38.9-23.4-59.4-39.1-73.1l-1.1-1C119.5 47.7 112 40.1 112 24c0-13.3-10.7-24-24-24zM32 192c-17.7 0-32 14.3-32 32V416c0 53 43 96 96 96H288c53 0 96-43 96-96h16c61.9 0 112-50.1 112-112s-50.1-112-112-112H352 32zm352 64h16c26.5 0 48 21.5 48 48s-21.5 48-48 48H384V256zM224 24c0-13.3-10.7-24-24-24s-24 10.7-24 24c0 38.9 23.4 59.4 39.1 73.1l1.1 1C232.5 112.3 240 119.9 240 136c0 13.3 10.7 24 24 24s24-10.7 24-24c0-38.9-23.4-59.4-39.1-73.1l-1.1-1C231.5 47.7 224 40.1 224 24z"/></symbol>
+    <symbol id="i-pizza-slice" viewBox="0 0 512 512"><path d="M169.7 .9c-22.8-1.6-41.9 14-47.5 34.7L110.4 80c.5 0 1.1 0 1.6 0c176.7 0 320 143.3 320 320c0 .5 0 1.1 0 1.6l44.4-11.8c20.8-5.5 36.3-24.7 34.7-47.5C498.5 159.5 352.5 13.5 169.7 .9zM399.8 410.2c.1-3.4 .2-6.8 .2-10.2c0-159.1-128.9-288-288-288c-3.4 0-6.8 .1-10.2 .2L.5 491.9c-1.5 5.5 .1 11.4 4.1 15.4s9.9 5.6 15.4 4.1L399.8 410.2zM176 208a32 32 0 1 1 0 64 32 32 0 1 1 0-64zm64 128a32 32 0 1 1 64 0 32 32 0 1 1 -64 0zM96 384a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/></symbol>
+    <symbol id="i-receipt" viewBox="0 0 384 512"><path d="M14 2.2C22.5-1.7 32.5-.3 39.6 5.8L80 40.4 120.4 5.8c9-7.7 22.3-7.7 31.2 0L192 40.4 232.4 5.8c9-7.7 22.3-7.7 31.2 0L304 40.4 344.4 5.8c7.1-6.1 17.1-7.5 25.6-3.6s14 12.4 14 21.8V488c0 9.4-5.5 17.9-14 21.8s-18.5 2.5-25.6-3.6L304 471.6l-40.4 34.6c-9 7.7-22.3 7.7-31.2 0L192 471.6l-40.4 34.6c-9 7.7-22.3 7.7-31.2 0L80 471.6 39.6 506.2c-7.1 6.1-17.1 7.5-25.6 3.6S0 497.4 0 488V24C0 14.6 5.5 6.1 14 2.2zM96 144c-8.8 0-16 7.2-16 16s7.2 16 16 16H288c8.8 0 16-7.2 16-16s-7.2-16-16-16H96zM80 352c0 8.8 7.2 16 16 16H288c8.8 0 16-7.2 16-16s-7.2-16-16-16H96c-8.8 0-16 7.2-16 16zM96 240c-8.8 0-16 7.2-16 16s7.2 16 16 16H288c8.8 0 16-7.2 16-16s-7.2-16-16-16H96z"/></symbol>
+    <symbol id="i-utensils" viewBox="0 0 448 512"><path d="M416 0C400 0 288 32 288 176V288c0 35.3 28.7 64 64 64h32V480c0 17.7 14.3 32 32 32s32-14.3 32-32V352 240 32c0-17.7-14.3-32-32-32zM64 16C64 7.8 57.9 1 49.7 .1S34.2 4.6 32.4 12.5L2.1 148.8C.7 155.1 0 161.5 0 167.9c0 45.9 35.1 83.6 80 87.7V480c0 17.7 14.3 32 32 32s32-14.3 32-32V255.6c44.9-4.1 80-41.8 80-87.7c0-6.4-.7-12.8-2.1-19.1L191.6 12.5c-1.8-8-9.3-13.3-17.4-12.4S160 7.8 160 16V150.2c0 5.4-4.4 9.8-9.8 9.8c-5.1 0-9.3-3.9-9.8-9L127.9 14.6C127.2 6.3 120.3 0 112 0s-15.2 6.3-15.9 14.6L83.7 151c-.5 5.1-4.7 9-9.8 9c-5.4 0-9.8-4.4-9.8-9.8V16zm48.3 152l-.3 0-.3 0 .3-.7 .3 .7z"/></symbol>
+    <symbol id="i-warehouse" viewBox="0 0 640 512"><path d="M0 488V171.3c0-26.2 15.9-49.7 40.2-59.4L308.1 4.8c7.6-3.1 16.1-3.1 23.8 0L599.8 111.9c24.3 9.7 40.2 33.3 40.2 59.4V488c0 13.3-10.7 24-24 24H568c-13.3 0-24-10.7-24-24V224c0-17.7-14.3-32-32-32H128c-17.7 0-32 14.3-32 32V488c0 13.3-10.7 24-24 24H24c-13.3 0-24-10.7-24-24zm488 24l-336 0c-13.3 0-24-10.7-24-24V432H512l0 56c0 13.3-10.7 24-24 24zM128 400V336H512v64H128zm0-96V224H512l0 80H128z"/></symbol>
+  </svg>
+
   <header class="nav">
     <div class="nav-inner">
-      <a class="brand" href="#top"><i class="fas fa-receipt"></i> Foodnance</a>
+      <a class="brand" href="#top"><svg class="ic" style="width:.75em" aria-hidden="true" focusable="false"><use href="#i-receipt"/></svg> Foodnance</a>
       <div class="nav-spacer"></div>
-      <a class="nav-link" href="#features">Features</a>
-      <a class="nav-link" href="#how">How it works</a>
-      <a class="nav-link" href="#faq">FAQ</a>
-      <a class="nav-link" href="/login">Log in</a>
-      <a class="btn btn-primary" href="mailto:simoneisonni@gmail.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
+      <a class="nav-link nav-anchor" href="#features">Features</a>
+      <a class="nav-link nav-anchor" href="#how">How it works</a>
+      <a class="nav-link nav-anchor" href="#faq">FAQ</a>
+      <a class="nav-link nav-login" href="/login">Log in</a>
+      <a class="btn btn-primary" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
         Request access
       </a>
     </div>
@@ -470,9 +511,11 @@
 
   <!-- ══ HERO ══ -->
   <div class="hero wrap">
-    <div class="eyebrow"><i class="fas fa-bolt"></i> Now onboarding first customers</div>
+    <div class="eyebrow"><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-bolt"/></svg> Now onboarding first Canadian customers</div>
 
     <h1>Know your <span class="accent">real food cost</span></h1>
+
+    <p class="def">Foodnance is food cost software for independent restaurants, bakeries and commissaries in Canada.</p>
 
     <p class="sub">
       Photograph a supplier invoice. Foodnance reads every line, updates the cost of every
@@ -481,18 +524,18 @@
     </p>
 
     <div class="cta-row">
-      <a class="btn btn-primary btn-lg" href="mailto:simoneisonni@gmail.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
-        <i class="fas fa-envelope"></i> Request access
+      <a class="btn btn-primary btn-lg" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
+        <svg class="ic" style="width:1em" aria-hidden="true" focusable="false"><use href="#i-envelope"/></svg> Request access
       </a>
-      <a class="btn btn-ghost btn-lg" href="/login"><i class="fas fa-arrow-right-to-bracket"></i> Log in</a>
     </div>
     <p class="cta-note">Early access — we set your account up with you, one business at a time.</p>
+    <p class="cta-note">Already a customer? <a href="/login">Log in</a></p>
 
     <!-- Illustrative UI, not a customer's data. Swap for a real screenshot when ready. -->
     <div class="preview">
       <div class="preview-bar">
         <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-        <span class="title"><i class="fas fa-chart-line"></i> Price Movers</span>
+        <span class="title"><svg class="ic" style="width:1em" aria-hidden="true" focusable="false"><use href="#i-chart-line"/></svg> Price Movers</span>
         <span class="example-tag">Example</span>
       </div>
       <div class="preview-body">
@@ -500,7 +543,7 @@
           <div class="kpi">
             <div class="label">Food cost %</div>
             <div class="value">31.4%</div>
-            <div class="delta down"><i class="fas fa-arrow-down"></i> 2.1 pts vs last month</div>
+            <div class="delta down"><svg class="ic" style="width:.75em" aria-hidden="true" focusable="false"><use href="#i-arrow-down"/></svg> 2.1 pts vs last month</div>
           </div>
           <div class="kpi">
             <div class="label">Purchases (Jul)</div>
@@ -560,37 +603,37 @@
 
       <div class="grid">
         <div class="card">
-          <div class="icon"><i class="fas fa-camera"></i></div>
+          <div class="icon"><svg class="ic" style="width:1em" aria-hidden="true" focusable="false"><use href="#i-camera"/></svg></div>
           <h3>Invoices read for you</h3>
           <p>Photo or PDF in, itemised lines out — product, pack size, unit price. It flags a
              total that doesn't add up, so a typo never becomes a wrong food cost.</p>
         </div>
         <div class="card">
-          <div class="icon"><i class="fas fa-arrow-trend-up"></i></div>
+          <div class="icon"><svg class="ic" style="width:1.125em" aria-hidden="true" focusable="false"><use href="#i-arrow-trend-up"/></svg></div>
           <h3>Price movers &amp; vendor compare</h3>
           <p>See exactly which items went up, by how much, and which supplier is cheapest for
              the same item — with the dollar figure you'd save by switching.</p>
         </div>
         <div class="card">
-          <div class="icon"><i class="fas fa-book-open"></i></div>
+          <div class="icon"><svg class="ic" style="width:1.125em" aria-hidden="true" focusable="false"><use href="#i-book-open"/></svg></div>
           <h3>Recipe &amp; product costing</h3>
           <p>Cost every recipe from live ingredient prices, then build finished products from
              recipes. When flour goes up, every affected margin updates itself.</p>
         </div>
         <div class="card">
-          <div class="icon"><i class="fas fa-boxes-stacked"></i></div>
+          <div class="icon"><svg class="ic" style="width:1.125em" aria-hidden="true" focusable="false"><use href="#i-boxes-stacked"/></svg></div>
           <h3>Stock takes that reconcile</h3>
           <p>Count by storage area in walk order, on a phone, offline if the walk-in has no
              signal. See counted versus expected, and what the variance cost you.</p>
         </div>
         <div class="card">
-          <div class="icon"><i class="fas fa-chart-pie"></i></div>
+          <div class="icon"><svg class="ic" style="width:1.125em" aria-hidden="true" focusable="false"><use href="#i-chart-pie"/></svg></div>
           <h3>P&amp;L with true COGS</h3>
           <p>Monthly profit and loss from real purchases, with the option to swap in
              stock-take-based true cost of goods instead of purchases alone.</p>
         </div>
         <div class="card">
-          <div class="icon"><i class="fas fa-id-card"></i></div>
+          <div class="icon"><svg class="ic" style="width:1.125em" aria-hidden="true" focusable="false"><use href="#i-id-card"/></svg></div>
           <h3>Certifications that don't lapse</h3>
           <p>Track food-safety certificates per staff member and get told what's expiring
              before an inspector is the one who notices.</p>
@@ -636,11 +679,11 @@
            difference between a good and a bad month.</p>
       </div>
       <div class="who">
-        <span><i class="fas fa-utensils"></i> Restaurants</span>
-        <span><i class="fas fa-bread-slice"></i> Bakeries</span>
-        <span><i class="fas fa-warehouse"></i> Commissaries</span>
-        <span><i class="fas fa-mug-hot"></i> Cafés</span>
-        <span><i class="fas fa-pizza-slice"></i> Pizzerias</span>
+        <span><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-utensils"/></svg> Restaurants</span>
+        <span><svg class="ic" style="width:1em" aria-hidden="true" focusable="false"><use href="#i-bread-slice"/></svg> Bakeries</span>
+        <span><svg class="ic" style="width:1.25em" aria-hidden="true" focusable="false"><use href="#i-warehouse"/></svg> Commissaries</span>
+        <span><svg class="ic" style="width:1em" aria-hidden="true" focusable="false"><use href="#i-mug-hot"/></svg> Cafés</span>
+        <span><svg class="ic" style="width:1em" aria-hidden="true" focusable="false"><use href="#i-pizza-slice"/></svg> Pizzerias</span>
       </div>
     </div>
   </section>
@@ -742,8 +785,8 @@
         <h2>Find out what your food actually costs</h2>
         <p>We're onboarding the first businesses now, hands-on. Tell us a little about your
            operation and we'll set you up.</p>
-        <a class="btn btn-primary btn-lg" href="mailto:simoneisonni@gmail.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
-          <i class="fas fa-envelope"></i> Request access
+        <a class="btn btn-primary btn-lg" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
+          <svg class="ic" style="width:1em" aria-hidden="true" focusable="false"><use href="#i-envelope"/></svg> Request access
         </a>
         <p class="cta-note" style="margin-top:1rem">No card, no commitment — a conversation first.</p>
       </div>
@@ -752,10 +795,11 @@
 
   <footer>
     <div class="wrap foot-inner">
-      <a class="brand" href="#top" style="font-size:1rem"><i class="fas fa-receipt"></i> Foodnance</a>
+      <a class="brand" href="#top" style="font-size:1rem"><svg class="ic" style="width:.75em" aria-hidden="true" focusable="false"><use href="#i-receipt"/></svg> Foodnance</a>
       <div class="nav-spacer"></div>
       <span>&copy; 2026 Foodnance</span>
-      <a href="mailto:simoneisonni@gmail.com">Contact</a>
+      <a href="/login">Log in</a>
+      <a href="mailto:hello@foodnance.com">Contact</a>
     </div>
   </footer>
 
