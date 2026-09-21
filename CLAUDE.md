@@ -249,7 +249,19 @@ npm run test:isolation # tenant isolation  — needs the sandbox; the pre-launch
 npm run test:lifecycle # account lifecycle — needs the sandbox
 npm run test:merge     # product merge/group — needs the sandbox
 npm run test:reset     # forgotten-password flow — needs the sandbox
+npm run test:purge     # account purge: leaves nothing behind, touches no other customer — needs the sandbox
 ```
+
+**The account purge** (`DELETE /api/admin/organizations/:id`, admin-screen button) is
+the only path that hard-deletes customer data, and the Privacy Policy draft's
+"permanently deleted" rests on it. `PURGE_TABLES` must hold every tenant table and
+list **children before parents** wherever a foreign key doesn't cascade — an
+alphabetical list 500'd half-way through (`certification_types` before the
+`staff_certifications` pointing at it) and the `ai_*` log tables were missing, which
+blocked the final org delete. `tests/purge-coverage.test.mjs` enforces both from the
+migrations; the row deletes run in one `DB.batch()` so a failure rolls back
+instead of leaving an account half-erased. Nothing triggers it automatically —
+it is a manual operator action.
 
 Plain Node, no framework, no dependencies. `tests/helpers/browser-module.mjs`
 evaluates `public/static/*.js` so unit tests exercise the *shipped* frontend
@@ -273,7 +285,7 @@ Local dev uses a local SQLite file under `.wrangler/state/v3/d1/`. The `ecosyste
 
 **Frontend is static, not part of the worker bundle.** `public/*.html` are standalone pages; `public/static/*.js` are matching vanilla-JS controllers (e.g. `invoices.html` ↔ `static/invoices.js`); styling is TailwindCSS via CDN + FontAwesome. `public/_routes.json` sets `include: ["/api/*"]`, so Cloudflare Pages routes **only** `/api/*` to the Hono worker and serves everything else as static assets. The frontend talks to the backend purely through `fetch` against `/api/*`. `public/static/utils.js` holds shared client helpers.
 
-**Public vs. app pages.** `public/index.html` is the **public marketing landing page** (standalone, no controller, does not load `static/style.css`); `public/login.html` is the **real sign-in screen** — it posts to `/api/auth/login`, and on load asks `/api/auth/me` so an existing session skips the form. Where it sends you is decided by `destinationFor()`: an explicit `?next=` (same-origin only — a `//host` value is rejected), else the admin screen for a super-admin (they have no org, so the upload screen has nothing to file against), else a handheld-aware default. Auth is enforced server-side in the `/api/*` middleware chokepoint described under "Plan tiers"; static pages cannot be gated, since `_routes.json` sends only `/api/*` to the worker. The Products app page is `public/products.html` ↔ `static/products.js` (it was `index.html` until the landing page took the root URL — link to it as `/products.html`). Every app page carries `<meta name="robots" content="noindex, nofollow">`; `index.html` is the only page intended to be indexable, and it is *also* noindex until the launch is announced (see `public/robots.txt`, which documents the launch checklist). Cloudflare Pages strips `.html` and 308-redirects, so `/products.html` → `/products` in production; internal nav keeps the `.html` suffix so links also resolve under `npm run dev`.
+**Public vs. app pages.** `public/index.html` is the **public marketing landing page** (standalone, no controller, does not load `static/style.css`); `public/login.html` is the **real sign-in screen** — it posts to `/api/auth/login`, and on load asks `/api/auth/me` so an existing session skips the form. Where it sends you is decided by `destinationFor()`: an explicit `?next=` (same-origin only — a `//host` value is rejected), else the admin screen for a super-admin (they have no org, so the upload screen has nothing to file against), else a handheld-aware default. Auth is enforced server-side in the `/api/*` middleware chokepoint described under "Plan tiers"; static pages cannot be gated, since `_routes.json` sends only `/api/*` to the worker. The Products app page is `public/products.html` ↔ `static/products.js` (it was `index.html` until the landing page took the root URL — link to it as `/products.html`). Every app page carries `<meta name="robots" content="noindex, nofollow">`; `index.html` is the only page intended to be indexable, and it is *also* noindex until the launch is announced (see `public/robots.txt`, which documents the launch checklist). **`public/food-cost-calculator.html`** is the third marketing page (free tool for SEO/AEO, same `noindex` until launch — remove all three together): pure client-side, `static/food-cost-calculator.js` + `tests/food-cost-calculator*.test.mjs`. Its promise is "nothing typed is saved or sent", enforced by a test that bans `fetch`/storage/`innerHTML` in the script; its FAQ markup must match the visible FAQ word for word. Cloudflare Pages strips `.html` and 308-redirects, so `/products.html` → `/products` in production; internal nav keeps the `.html` suffix so links also resolve under `npm run dev`.
 
 ### Generic table CRUD
 Most data access goes through one generic REST layer: `/api/tables/:table` (+ `/:id`) supporting GET/POST/PUT/PATCH/DELETE. Tables must be in the `ALLOWED_TABLES` allowlist (defense against SQL injection via the `:table` param — column/table names are interpolated, values are always bound). Primary keys: string `uid()` is generated on insert **unless** the table is in `INTEGER_PK_TABLES` (`units` and `categories`), which use autoincrement.
