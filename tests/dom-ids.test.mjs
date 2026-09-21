@@ -25,6 +25,7 @@ const PAGES = [
   ['sales.html',             'sales.js'],
   ['recipes.html',           'recipes.js'],
   ['finished-products.html', 'finished-products.js'],
+  ['food-cost-calculator.html', 'food-cost-calculator.js'],
 ];
 
 // Ids the controller creates at runtime via innerHTML, so they are never in

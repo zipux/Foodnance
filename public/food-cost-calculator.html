@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en-CA">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Held out of search on purpose, exactly like index.html and pricing.html:
+       reachable, not announced. TO LAUNCH: delete the robots meta line below
+       together with the ones in index.html and pricing.html (checklist in
+       robots.txt), then add the sitemap line back and submit in Search Console. -->
+  <meta name="robots" content="noindex, nofollow" />
+
+  <title>Food Cost Calculator — Cost a Dish From What You Paid</title>
+  <meta name="description" content="Free food cost calculator: enter what you paid for ingredients and what goes in one dish to get cost per portion and food cost percentage. Nothing is saved." />
+  <link rel="canonical" href="https://foodnance.com/food-cost-calculator" />
+  <meta name="theme-color" content="#4f46e5" />
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="mask-icon" href="/favicon.svg" color="#4f46e5" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Foodnance" />
+  <meta property="og:locale" content="en_CA" />
+  <meta property="og:url" content="https://foodnance.com/food-cost-calculator" />
+  <meta property="og:title" content="Food Cost Calculator — Cost a Dish From What You Paid" />
+  <meta property="og:description" content="Enter what you paid and what goes in the dish. Get cost per portion and food cost percentage. Free, and nothing is saved." />
+  <!-- og:image goes here once the shared 1200x630 image exists (see index.html). -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Food Cost Calculator — Cost a Dish From What You Paid" />
+  <meta name="twitter:description" content="Enter what you paid and what goes in the dish. Get cost per portion and food cost percentage. Free, and nothing is saved." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..800&display=swap" rel="stylesheet" />
+
+  <!-- Structured data, one @graph like the other pages, sharing their ids.
+       The FAQPage below must match the visible FAQ on this page word for word
+       (tests/food-cost-calculator-page.test.mjs checks it): change both together.
+       Deliberately no aggregateRating — there are no reviews. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebPage",
+        "@id": "https://foodnance.com/food-cost-calculator#page",
+        "url": "https://foodnance.com/food-cost-calculator",
+        "name": "Food cost calculator",
+        "description": "A free calculator that works out the cost of a dish, the cost per portion and the food cost percentage from the prices you paid for your ingredients.",
+        "inLanguage": "en-CA",
+        "dateModified": "2026-09-21",
+        "isPartOf": { "@id": "https://foodnance.com/#website" },
+        "publisher": { "@id": "https://foodnance.com/#org" },
+        "about": { "@type": "Thing", "name": "Food cost" },
+        "breadcrumb": { "@id": "https://foodnance.com/food-cost-calculator#breadcrumb" },
+        "mainEntity": { "@id": "https://foodnance.com/food-cost-calculator#tool" }
+      },
+      {
+        "@type": "BreadcrumbList",
+        "@id": "https://foodnance.com/food-cost-calculator#breadcrumb",
+        "itemListElement": [
+          { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://foodnance.com/" },
+          { "@type": "ListItem", "position": 2, "name": "Food cost calculator", "item": "https://foodnance.com/food-cost-calculator" }
+        ]
+      },
+      {
+        "@type": "WebApplication",
+        "@id": "https://foodnance.com/food-cost-calculator#tool",
+        "name": "Food cost calculator",
+        "url": "https://foodnance.com/food-cost-calculator",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "Web browser",
+        "browserRequirements": "Requires JavaScript",
+        "isAccessibleForFree": true,
+        "description": "Enter what you paid for each ingredient and how much goes in one dish. The calculator returns the cost of the dish, the cost per portion, the food cost percentage and the selling price needed for a target food cost. It runs in the browser and saves nothing.",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CAD" },
+        "publisher": { "@id": "https://foodnance.com/#org" }
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "https://foodnance.com/food-cost-calculator#faq",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "What is food cost?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Food cost is what the ingredients in a dish cost you, based on the prices you actually paid your suppliers. It is usually shown two ways: as dollars per portion, and as a percentage of the selling price." }
+          },
+          {
+            "@type": "Question",
+            "name": "How do you calculate food cost percentage?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Divide the cost of one portion by its selling price, then multiply by 100. A dish that costs $10.28 to make and sells for $34.00 has a food cost of 30.2 percent." }
+          },
+          {
+            "@type": "Question",
+            "name": "How do you calculate the cost of an ingredient in a recipe?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Divide what you paid by the quantity you bought to get the price per unit, then multiply by the quantity the recipe uses. Beef at $300 for 10 kg is $30.00 per kg, so 300 g of it costs $9.00." }
+          },
+          {
+            "@type": "Question",
+            "name": "What is a good food cost percentage?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Many restaurants aim for roughly 28 to 35 percent, but the right figure depends on the kind of restaurant, the menu and your prices. Use it as a starting point, and compare each dish with the target you set for your own business." }
+          },
+          {
+            "@type": "Question",
+            "name": "How do I include trimming and waste in the cost?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Enter a usable percentage for the product. If 15 percent of a 10 kg purchase of beef is lost to trimming, enter 85. The calculator then prices only the meat you can serve, so 300 g of beef costs $10.59 instead of $9.00." }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I mix units, like buying in kilograms and using grams?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Yes, within the same kind of unit. Weights (g, kg, oz, lb) convert to each other, and so do volumes (ml, L, fl oz, tsp, tbsp, cup). Weight and volume cannot be converted without knowing the density of the ingredient, so the calculator asks you to use a matching unit rather than guess." }
+          },
+          {
+            "@type": "Question",
+            "name": "Is anything I type saved or sent anywhere?",
+            "acceptedAnswer": { "@type": "Answer", "text": "No. The calculation happens in your browser. Nothing you enter is stored or sent to us, and it is gone when you refresh or close the page." }
+          },
+          {
+            "@type": "Question",
+            "name": "Why does my food cost keep changing?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Supplier prices move, so the same recipe costs a different amount from one delivery to the next. A calculator shows one moment in time. Foodnance re-costs every dish from your supplier invoices as you upload them, so the numbers stay current without re-typing." }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --primary:    #4f46e5;
+      --primary-d:  #3730a3;
+      --success:    #059669;
+      --danger:     #dc2626;
+      --warning:    #d97706;
+      --bg:         #ffffff;
+      --bg-alt:     #f8fafc;
+      --border:     #e2e8f0;
+      --text:       #1e293b;
+      --text-muted: #64748b;
+      --radius:     12px;
+      --radius-sm:  8px;
+      --shadow:     0 2px 16px rgba(0,0,0,.08);
+      --maxw:       1080px;
+    }
+
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      color: var(--text); background: var(--bg);
+      font-size: 16px; line-height: 1.6; -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 1.25rem; }
+    .ic { height: 1em; fill: currentColor; vertical-align: -.125em; flex: none; }
+
+    /* ===== NAV (same as index.html) ===== */
+    header.nav {
+      position: sticky; top: 0; z-index: 50;
+      background: rgba(255,255,255,.86); backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: var(--maxw); margin: 0 auto; padding: .85rem 1.25rem;
+      display: flex; align-items: center; gap: 1rem;
+    }
+    .brand {
+      display: flex; align-items: center; gap: .55rem;
+      font-weight: 800; font-size: 1.15rem; letter-spacing: -.01em;
+      color: var(--text); text-decoration: none;
+    }
+    .brand .ic { color: var(--primary); }
+    .nav-spacer { flex: 1; }
+    .nav-link {
+      color: var(--text-muted); text-decoration: none; font-size: .92rem;
+      font-weight: 500; padding: .4rem .6rem; border-radius: 6px;
+      white-space: nowrap;
+    }
+    .nav-link:hover { color: var(--text); background: var(--bg-alt); }
+    .nav-link[aria-current="page"] { color: var(--text); font-weight: 600; }
+
+    /* ===== BUTTONS ===== */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+      font-family: inherit; font-size: .95rem; font-weight: 600;
+      padding: .7rem 1.25rem; border-radius: var(--radius-sm);
+      text-decoration: none; border: 1px solid transparent; cursor: pointer;
+      transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
+      white-space: nowrap;
+    }
+    .btn-primary {
+      background: linear-gradient(180deg, var(--primary), var(--primary-d));
+      color: #fff; box-shadow: 0 2px 10px rgba(79,70,229,.28);
+    }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(79,70,229,.34); }
+    .btn-ghost { background: #fff; color: var(--text); border-color: var(--border); }
+    .btn-ghost:hover { background: var(--bg-alt); }
+    .btn-sm { font-size: .88rem; padding: .5rem .9rem; }
+    .btn-lg { font-size: 1rem; padding: .85rem 1.6rem; }
+    .btn:focus-visible, .nav-link:focus-visible, .brand:focus-visible,
+    .rm:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+    /* ===== HERO ===== */
+    .hero { padding: 3.5rem 0 1.6rem; text-align: center; }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: .45rem;
+      font-size: .8rem; font-weight: 600; letter-spacing: .02em;
+      color: var(--primary); background: #eef2ff; border: 1px solid #e0e7ff;
+      border-radius: 999px; padding: .35rem .8rem; margin-bottom: 1.3rem;
+    }
+    h1 {
+      font-size: clamp(2rem, 5vw, 3rem); line-height: 1.12; letter-spacing: -.03em;
+      font-weight: 800; max-width: 22ch; margin: 0 auto 1rem;
+    }
+    h1 .accent {
+      background: linear-gradient(120deg, var(--primary), #7c6cf0);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .sub { font-size: clamp(1rem, 2.2vw, 1.15rem); color: var(--text-muted); max-width: 58ch; margin: 0 auto; }
+
+    /* ===== SECTIONS ===== */
+    section { padding: 3rem 0; }
+    .section-alt { background: var(--bg-alt); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    .section-head { text-align: center; max-width: 60ch; margin: 0 auto 2rem; }
+    h2.section-title {
+      font-size: clamp(1.5rem, 3.4vw, 2.1rem); letter-spacing: -.02em;
+      font-weight: 800; line-height: 1.2; margin-bottom: .7rem;
+    }
+    .section-head p { color: var(--text-muted); font-size: 1.02rem; }
+
+    /* ===== CALCULATOR ===== */
+    .calc {
+      background: #fff; border: 1px solid var(--border); border-radius: 16px;
+      box-shadow: var(--shadow); padding: 1.6rem; max-width: 900px; margin: 0 auto;
+    }
+    .calc-top { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.4rem; }
+    .privacy-note { font-size: .86rem; color: var(--text-muted); display: flex; gap: .5rem; align-items: center; }
+    .privacy-note .ic { color: var(--success); }
+    .calc-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+    .step { margin-top: 1.6rem; }
+    .step:first-of-type { margin-top: 0; }
+    .step h3 { font-size: 1.05rem; font-weight: 700; letter-spacing: -.01em; display: flex; align-items: center; gap: .6rem; }
+    .step h3 .n {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 1.6rem; height: 1.6rem; border-radius: 50%;
+      background: var(--primary); color: #fff; font-size: .82rem; flex: none;
+    }
+    .step > p { color: var(--text-muted); font-size: .9rem; margin: .25rem 0 .9rem 2.2rem; }
+
+    .rows { display: grid; gap: .7rem; }
+    .row {
+      display: grid; gap: .55rem .7rem; align-items: end;
+      padding: .8rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-alt);
+    }
+    .row.bad { border-color: #fca5a5; background: #fef2f2; }
+    .row.buy { grid-template-columns: minmax(0,2.1fr) minmax(0,1fr) minmax(0,1.1fr) minmax(0,1.2fr) minmax(0,.9fr) auto; }
+    .row.use { grid-template-columns: minmax(0,2.4fr) minmax(0,1fr) minmax(0,1.1fr) minmax(0,1fr) auto; }
+    .fld { display: flex; flex-direction: column; gap: .25rem; min-width: 0; }
+    .lbl { font-size: .74rem; font-weight: 600; color: var(--text-muted); letter-spacing: .01em; }
+    input, select {
+      font: inherit; font-size: 1rem; color: var(--text);
+      width: 100%; height: 2.6rem; padding: .55rem .65rem; background: #fff;
+      border: 1px solid var(--border); border-radius: 6px; min-width: 0;
+    }
+    .affix { position: relative; display: block; }
+    .affix .pre { position: absolute; left: .65rem; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none; }
+    .affix input { padding-left: 1.4rem; }
+    .cost {
+      font-weight: 700; font-variant-numeric: tabular-nums; padding: .55rem 0;
+      display: block; min-height: 2.5rem;
+    }
+    .rm {
+      align-self: end; width: 2.4rem; height: 2.4rem; border-radius: 6px;
+      background: #fff; border: 1px solid var(--border); color: var(--text-muted);
+      font-size: 1.2rem; line-height: 1; cursor: pointer;
+    }
+    .rm:hover { color: var(--danger); border-color: #fca5a5; }
+    .msg { grid-column: 1 / -1; font-size: .82rem; color: var(--text-muted); }
+    .msg:empty { display: none; }
+    .row.bad .msg { color: #b91c1c; }
+    .add { margin-top: .7rem; }
+
+    /* Desktop: label only the first row of a group; later rows keep it for
+       screen readers but not the eye. Small screens keep every label. */
+    @media (min-width: 761px) {
+      .rows .row:not(:first-child) .lbl {
+        position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+      }
+    }
+    @media (max-width: 760px) {
+      .calc { padding: 1.1rem; }
+      .row.buy, .row.use { grid-template-columns: 1fr 1fr; }
+      .row .f-name, .row .f-ing { grid-column: 1 / -1; }
+      .row .rm { grid-column: 2; justify-self: end; }
+      .step > p { margin-left: 0; }
+    }
+
+    .inputs-3 { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); margin-top: .9rem; }
+    .inputs-3 .lbl { font-size: .82rem; }
+    .warn-inline { color: #b91c1c; font-size: .82rem; margin-top: .3rem; }
+
+    /* ===== RESULTS ===== */
+    .results { margin-top: 1.8rem; border-top: 1px solid var(--border); padding-top: 1.5rem; }
+    .results h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: .9rem; }
+    .stats { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+    .stat { border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem 1.1rem; background: #fff; }
+    .stat.main { background: #eef2ff; border-color: #c7d2fe; }
+    .stat .k { font-size: .82rem; color: var(--text-muted); font-weight: 600; }
+    .stat .v { font-size: 1.8rem; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.25; }
+    .stat .note { font-size: .78rem; color: var(--text-muted); min-height: 1.2em; }
+    .res-warn { background: #fffbeb; border: 1px solid #fcd34d; color: #92400e; border-radius: var(--radius-sm); padding: .7rem .9rem; font-size: .9rem; margin-bottom: .9rem; }
+    .fine { font-size: .82rem; color: var(--text-muted); margin-top: 1rem; }
+
+    /* ===== ARTICLE ===== */
+    .prose { max-width: 720px; margin: 0 auto; }
+    .prose h2 { font-size: clamp(1.4rem, 3vw, 1.8rem); letter-spacing: -.02em; font-weight: 800; line-height: 1.25; margin: 2.4rem 0 .8rem; }
+    .prose h2:first-child { margin-top: 0; }
+    .prose h3 { font-size: 1.1rem; font-weight: 700; margin: 1.5rem 0 .4rem; letter-spacing: -.01em; }
+    .prose p { color: #334155; margin-bottom: .9rem; }
+    .prose ol { margin: 0 0 1rem 1.3rem; color: #334155; }
+    .prose li { margin-bottom: .6rem; }
+    .formula {
+      display: block; background: #fff; border: 1px solid var(--border); border-left: 3px solid var(--primary);
+      border-radius: 6px; padding: .6rem .9rem; margin: .5rem 0; font-weight: 600; color: var(--text);
+    }
+    .table-wrap { overflow-x: auto; margin: 1rem 0 1.2rem; }
+    table.eg { width: 100%; border-collapse: collapse; font-size: .93rem; background: #fff; border: 1px solid var(--border); }
+    table.eg th, table.eg td { text-align: left; padding: .6rem .8rem; border-bottom: 1px solid var(--border); }
+    table.eg th { background: var(--bg-alt); font-size: .8rem; color: var(--text-muted); text-transform: none; }
+    table.eg td.num, table.eg th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    table.eg tr.total td { font-weight: 800; background: #eef2ff; }
+
+    /* ===== FAQ ===== */
+    .faq { max-width: 720px; margin: 0 auto; display: grid; gap: .8rem; }
+    .faq .q { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 1.1rem 1.3rem; }
+    .faq h3 { font-size: 1.02rem; font-weight: 700; margin-bottom: .35rem; letter-spacing: -.01em; }
+    .faq p { color: #475569; font-size: .96rem; }
+
+    /* ===== FINAL CTA ===== */
+    .final {
+      background: linear-gradient(135deg, var(--primary-d), var(--primary));
+      color: #fff; border-radius: 16px; padding: 3rem 1.5rem; text-align: center;
+    }
+    .final h2 { font-size: clamp(1.5rem, 3.4vw, 2.1rem); letter-spacing: -.02em; font-weight: 800; line-height: 1.2; margin-bottom: .7rem; }
+    .final p { color: rgba(255,255,255,.88); max-width: 56ch; margin: 0 auto 1.6rem; }
+    .final .btn-primary { background: #fff; color: var(--primary-d); box-shadow: 0 4px 16px rgba(15,23,42,.2); }
+    .final .more { margin: 1rem 0 0; font-size: .88rem; }
+    .final .more a { color: #fff; font-weight: 600; }
+
+    /* ===== FOOTER ===== */
+    footer { border-top: 1px solid var(--border); padding: 2rem 0; font-size: .87rem; color: var(--text-muted); }
+    .foot-inner { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    footer a { color: var(--text-muted); text-decoration: none; }
+    footer a:hover { color: var(--text); text-decoration: underline; }
+
+    @media (max-width: 640px) {
+      .hero { padding: 2.6rem 0 1.2rem; }
+      section { padding: 2.2rem 0; }
+      .nav-inner { padding: .7rem 1rem; gap: .4rem; }
+      .brand { font-size: 1.05rem; }
+      .nav-anchor { display: none; }
+      .nav-inner .btn { padding: .5rem .85rem; font-size: .88rem; }
+    }
+    @media (max-width: 359px) {
+      .nav-login { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Icons: Font Awesome Free 6.4.0 by @fontawesome, https://fontawesome.com/license/free
+       (icons CC BY 4.0). Inlined so the page loads no icon font. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="i-receipt" viewBox="0 0 384 512"><path d="M14 2.2C22.5-1.7 32.5-.3 39.6 5.8L80 40.4 120.4 5.8c9-7.7 22.3-7.7 31.2 0L192 40.4 232.4 5.8c9-7.7 22.3-7.7 31.2 0L304 40.4 344.4 5.8c7.1-6.1 17.1-7.5 25.6-3.6s14 12.4 14 21.8V488c0 9.4-5.5 17.9-14 21.8s-18.5 2.5-25.6-3.6L304 471.6l-40.4 34.6c-9 7.7-22.3 7.7-31.2 0L192 471.6l-40.4 34.6c-9 7.7-22.3 7.7-31.2 0L80 471.6 39.6 506.2c-7.1 6.1-17.1 7.5-25.6 3.6S0 497.4 0 488V24C0 14.6 5.5 6.1 14 2.2zM96 144c-8.8 0-16 7.2-16 16s7.2 16 16 16H288c8.8 0 16-7.2 16-16s-7.2-16-16-16H96zM80 352c0 8.8 7.2 16 16 16H288c8.8 0 16-7.2 16-16s-7.2-16-16-16H96c-8.8 0-16 7.2-16 16zM96 240c-8.8 0-16 7.2-16 16s7.2 16 16 16H288c8.8 0 16-7.2 16-16s-7.2-16-16-16H96z"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 448 512"><path d="M144 144v48H304V144c0-44.2-35.8-80-80-80s-80 35.8-80 80zM80 192V144C80 64.5 144.5 0 224 0s144 64.5 144 144v48h16c35.3 0 64 28.7 64 64V448c0 35.3-28.7 64-64 64H64c-35.3 0-64-28.7-64-64V256c0-35.3 28.7-64 64-64H80z"/></symbol>
+  </svg>
+
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="/"><svg class="ic" style="width:.75em" aria-hidden="true" focusable="false"><use href="#i-receipt"/></svg> Foodnance</a>
+      <div class="nav-spacer"></div>
+      <a class="nav-link nav-anchor" href="/#features">Features</a>
+      <a class="nav-link nav-anchor" href="/#how">How it works</a>
+      <a class="nav-link nav-anchor" href="/food-cost-calculator" aria-current="page">Free calculator</a>
+      <a class="nav-link nav-anchor" href="/pricing">Pricing</a>
+      <a class="nav-link nav-anchor" href="/#faq">FAQ</a>
+      <a class="nav-link nav-login" href="/login">Log in</a>
+      <a class="btn btn-primary" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">Request access</a>
+    </div>
+  </header>
+
+  <main>
+  <!-- ══ HERO ══ -->
+  <div class="hero wrap">
+    <div class="eyebrow">Free tool</div>
+    <h1>Food cost calculator <span class="accent">for any dish</span></h1>
+    <p class="sub">Enter what you paid for your ingredients and what goes on the plate. You get the cost of the dish, the cost per portion and your food cost percentage. Nothing is saved.</p>
+  </div>
+
+  <!-- ══ THE CALCULATOR ══ -->
+  <section style="padding-top:1rem" aria-labelledby="calc-label">
+    <div class="wrap">
+      <h2 id="calc-label" style="position:absolute;left:-9999px">Food cost calculator</h2>
+      <div class="calc" id="fcApp">
+        <div class="calc-top">
+          <p class="privacy-note"><svg class="ic" style="width:.8em" aria-hidden="true" focusable="false"><use href="#i-lock"/></svg> Everything runs in your browser. Nothing you type is saved or sent anywhere.</p>
+          <div class="calc-actions">
+            <button type="button" class="btn btn-ghost btn-sm" id="loadExample">Try an example</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="clearAll">Clear all</button>
+          </div>
+        </div>
+
+        <div class="step">
+          <h3><span class="n">1</span> What you bought</h3>
+          <p>Type each product, how much you bought, and the total you paid. Use the price on your invoice. If part of it is lost to trimming or cooking, enter the usable percentage.</p>
+          <div class="rows" id="buyRows"></div>
+          <button type="button" class="btn btn-ghost btn-sm add" id="addBuy">+ Add a product</button>
+        </div>
+
+        <div class="step">
+          <h3><span class="n">2</span> What goes in one dish</h3>
+          <p>Choose each ingredient from your list and enter how much the recipe uses.</p>
+          <div class="rows" id="useRows"></div>
+          <button type="button" class="btn btn-ghost btn-sm add" id="addUse">+ Add an ingredient</button>
+        </div>
+
+        <div class="step">
+          <h3><span class="n">3</span> Portions and price</h3>
+          <p>Optional. Add the selling price to see your food cost percentage.</p>
+          <div class="inputs-3">
+            <label class="fld"><span class="lbl">Portions this recipe makes</span>
+              <input type="text" inputmode="decimal" id="portions" placeholder="1" autocomplete="off" />
+              <span class="warn-inline" id="portionsNote" hidden>Enter a number above zero.</span>
+            </label>
+            <label class="fld"><span class="lbl">Selling price per portion</span>
+              <span class="affix"><span class="pre" aria-hidden="true">$</span><input type="text" inputmode="decimal" id="price" placeholder="e.g. 34" autocomplete="off" /></span>
+            </label>
+            <label class="fld"><span class="lbl">Target food cost %</span>
+              <input type="text" inputmode="decimal" id="target" placeholder="30" autocomplete="off" />
+            </label>
+          </div>
+        </div>
+
+        <div class="results" id="results" aria-live="polite">
+          <h3>Your result</h3>
+          <div class="res-warn" id="resWarn" hidden></div>
+          <div class="stats">
+            <div class="stat"><div class="k" id="resTotalLbl">Cost of the dish</div><div class="v" id="resTotal">—</div></div>
+            <div class="stat"><div class="k">Cost per portion</div><div class="v" id="resPortion">—</div></div>
+            <div class="stat main"><div class="k">Food cost percentage</div><div class="v" id="resPct">—</div><div class="note" id="resPctNote"></div></div>
+            <div class="stat"><div class="k">Gross profit per portion</div><div class="v" id="resProfit">—</div></div>
+            <div class="stat"><div class="k" id="resTargetLbl">Price for your target</div><div class="v" id="resTarget">—</div></div>
+          </div>
+          <p class="fine">An estimate from the numbers you typed. It covers ingredients only, not labour, packaging or overhead. Use any currency: the calculator only multiplies.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ HOW TO ══ -->
+  <section class="section-alt">
+    <div class="wrap">
+      <div class="prose">
+        <h2>How to calculate food cost</h2>
+        <p>Food cost has three steps: price each ingredient, add up the dish, then compare the total with what you charge.</p>
+
+        <ol>
+          <li><strong>Find the price per unit.</strong> Divide what you paid by how much you bought.
+            <span class="formula">Price per kg = total paid ÷ kg bought</span></li>
+          <li><strong>Cost each ingredient.</strong> Multiply that price by the amount the recipe uses, then add the ingredients together to get the cost of the dish. Divide by the number of portions to get the cost per portion.
+            <span class="formula">Ingredient cost = price per kg × kg used</span></li>
+          <li><strong>Work out the food cost percentage.</strong> Divide the cost of one portion by its selling price.
+            <span class="formula">Food cost % = cost per portion ÷ selling price × 100</span>
+            To go the other way and set a price for a target, divide the cost per portion by the target.
+            <span class="formula">Selling price = cost per portion ÷ target food cost %</span></li>
+        </ol>
+        <p>If you lose part of a product to trimming or cooking, price only the part you serve.</p>
+        <span class="formula">Price per kg = total paid ÷ (kg bought × usable %)</span>
+
+        <h2>A worked example</h2>
+        <p>A kitchen buys 10 kg of beef for $300 and 5 kg of potatoes for $32. One dish uses 300 g of beef and 200 g of potatoes.</p>
+        <div class="table-wrap">
+          <table class="eg">
+            <thead><tr><th>Ingredient</th><th>Bought</th><th class="num">Price per kg</th><th>Used</th><th class="num">Cost</th></tr></thead>
+            <tbody>
+              <tr><td>Beef</td><td>10 kg for $300</td><td class="num">$30.00</td><td>300 g</td><td class="num">$9.00</td></tr>
+              <tr><td>Potatoes</td><td>5 kg for $32</td><td class="num">$6.40</td><td>200 g</td><td class="num">$1.28</td></tr>
+              <tr class="total"><td colspan="4">Cost of the dish</td><td class="num">$10.28</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Sold at $34.00, the food cost is $10.28 ÷ $34.00 × 100, which is 30.2 percent, and each portion leaves $23.72 of gross profit. To hit exactly 30 percent, the price would be $10.28 ÷ 0.30, or $34.27. Press <strong>Try an example</strong> above to see the calculator do the same.</p>
+
+        <h2>What this calculator does not include</h2>
+        <p>Food cost covers ingredients only. It leaves out labour, packaging, delivery fees and overhead, so a dish with a good food cost percentage can still lose money. It also uses the prices you type today. If your supplier raises a price next week, the answer changes and you need to run it again.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ FAQ ══ -->
+  <section>
+    <div class="wrap">
+      <div class="section-head">
+        <h2 class="section-title">Food cost questions</h2>
+        <p>Short answers to what people usually ask.</p>
+      </div>
+      <div class="faq">
+        <div class="q"><h3>What is food cost?</h3><p>Food cost is what the ingredients in a dish cost you, based on the prices you actually paid your suppliers. It is usually shown two ways: as dollars per portion, and as a percentage of the selling price.</p></div>
+        <div class="q"><h3>How do you calculate food cost percentage?</h3><p>Divide the cost of one portion by its selling price, then multiply by 100. A dish that costs $10.28 to make and sells for $34.00 has a food cost of 30.2 percent.</p></div>
+        <div class="q"><h3>How do you calculate the cost of an ingredient in a recipe?</h3><p>Divide what you paid by the quantity you bought to get the price per unit, then multiply by the quantity the recipe uses. Beef at $300 for 10 kg is $30.00 per kg, so 300 g of it costs $9.00.</p></div>
+        <div class="q"><h3>What is a good food cost percentage?</h3><p>Many restaurants aim for roughly 28 to 35 percent, but the right figure depends on the kind of restaurant, the menu and your prices. Use it as a starting point, and compare each dish with the target you set for your own business.</p></div>
+        <div class="q"><h3>How do I include trimming and waste in the cost?</h3><p>Enter a usable percentage for the product. If 15 percent of a 10 kg purchase of beef is lost to trimming, enter 85. The calculator then prices only the meat you can serve, so 300 g of beef costs $10.59 instead of $9.00.</p></div>
+        <div class="q"><h3>Can I mix units, like buying in kilograms and using grams?</h3><p>Yes, within the same kind of unit. Weights (g, kg, oz, lb) convert to each other, and so do volumes (ml, L, fl oz, tsp, tbsp, cup). Weight and volume cannot be converted without knowing the density of the ingredient, so the calculator asks you to use a matching unit rather than guess.</p></div>
+        <div class="q"><h3>Is anything I type saved or sent anywhere?</h3><p>No. The calculation happens in your browser. Nothing you enter is stored or sent to us, and it is gone when you refresh or close the page.</p></div>
+        <div class="q"><h3>Why does my food cost keep changing?</h3><p>Supplier prices move, so the same recipe costs a different amount from one delivery to the next. A calculator shows one moment in time. Foodnance re-costs every dish from your supplier invoices as you upload them, so the numbers stay current without re-typing.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ FINAL CTA ══ -->
+  <section style="padding-top:0">
+    <div class="wrap">
+      <div class="final">
+        <h2>Costing one dish is a start</h2>
+        <p>Foodnance is food cost software for independent Canadian restaurants and bakeries. Photograph a supplier invoice, and your recipe costs, margins and P&amp;L update themselves.</p>
+        <a class="btn btn-primary btn-lg" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">Request access</a>
+        <p class="more">Curious about the cost? <a href="/pricing">See pricing</a></p>
+      </div>
+    </div>
+  </section>
+  </main>
+
+  <footer>
+    <div class="wrap foot-inner">
+      <a class="brand" href="/" style="font-size:1rem"><svg class="ic" style="width:.75em" aria-hidden="true" focusable="false"><use href="#i-receipt"/></svg> Foodnance</a>
+      <div class="nav-spacer"></div>
+      <span>&copy; 2026 Foodnance</span>
+      <a href="/">Home</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/login">Log in</a>
+      <a href="mailto:hello@foodnance.com">Contact</a>
+    </div>
+  </footer>
+
+  <script src="/static/env-banner.js?v=20260807-2"></script>
+  <script src="/static/food-cost-calculator.js?v=20260921-2"></script>
+</body>
+</html>
