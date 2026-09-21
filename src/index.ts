@@ -2286,23 +2286,33 @@ app.post('/api/admin/organizations/:id/archive', async (c) => {
   return c.json({ ok: true, organization: { id: org.id, name: org.name }, archived: true })
 })
 
-// Every tenant table, for the purge below. Mirrors TENANT_TABLES in
-// tests/org-scoping.test.mjs — if a table is added there it belongs here too,
-// or a purge silently leaves that table's rows behind, still carrying the
-// deleted customer's data.
+// Every tenant table, for the purge below.
+//
+// Two rules, both enforced by tests/purge-coverage.test.mjs so they cannot rot:
+//   1. It contains every table in TENANT_TABLES (tests/org-scoping.test.mjs). A
+//      table missing here is not merely "left behind" — it still carries the
+//      deleted customer's data, and if it has a foreign key to the organization
+//      it makes the final DELETE fail.
+//   2. CHILD BEFORE PARENT wherever a foreign key does not cascade. SQLite
+//      refuses to delete a row something still points at, and an alphabetical
+//      list gets this wrong: certification_types sorts before the
+//      staff_certifications that reference it, generic_products before
+//      product_aliases. Either one made the purge 500 half-way through.
 const PURGE_TABLES = [
-  'categories', 'certification_types', 'finished_product_items', 'finished_products',
-  'generic_products', 'inventory', 'invoice_lines', 'invoices', 'item_placements',
-  'labor_periods', 'operating_expenses',
-  // Child before parent: pos_sale_lines.import_id references pos_imports(id).
-  // The rest of this list is alphabetical and happens to satisfy that already
-  // (recipe_items before recipes, stock_take_items before stock_takes); this
-  // pair does not, so it is ordered by hand.
+  // Logs that point at the organization itself.
+  'ai_cap_blocks', 'ai_parse_log',
   'pos_sale_lines', 'pos_imports', 'pos_item_map',
-  'product_aliases', 'product_entries', 'product_mappings',
-  'recipe_items', 'recipes', 'recurring_expenses', 'sales_monthly', 'spread_expenses',
-  'staff', 'staff_certifications', 'stock_log', 'stock_take_items', 'stock_takes',
-  'storage_sections', 'suppliers', 'units', 'vendor_fee_templates',
+  'stock_take_items', 'stock_takes',
+  'item_placements', 'storage_sections',
+  'invoice_lines', 'invoices',
+  'recipe_items', 'recipes',
+  'finished_product_items', 'finished_products',
+  'staff_certifications', 'staff', 'certification_types',
+  'product_aliases', 'product_mappings', 'product_entries',
+  'inventory', 'stock_log', 'generic_products',
+  'suppliers', 'categories', 'units', 'vendor_fee_templates',
+  'sales_monthly', 'operating_expenses', 'recurring_expenses', 'spread_expenses',
+  'labor_periods',
 ]
 
 // Irreversible. Guarded three ways, because the cost of doing this to the wrong
@@ -2330,11 +2340,27 @@ app.delete('/api/admin/organizations/:id', async (c) => {
   // Data first, org row last: if this fails part-way the account still exists
   // and is still archived, so it can be retried. Deleting the organization
   // first would strand every remaining row with no owner and no way to find it.
-  for (const table of PURGE_TABLES) {
-    await c.env.DB.prepare(`DELETE FROM ${table} WHERE org_id IS ?`).bind(id).run()
+  //
+  // One DB.batch(), which D1 runs as a single transaction: it either erases
+  // everything or — if any statement throws — nothing, so a purge can never
+  // leave an account half-deleted and unretryable. (Run row by row it did: a
+  // foreign-key failure on statement N left statements 1..N-1 committed.)
+  //
+  // Users go last because password_resets and invites point at them; the reset
+  // tokens are hashed, but they are still rows tied to a person.
+  try {
+    await c.env.DB.batch([
+      ...PURGE_TABLES.map(table =>
+        c.env.DB.prepare(`DELETE FROM ${table} WHERE org_id IS ?`).bind(id)),
+      c.env.DB.prepare(
+        'DELETE FROM password_resets WHERE user_id IN (SELECT id FROM users WHERE org_id = ?)').bind(id),
+      c.env.DB.prepare('DELETE FROM invites WHERE org_id = ?').bind(id),
+      c.env.DB.prepare('DELETE FROM users WHERE org_id = ?').bind(id),
+    ])
+  } catch (e) {
+    console.error('purge failed, nothing was deleted', id, e)
+    return c.json({ error: 'Could not delete this account. Nothing was changed — it is still closed and can be retried.' }, 500)
   }
-  await c.env.DB.prepare('DELETE FROM invites WHERE org_id = ?').bind(id).run()
-  await c.env.DB.prepare('DELETE FROM users WHERE org_id = ?').bind(id).run()
 
   // Their invoice photos and certificates. R2 lists 1000 keys at a time.
   let filesDeleted = 0
@@ -2349,10 +2375,10 @@ app.delete('/api/admin/organizations/:id', async (c) => {
       cursor = listed.truncated ? listed.cursor : undefined
     } while (cursor)
   } catch (_) {
-    // Rows are already gone; report the shortfall rather than failing the whole
-    // purge, otherwise a retry would find nothing left to delete and 404.
+    // Rows are already gone and the organization row is deliberately still here,
+    // so running the purge again picks up the remaining files rather than 404ing.
     return c.json({ ok: true, deleted: org.name, files_deleted: filesDeleted,
-                    warning: 'Data deleted, but some uploaded files could not be removed.' })
+                    warning: 'Data deleted, but some uploaded files could not be removed. Run the delete again to finish.' })
   }
 
   await c.env.DB.prepare('DELETE FROM organizations WHERE id = ?').bind(id).run()

@@ -25,7 +25,8 @@
     "test:live-costing": "node tests/integration/live-costing.test.mjs",
     "test:cogs": "node tests/integration/cogs-valuation.test.mjs",
     "test:merge": "node tests/integration/product-merge.test.mjs",
-    "test:reset": "node tests/integration/password-reset.test.mjs"
+    "test:reset": "node tests/integration/password-reset.test.mjs",
+    "test:purge": "node tests/integration/org-purge.test.mjs"
   },
   "dependencies": {
     "hono": "^4.12.7"

@@ -69,8 +69,15 @@ t.check('the email goes out AFTER the response (no timing tell for known address
   !!issue && /executionCtx\.waitUntil\(delivery\)/.test(issue));
 t.check('an older unused link is spent when a new one is issued',
   !!issue && /UPDATE password_resets SET used_at = datetime\('now'\) WHERE user_id = \? AND used_at IS NULL/.test(issue));
-t.check('rows are never deleted — they are the rate-limit ledger',
-  !/DELETE FROM password_resets/.test(src));
+// The one exception is the account purge: it deletes a user's rows only because
+// the user is being deleted too, at which point there is no one left to protect.
+const deletes = [...src.matchAll(/DELETE FROM password_resets[^`'"]*/g)];
+const purgeStart = src.indexOf("app.delete('/api/admin/organizations/:id'");
+t.check('rows are never deleted — they are the rate-limit ledger — except by the account purge',
+  deletes.length === 1
+  && deletes[0].index > purgeStart
+  && /WHERE user_id IN \(SELECT id FROM users WHERE org_id = \?\)/.test(deletes[0][0]),
+  `${deletes.length} DELETE statement(s)`);
 
 t.section('the token');
 t.check('only the SHA-256 is stored, never the raw token',
