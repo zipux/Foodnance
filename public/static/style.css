@@ -99,6 +99,21 @@ body {
   color: rgba(255,255,255,.92);
   white-space: nowrap;
 }
+/* Nothing may move when the chip arrives. The tabs push themselves (and whatever
+   follows them) to the right edge with margin-left:auto. A second auto margin on
+   the chip would SPLIT that free space between the two, so the tabs sat at one
+   position before the chip existed and jumped several hundred pixels left the
+   moment utils.js inserted it — on every page load. So the chip takes no auto
+   margin when it follows the tabs... */
+.nav-links ~ .session-chip { margin-left: 0; }
+
+/* ...and until it exists, an empty box of the same width sits where it will go.
+   utils.js adds .has-chip when it inserts the real one, in the same frame, so the
+   tabs never change position. The width is remembered from the last page load
+   (nav-gate.js sets --dm-chip-w); these are the fallbacks for a first visit. */
+:root { --dm-chip-w: 240px; }
+.navbar:not(.has-chip)::after { content: ''; flex: 0 0 var(--dm-chip-w); }
+
 .session-chip .session-who {
   display: flex;
   align-items: center;
@@ -941,6 +956,7 @@ body {
   /* Narrow screens: drop the org name and the button's word, keep the button
      itself — its aria-label carries the meaning for screen readers. */
   .session-chip { gap: .3rem; }
+  :root { --dm-chip-w: 107px; }   /* icon-only chip (measured): the reserved room shrinks with it */
   .session-chip .session-who span { display: none; }
   .session-chip .session-signout span { display: none; }
   .session-chip .session-signout { padding: .4rem .55rem; }

@@ -25,8 +25,11 @@ const t = suite('nav-gate');
 
 // A localStorage that can be made to misbehave, and a document that records
 // what gets appended to <head>.
-function env({ stored, storageThrows = false } = {}) {
-  const store = new Map(stored === undefined ? [] : [['dm_nav_features', stored]]);
+function env({ stored, chipStored, storageThrows = false } = {}) {
+  const store = new Map([
+    ...(stored === undefined ? [] : [['dm_nav_features', stored]]),
+    ...(chipStored === undefined ? [] : [['dm_chip_w', chipStored]]),
+  ]);
   const appended = [];
   const localStorage = {
     getItem: (k) => { if (storageThrows) throw new Error('blocked'); return store.has(k) ? store.get(k) : null; },
@@ -39,7 +42,8 @@ function env({ stored, storageThrows = false } = {}) {
     getElementById: (id) => appended.find(e => e.id === id) || null,
     addEventListener() {}, querySelector: () => null, querySelectorAll: () => [], body: {},
   };
-  const names = ['DM_NAV_GATED', 'dmNavCss', 'dmNavRecall', 'dmNavRemember', 'dmNavForget', 'dmNavDropProvisional'];
+  const names = ['DM_NAV_GATED', 'dmNavCss', 'dmNavRecall', 'dmNavRemember', 'dmNavForget', 'dmNavDropProvisional',
+    'DM_NARROW_QUERY', 'dmChipCss', 'dmChipRecall', 'dmChipRemember'];
   const api = loadBrowserModule(['nav-gate.js'], names, { localStorage, document });
   return { api, store, appended };
 }
@@ -147,6 +151,54 @@ t.section('At page load');
   t.check('a corrupt memory injects nothing', env({ stored: '{{' }).appended.length === 0);
 }
 
+// ── The chip: nothing may move when it arrives ────────────────────
+t.section('Reserving the account chip\'s room');
+const css = read('static/style.css');
+t.check('the phone breakpoint matches style.css',
+  css.includes('@media ' + api.DM_NARROW_QUERY.replace('(', '(')) && api.DM_NARROW_QUERY === '(max-width: 768px)');
+t.check('the chip takes no auto margin when it follows the tabs (two auto margins split the free space)',
+  /\.nav-links ~ \.session-chip \{ margin-left: 0; \}/.test(css));
+t.check('an empty box the width of the chip holds its place until it exists',
+  /\.navbar:not\(\.has-chip\)::after \{ content: ''; flex: 0 0 var\(--dm-chip-w\); \}/.test(css));
+t.check('there is a fallback width for a first visit, and the icon-only width on phones',
+  /:root \{ --dm-chip-w: 240px; \}/.test(css) && /@media \(max-width: 768px\) \{[\s\S]*?:root \{ --dm-chip-w: 107px; \}/.test(css));
+t.check('utils.js marks the nav .has-chip in the same step it inserts the chip',
+  /nav\.appendChild\(chip\);[\s\S]{0,700}nav\.classList\.add\('has-chip'\)/.test(utilsSrc));
+t.check('and remembers the measured width with which layout it was measured in',
+  /dmChipRemember\(chip\.getBoundingClientRect\(\)\.width, matchMedia\('\(max-width: 768px\)'\)\.matches\)/.test(utilsSrc));
+
+t.check('a remembered width becomes the CSS variable', api.dmChipCss({ w: 241.4, narrow: false }, false) === ':root{--dm-chip-w:241px}');
+t.check('a width from the other layout is ignored (desktop width on a phone)', api.dmChipCss({ w: 241, narrow: false }, true) === '');
+t.check('...and a phone width on a desktop', api.dmChipCss({ w: 130, narrow: true }, false) === '');
+for (const [label, bad] of [['null', null], ['no width', {}], ['a string', { w: '241', narrow: false }], ['NaN', { w: NaN, narrow: false }],
+                            ['too small', { w: 5, narrow: false }], ['absurd', { w: 99999, narrow: false }], ['Infinity', { w: Infinity, narrow: false }]]) {
+  t.check(`an unusable width (${label}) falls back to the stylesheet's`, api.dmChipCss(bad, false) === '');
+}
+{
+  const e = env();
+  e.api.dmChipRemember(241.2, false);
+  t.check('remember stores width and layout only', JSON.stringify(JSON.parse(e.store.get('dm_chip_w'))) === '{"w":241,"narrow":false}');
+  t.check('recall reads it back', e.api.dmChipRecall().w === 241);
+  e.api.dmChipRemember(3, false); e.api.dmChipRemember(NaN, false); e.api.dmChipRemember('x', false);
+  t.check('implausible widths are never stored', e.api.dmChipRecall().w === 241);
+  e.api.dmNavForget();
+  t.check('sign-out forgets the chip width too', e.api.dmChipRecall() === null);
+  t.check('blocked storage never throws for the chip either', (() => {
+    try { const b = env({ storageThrows: true }); b.api.dmChipRemember(200, false); b.api.dmChipRecall(); return true; } catch (_) { return false; }
+  })());
+}
+{
+  const e = env({ stored: JSON.stringify({ features: [] }), chipStored: JSON.stringify({ w: 250, narrow: false }) });
+  const chipStyle = e.appended.find(x => x.id === 'dmChipW');
+  t.check('at load, a remembered chip width is injected as --dm-chip-w', !!chipStyle && chipStyle.textContent === ':root{--dm-chip-w:250px}');
+  e.api.dmNavDropProvisional();
+  t.check('it is a layout variable, so the server\'s answer does NOT remove it', chipStyle.removed !== true);
+  t.check('and it is separate from the tab-hiding style, which is removed',
+    e.appended.find(x => x.id === 'dmNavGate').removed === true);
+  t.check('no remembered width injects nothing (the stylesheet fallback applies)', !env().appended.some(x => x.id === 'dmChipW'));
+  t.check('a corrupt remembered width injects nothing', !env({ chipStored: '{{' }).appended.some(x => x.id === 'dmChipW'));
+}
+
 // ── Wiring ────────────────────────────────────────────────────────
 t.section('Wired into every page');
 for (const page of pages) {
@@ -154,7 +206,13 @@ for (const page of pages) {
   const head = html.slice(0, html.indexOf('</head>'));
   t.check(`${page}: nav-gate.js is loaded synchronously in <head>`,
     /<script src="\/static\/nav-gate\.js\?v=\d+-\d+"><\/script>/.test(head) && !/nav-gate\.js[^>]*(async|defer)/.test(head));
-  t.check(`${page}: utils.js carries the current cache-buster`, /utils\.js\?v=20260921-1/.test(html));
+}
+// One cache-buster per shared file, the same on every page: a page left on an old
+// ?v= keeps serving the old script from the CDN (see CLAUDE.md), which here would
+// mean a nav that jumps or flashes on that one page only.
+for (const file of ['utils.js', 'style.css', 'nav-gate.js']) {
+  const versions = new Set(pages.map(p => (read(p).match(new RegExp(file.replace('.', '\\.') + '\\?v=([0-9-]+)')) || [])[1]));
+  t.check(`every app page loads ${file} with the same ?v=`, versions.size === 1 && !versions.has(undefined), [...versions].join(', '));
 }
 const login = read('login.html'), admin = read('admin.html');
 t.check('login.html loads it and seeds the memory from the login response',

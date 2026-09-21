@@ -74,7 +74,42 @@ function dmNavRemember(me) {
 // Sign out: the next person to use this browser must not inherit the last
 // one's tabs.
 function dmNavForget() {
-  try { localStorage.removeItem(DM_NAV_KEY); } catch (_) {}
+  try { localStorage.removeItem(DM_NAV_KEY); localStorage.removeItem(DM_CHIP_KEY); } catch (_) {}
+}
+
+// ─── The account chip's width ─────────────────────────────────
+// The nav jumped sideways on every page load because the account chip (name,
+// settings, sign out) is inserted by utils.js only AFTER /api/auth/me answers,
+// and the tabs are pushed right by whatever room is left. style.css now reserves
+// an empty box where the chip will go; this remembers how wide the real one was,
+// so the box is exactly that wide and the tabs do not move by a single pixel.
+//
+// Stored with which layout it was measured in, because the chip loses its labels
+// on narrow screens. A remembered width from the other layout is ignored, and the
+// stylesheet's own fallback is used instead.
+const DM_CHIP_KEY = 'dm_chip_w';
+// Must equal the phone breakpoint in style.css — tests/nav-gate.test.mjs checks.
+const DM_NARROW_QUERY = '(max-width: 768px)';
+
+// The CSS variable override for a remembered width, or '' when there is nothing
+// trustworthy to use. Bounded, so a bad value cannot collapse or blow up the nav.
+function dmChipCss(mem, narrowNow) {
+  if (!mem || typeof mem.w !== 'number' || !isFinite(mem.w)) return '';
+  if (mem.w < 40 || mem.w > 600) return '';
+  if (!!mem.narrow !== !!narrowNow) return '';
+  return ':root{--dm-chip-w:' + Math.round(mem.w) + 'px}';
+}
+
+function dmChipRecall() {
+  try { return JSON.parse(localStorage.getItem(DM_CHIP_KEY)); } catch (_) { return null; }
+}
+
+function dmChipRemember(width, narrow) {
+  try {
+    if (typeof width === 'number' && isFinite(width) && width >= 40 && width <= 600) {
+      localStorage.setItem(DM_CHIP_KEY, JSON.stringify({ w: Math.round(width), narrow: !!narrow }));
+    }
+  } catch (_) { /* storage blocked: the stylesheet's fallback width is used */ }
 }
 
 // The server has answered: drop the guess. utils.js then applies the real list.
@@ -85,10 +120,25 @@ function dmNavDropProvisional() {
 
 (function () {
   if (typeof document === 'undefined' || !document.head || !document.createElement) return;
+
+  // Hide the tabs the plan lacks. Provisional: removed when the server answers.
   const css = dmNavCss(dmNavRecall());
-  if (!css) return;
-  const style = document.createElement('style');
-  style.id = DM_NAV_STYLE_ID;
-  style.textContent = css;
-  document.head.appendChild(style);
+  if (css) {
+    const style = document.createElement('style');
+    style.id = DM_NAV_STYLE_ID;
+    style.textContent = css;
+    document.head.appendChild(style);
+  }
+
+  // Reserve the chip's remembered width. A layout variable, not a guess about
+  // the user, so it stays for the life of the page.
+  let narrow = false;
+  try { narrow = typeof matchMedia === 'function' && matchMedia(DM_NARROW_QUERY).matches; } catch (_) {}
+  const chipCss = dmChipCss(dmChipRecall(), narrow);
+  if (chipCss) {
+    const w = document.createElement('style');
+    w.id = 'dmChipW';
+    w.textContent = chipCss;
+    document.head.appendChild(w);
+  }
 })();

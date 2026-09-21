@@ -375,6 +375,16 @@ async function renderSessionChip() {
     </a>`;
   nav.appendChild(chip);
 
+  // The chip was not in the page until now, and the tabs are pushed right by the
+  // room it leaves — so its arrival used to slide them ~300px on every page load.
+  // style.css holds an empty box of the chip's width until this class appears
+  // (same frame, so no movement); remember the real width so the next page's box
+  // is exactly right. See nav-gate.js.
+  nav.classList.add('has-chip');
+  if (typeof dmChipRemember === 'function') {
+    dmChipRemember(chip.getBoundingClientRect().width, matchMedia('(max-width: 768px)').matches);
+  }
+
   document.getElementById('navChangePw').addEventListener('click', (e) => {
     e.preventDefault();
     openChangePasswordModal();

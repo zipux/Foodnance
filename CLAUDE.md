@@ -353,6 +353,15 @@ gated paths must equal `PLAN_GATED_PAGES` in utils.js (`tests/nav-gate.test.mjs`
 links only: a gated page reached by URL still swaps in its upgrade panel after `/me`.
 Adding a nav page means adding the `<script>` line to its `<head>` (the test checks).
 
+**The nav must not move when the account chip arrives.** `renderSessionChip()` inserts the
+chip only after `/me` answers, and the tabs are pushed right by the room it leaves
+(`.nav-links{margin-left:auto}`). The chip *also* had `margin-left:auto`, so the two split the
+free space and the tabs jumped ~300px on every page load. Now the chip takes no auto margin
+when it follows the tabs, `.navbar:not(.has-chip)::after` reserves a box of `--dm-chip-w`
+until utils.js adds `.has-chip`, and nav-gate.js sets that width from `localStorage['dm_chip_w']`
+(measured last load, per layout, cleared at sign-out). Measured in a browser: 0px movement.
+Fallbacks are 240px desktop / 107px phone (first visit only).
+
 ### Product categories
 Categories are **free-text** on `generic_products.category`. The managed master list is the **`categories` table** (migration `0018`, same shape as `units`: `id`/`name`/`sort_order`, integer PK), edited through the **Manage Categories** modal (`public/static/utils.js`, mirrors Manage Units) and picked in the product form, with "+ New category…" for inline adds. Deleting one only removes it from the picker — products keep their label (the DELETE is usage-checked, `?force=true` to override).
 
