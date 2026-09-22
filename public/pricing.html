@@ -30,7 +30,7 @@
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560;9..144,620&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
 
   <!-- Structured data. The Offers must match the prices visible on this page and
        in the FAQ on the homepage: change all three together. Deliberately no
@@ -106,31 +106,34 @@
     :root {
       --primary:    #0369a1;
       --primary-d:  #075985;
-      --bg:         #ffffff;
-      --bg-alt:     #f8fafc;
-      --border:     #e2e8f0;
-      --text:       #1e293b;
-      --text-muted: #64748b;
+      --nav-bg:     #0f172a;
+      --nav-bg-d:   #1e293b;
+      --bg:         #faf9f6;
+      --bg-alt:     #f3f1ec;
+      --border:     #e4e0d8;
+      --text:       #171512;
+      --text-muted: #6b6659;
       --radius:     12px;
-      --radius-sm:  8px;
-      --shadow:     0 2px 16px rgba(0,0,0,.08);
-      --shadow-lg:  0 18px 48px rgba(15,23,42,.14);
+      --radius-sm:  6px;
+      --shadow:     0 2px 16px rgba(0,0,0,.06);
+      --shadow-lg:  0 18px 48px rgba(15,23,42,.12);
       --maxw:       1080px;
     }
 
     html { scroll-behavior: smooth; }
     body {
-      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
       color: var(--text); background: var(--bg);
-      font-size: 16px; line-height: 1.6; -webkit-font-smoothing: antialiased;
+      font-size: 16px; line-height: 1.65; -webkit-font-smoothing: antialiased;
     }
     .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 1.25rem; }
     .ic { height: 1em; fill: currentColor; vertical-align: -.125em; flex: none; }
+    .kicker { font-family: 'IBM Plex Mono', monospace; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
 
     /* ===== NAV (same as index.html) ===== */
     header.nav {
       position: sticky; top: 0; z-index: 50;
-      background: rgba(255,255,255,.86); backdrop-filter: blur(10px);
+      background: rgba(250,249,246,.88); backdrop-filter: blur(10px);
       border-bottom: 1px solid var(--border);
     }
     .nav-inner {
@@ -139,7 +142,7 @@
     }
     .brand {
       display: flex; align-items: center; gap: .55rem;
-      font-weight: 800; font-size: 1.15rem; letter-spacing: -.01em;
+      font-weight: 700; font-size: 1.15rem; letter-spacing: -.01em;
       color: var(--text); text-decoration: none;
     }
     .brand .ic { color: var(--primary); }
@@ -155,39 +158,33 @@
     /* ===== BUTTONS ===== */
     .btn {
       display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
-      font-family: inherit; font-size: .95rem; font-weight: 600;
-      padding: .7rem 1.25rem; border-radius: var(--radius-sm);
+      font-family: inherit; font-size: .93rem; font-weight: 600;
+      padding: .7rem 1.2rem; border-radius: var(--radius-sm);
       text-decoration: none; border: 1px solid transparent; cursor: pointer;
-      transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
-      white-space: nowrap;
+      transition: background .15s ease; white-space: nowrap;
     }
-    .btn-primary {
-      background: linear-gradient(180deg, var(--primary), var(--primary-d));
-      color: #fff; box-shadow: 0 2px 10px rgba(3,105,161,.28);
-    }
-    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(3,105,161,.34); }
+    .btn-primary { background: var(--nav-bg); color: #fff; }
+    .btn-primary:hover { background: var(--nav-bg-d); }
     .btn-ghost { background: #fff; color: var(--text); border-color: var(--border); }
     .btn-ghost:hover { background: var(--bg-alt); }
-    .btn-lg { font-size: 1rem; padding: .85rem 1.6rem; }
+    .btn-lg { font-size: .98rem; padding: .85rem 1.5rem; }
     .btn:focus-visible, .nav-link:focus-visible, .brand:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
     /* ===== HERO ===== */
-    .hero { padding: 4rem 0 2.2rem; text-align: center; }
+    .hero { padding: 4rem 0 2.4rem; text-align: center; }
     .eyebrow {
-      display: inline-flex; align-items: center; gap: .45rem;
-      font-size: .8rem; font-weight: 600; letter-spacing: .02em;
-      color: var(--primary); background: #f0f9ff; border: 1px solid #e0f2fe;
-      border-radius: 999px; padding: .35rem .8rem; margin-bottom: 1.3rem;
+      display: inline-flex; align-items: center; gap: .5rem;
+      color: var(--primary); margin-bottom: 1.2rem;
     }
+    .eyebrow .rule { width: 22px; height: 1px; background: var(--primary); display: inline-block; }
+    .eyebrow .kicker { font-size: .72rem; }
     h1 {
-      font-size: clamp(2rem, 5vw, 3rem); line-height: 1.12; letter-spacing: -.03em;
-      font-weight: 800; max-width: 22ch; margin: 0 auto 1rem;
+      font-family: 'Fraunces', Georgia, serif; font-weight: 600;
+      font-size: clamp(1.9rem, 4.6vw, 2.8rem); line-height: 1.14; letter-spacing: -.01em;
+      max-width: 22ch; margin: 0 auto 1rem;
     }
-    h1 .accent {
-      background: linear-gradient(120deg, var(--primary), #38bdf8);
-      -webkit-background-clip: text; background-clip: text; color: transparent;
-    }
-    .sub { font-size: clamp(1rem, 2.2vw, 1.15rem); color: var(--text-muted); max-width: 54ch; margin: 0 auto; }
+    h1 .accent { color: var(--primary); border-bottom: 3px solid #bae6fd; padding-bottom: 1px; }
+    .sub { font-size: clamp(.98rem, 2.2vw, 1.06rem); color: var(--text-muted); max-width: 54ch; margin: 0 auto; }
 
     /* ===== PLANS ===== */
     .plans {
@@ -195,13 +192,13 @@
       max-width: 820px; margin: 0 auto;
     }
     .plan {
-      background: #fff; border: 1px solid var(--border); border-radius: 16px;
+      background: #fff; border: 1px solid var(--border); border-radius: 12px;
       padding: 1.8rem; display: flex; flex-direction: column; box-shadow: var(--shadow);
     }
-    .plan h2 { font-size: 1.25rem; letter-spacing: -.01em; margin-bottom: .2rem; }
+    .plan h2 { font-family: 'IBM Plex Sans', sans-serif; font-size: 1.2rem; font-weight: 700; letter-spacing: -.005em; margin-bottom: .2rem; }
     .plan .tag { color: var(--text-muted); font-size: .92rem; min-height: 2.9em; }
-    .price { font-size: 2.9rem; font-weight: 800; letter-spacing: -.035em; line-height: 1.1; margin: 1.1rem 0 .1rem; }
-    .price .cur { font-size: 1.15rem; font-weight: 600; color: var(--text-muted); letter-spacing: 0; }
+    .price { font-family: 'Fraunces', Georgia, serif; font-weight: 600; font-size: 2.6rem; letter-spacing: -.01em; line-height: 1.1; margin: 1.1rem 0 .1rem; }
+    .price .cur { font-family: 'IBM Plex Mono', monospace; font-size: 1rem; font-weight: 600; color: var(--text-muted); letter-spacing: 0; }
     .per { font-size: .86rem; color: var(--text-muted); }
     .ticks { list-style: none; display: grid; gap: .65rem; margin: 1.3rem 0 1.7rem; font-size: .95rem; }
     .ticks li { display: flex; gap: .65rem; align-items: flex-start; }
@@ -210,19 +207,20 @@
     .plans-note { text-align: center; color: var(--text-muted); font-size: .88rem; margin-top: 1.1rem; }
 
     /* ===== SECTIONS ===== */
-    section { padding: 3.5rem 0; }
+    section { padding: 3.75rem 0; }
     .section-alt { background: var(--bg-alt); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-    .section-head { text-align: center; max-width: 60ch; margin: 0 auto 2.2rem; }
+    .section-head { text-align: center; max-width: 60ch; margin: 0 auto 2.4rem; }
     h2.section-title {
-      font-size: clamp(1.5rem, 3.4vw, 2.1rem); letter-spacing: -.02em;
-      font-weight: 800; line-height: 1.2; margin-bottom: .7rem;
+      font-family: 'Fraunces', Georgia, serif; font-weight: 600;
+      font-size: clamp(1.45rem, 3.2vw, 2rem); letter-spacing: -.01em;
+      line-height: 1.2; margin-bottom: .6rem;
     }
-    .section-head p { color: var(--text-muted); font-size: 1.02rem; }
+    .section-head p { color: var(--text-muted); font-size: 1rem; }
 
-    .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+    .grid { display: grid; gap: 1.1rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
     .card { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 1.4rem; }
-    .card h3 { font-size: 1.04rem; font-weight: 700; margin-bottom: .4rem; letter-spacing: -.01em; }
-    .card p { font-size: .93rem; color: var(--text-muted); }
+    .card h3 { font-size: 1.02rem; font-weight: 600; margin-bottom: .4rem; letter-spacing: -.005em; }
+    .card p { font-size: .9rem; color: var(--text-muted); }
 
     .facts { max-width: 640px; margin: 0 auto; display: grid; gap: .8rem; list-style: none; }
     .facts li {
@@ -236,17 +234,18 @@
 
     /* ===== FINAL CTA ===== */
     .final {
-      background: linear-gradient(135deg, var(--primary-d), var(--primary));
-      color: #fff; border-radius: 16px; padding: 3rem 1.5rem; text-align: center;
+      background: var(--nav-bg);
+      color: #fff; border-radius: 14px; padding: 3rem 1.5rem; text-align: center;
     }
-    .final h2 { font-size: clamp(1.5rem, 3.4vw, 2.1rem); letter-spacing: -.02em; font-weight: 800; line-height: 1.2; margin-bottom: .7rem; }
-    .final p { color: rgba(255,255,255,.88); max-width: 52ch; margin: 0 auto 1.6rem; }
-    .final .btn-primary { background: #fff; color: var(--primary-d); box-shadow: 0 4px 16px rgba(15,23,42,.2); }
+    .final h2 { font-family: 'Fraunces', Georgia, serif; font-weight: 600; font-size: clamp(1.45rem, 3.2vw, 2rem); letter-spacing: -.01em; line-height: 1.2; margin-bottom: .6rem; color: #fff; }
+    .final p { color: rgba(255,255,255,.82); max-width: 52ch; margin: 0 auto 1.6rem; }
+    .final .btn-primary { background: #fff; color: var(--nav-bg); }
+    .final .btn-primary:hover { background: #f1f5f9; }
     .final .more { margin: 1rem 0 0; font-size: .88rem; }
     .final .more a { color: #fff; font-weight: 600; }
 
     /* ===== FOOTER ===== */
-    footer { border-top: 1px solid var(--border); padding: 2rem 0; font-size: .87rem; color: var(--text-muted); }
+    footer { border-top: 1px solid var(--border); padding: 2rem 0; font-size: .86rem; color: var(--text-muted); }
     .foot-inner { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
     footer a { color: var(--text-muted); text-decoration: none; }
     footer a:hover { color: var(--text); text-decoration: underline; }
@@ -292,7 +291,7 @@
   <main>
   <!-- ══ HERO ══ -->
   <div class="hero wrap">
-    <div class="eyebrow">Simple pricing</div>
+    <div class="eyebrow"><span class="rule"></span><span class="kicker">Simple pricing</span></div>
     <h1>Two plans. <span class="accent">Priced in Canadian dollars.</span></h1>
     <p class="sub">Priced per location, per month, with no setup fee. You can see what Foodnance costs without booking a call.</p>
   </div>
