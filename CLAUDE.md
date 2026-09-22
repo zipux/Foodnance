@@ -250,6 +250,15 @@ does the modal reveal the link as a fallback (it also stays in the pending list,
 Resend). **Name and email are both required** (the link is bound to that address when
 accepted). `POST /api/team/invites/:id/resend` re-sends and restarts the 7 days.
 
+**Duplicates are refused inside the organization only** (409, before anything is created or
+an email slot is spent): an address already on the team (or deactivated — its `users.email`
+is still taken, so an invite could never be accepted) or already holding a pending invite,
+expired ones included (Resend is the way back). It must **never** ask whether an address has
+an account *anywhere* — that would tell one customer who else is a customer; an address
+belonging to another business goes through and is simply refused at accept time, as before.
+Consequence for tests: reaching the email cap from one business now means invite → revoke →
+invite again, which is exactly the loop the ledger exists for.
+
 This makes the app email strangers on a customer's behalf from foodnance.com, so:
 **10 emails per organization per hour and 3 per recipient address per day across every
 organization**, counted in `invite_emails` — *not* on `invites`, because revoke

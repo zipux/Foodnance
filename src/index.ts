@@ -1492,6 +1492,29 @@ app.post('/api/team/invite', async (c) => {
   if (!name) return c.json({ error: 'A name is required.' }, 400)
   if (!email.includes('@')) return c.json({ error: 'A valid email is required.' }, 400)
 
+  // Duplicates — checked against THIS organization only, before anything is
+  // created or emailed (so a refusal costs no email allowance). Deliberately
+  // never "does this address have an account anywhere": answering that would tell
+  // one customer whether a person is another customer's user. An address that
+  // belongs to a different business goes through as normal and simply cannot be
+  // accepted (accept-invite refuses it), exactly as it did before this check.
+  const onTeam = await c.env.DB.prepare(
+    `SELECT archived_at FROM users WHERE org_id = ? AND lower(email) = ? LIMIT 1`,
+  ).bind(org, email).first() as { archived_at: string | null } | null
+  if (onTeam) {
+    return c.json({
+      error: onTeam.archived_at
+        ? `${email} was deactivated on your team, so they can't be invited again. Contact us to bring them back.`
+        : `${email} is already on your team.`,
+    }, 409)
+  }
+  const pendingInvite = await c.env.DB.prepare(
+    `SELECT id FROM invites WHERE org_id = ? AND lower(email) = ? AND accepted_at IS NULL LIMIT 1`,
+  ).bind(org, email).first()
+  if (pendingInvite) {
+    return c.json({ error: `${email} already has a pending invite. Use Resend on it instead.` }, 409)
+  }
+
   const id = uid()
   const token = randomHex(32)
   await c.env.DB.prepare(

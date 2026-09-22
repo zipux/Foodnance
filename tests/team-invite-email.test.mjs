@@ -80,6 +80,22 @@ t.check('every invite is emailed — there is no link-only path and no send_emai
 t.check('the response reports emailed + email_error so the page can fall back to the link',
   /emailed/.test(create) && /email_error/.test(create));
 
+t.section('duplicate invites are refused, inside this organization only');
+const dupUsers = create.match(/FROM users WHERE[^`]*`/)?.[0] || '';
+const dupInvites = create.match(/FROM invites WHERE org_id = \?[^`]*`/)?.[0] || '';
+t.check('checks whether the address is already on this team', /org_id = \?/.test(dupUsers) && /lower\(email\) = \?/.test(dupUsers), dupUsers);
+t.check('checks whether it already has a pending invite (expired ones too, they can be resent)',
+  /org_id = \?/.test(dupInvites) && /accepted_at IS NULL/.test(dupInvites) && !/expires_at/.test(dupInvites), dupInvites);
+t.check('both checks run BEFORE the invite is inserted and before any email allowance is spent',
+  create.indexOf('FROM users WHERE') !== -1 &&
+  create.indexOf('FROM users WHERE') < create.indexOf('INSERT INTO invites') &&
+  create.indexOf('FROM invites WHERE org_id') < create.indexOf('INSERT INTO invites') &&
+  create.indexOf('FROM invites WHERE org_id') < create.indexOf('emailTeamInvite('));
+t.check('NEVER asks whether the address has an account anywhere (that would leak who is another customer\'s user)',
+  [...create.matchAll(/FROM users WHERE[^`]*`/g)].every(m => /org_id = \?/.test(m[0])));
+t.check('a duplicate is a 409 with a plain-English reason', (create.match(/, 409\)/g) || []).length === 2 &&
+  /is already on your team/.test(create) && /already has a pending invite/.test(create) && /was deactivated on your team/.test(create));
+
 t.section('resend');
 const resend = handlerBody('post', '/api/team/invites/:id/resend') || '';
 t.check('POST /api/team/invites/:id/resend exists', !!resend);

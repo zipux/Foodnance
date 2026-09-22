@@ -71,6 +71,13 @@ const A = await makeOrg('a');
 const B = await makeOrg('b');
 const invite = (org, email, extra = {}) =>
   post('/api/team/invite', { name: 'Maria', email, ...extra }, org.j);
+// A second pending invite to the same address in one business is now refused as a
+// duplicate, so reaching the EMAIL cap from one business means invite → revoke →
+// invite again — which is precisely the loop the ledger exists to stop.
+const reinvite = (org, email, extra = {}) => {
+  sql(`DELETE FROM invites WHERE org_id = '${org.orgId}' AND lower(email) = '${email.toLowerCase()}' AND accepted_at IS NULL`);
+  return invite(org, email, extra);
+};
 const tooMany = (r) => /Too many/.test(r.data?.email_error || '');
 const reserved = (r) => r.data?.emailed === false && !!r.data?.email_error && !tooMany(r);
 
@@ -88,15 +95,58 @@ const noswitch = await invite(A, `noswitch-${STAMP}@test.local`, { send_email: f
 t.check('there is no way to ask for a link-only invite: send_email:false is ignored and an email is still attempted',
   noswitch.status === 201 && ledger(`to_email = 'noswitch-${STAMP}@test.local'`) === 1, JSON.stringify(noswitch.data));
 
+t.section('duplicates are refused before anything is created or emailed');
+const inviteCount = (email) => sql(`SELECT COUNT(*) AS n FROM invites WHERE org_id = '${A.orgId}' AND lower(email) = '${email.toLowerCase()}'`)[0].n;
+const ownerEmail = `inv-a-${STAMP}@test.local`;
+const selfInvite = await invite(A, ownerEmail);
+t.check('inviting someone already on your team → 409 "already on your team"',
+  selfInvite.status === 409 && /already on your team/.test(selfInvite.data.error), JSON.stringify(selfInvite.data));
+t.check('the refusal is case-insensitive', (await invite(A, ownerEmail.toUpperCase())).status === 409);
+t.check('it created no invite and spent no email slot', inviteCount(ownerEmail) === 0 && ledger(`to_email = '${ownerEmail}'`) === 0);
+
+const dupTo = `dup-${STAMP}@test.local`;
+const firstDup = await invite(A, dupTo);
+t.check('the first invite to a new address goes through', firstDup.status === 201);
+const secondDup = await invite(A, dupTo);
+t.check('a second invite to the same address → 409 "already has a pending invite … Resend"',
+  secondDup.status === 409 && /pending invite/.test(secondDup.data.error) && /Resend/.test(secondDup.data.error), JSON.stringify(secondDup.data));
+t.check('still only one invite and one email slot for that address', inviteCount(dupTo) === 1 && ledger(`to_email = '${dupTo}'`) === 1);
+sql(`UPDATE invites SET expires_at = datetime('now', '-1 day') WHERE org_id = '${A.orgId}' AND lower(email) = '${dupTo}'`);
+t.check('an EXPIRED pending invite still counts (Resend is the way back, not a second invite)', (await invite(A, dupTo)).status === 409);
+const dupInvite = sql(`SELECT id FROM invites WHERE org_id = '${A.orgId}' AND lower(email) = '${dupTo}'`)[0];
+await post(`/api/team/invites/${dupInvite.id}/revoke`, {}, A.j);
+t.check('once revoked, the address can be invited again', (await invite(A, dupTo)).status === 201);
+
+const mateEmail = `mate-${STAMP}@test.local`;
+const mateInvite = await invite(A, mateEmail);
+const accepted = await post('/api/auth/accept-invite', { token: mateInvite.data.token, name: 'Mate', email: mateEmail, password: 'teammate-pw-123' });
+t.check('setup: a teammate accepts their invite', accepted.status === 200 || accepted.status === 201, JSON.stringify(accepted.data));
+t.check('inviting an active teammate → "already on your team"', /already on your team/.test((await invite(A, mateEmail)).data.error));
+const mateId = sql(`SELECT id FROM users WHERE lower(email) = '${mateEmail}'`)[0].id;
+await post(`/api/team/${mateId}/archive`, {}, A.j);
+const gone = await invite(A, mateEmail);
+t.check('inviting a DEACTIVATED teammate → 409 saying so (their address is still taken, so an invite could never be accepted)',
+  gone.status === 409 && /deactivated/.test(gone.data.error), JSON.stringify(gone.data));
+
+t.section('no cross-business leak: another business sees nothing different');
+const beforeB = ledger(`org_id = '${B.orgId}'`);
+const crossA = await invite(B, ownerEmail);                        // belongs to A's owner
+const crossFresh = await invite(B, `nobody-${STAMP}@test.local`);  // belongs to no one
+t.check("an address that is ANOTHER business's user is treated exactly like an unknown one (no 409, no hint)",
+  crossA.status === 201 && crossFresh.status === 201 && crossA.data.emailed === crossFresh.data.emailed &&
+  crossA.data.email_error === crossFresh.data.email_error, JSON.stringify([crossA.data, crossFresh.data]));
+t.check('both used an email slot, like any invite', ledger(`org_id = '${B.orgId}'`) === beforeB + 2);
+t.check("and B's owner is not told the address is a user of A", !/already/.test(JSON.stringify(crossA.data)));
+
 t.section('3 emails per address per day');
-const second = await invite(A, `same-${STAMP}@test.local`);
-const third  = await invite(A, `same-${STAMP}@test.local`);
+const second = await reinvite(A, `same-${STAMP}@test.local`);
+const third  = await reinvite(A, `same-${STAMP}@test.local`);
 t.check('second and third are allowed through', reserved(second) && reserved(third));
-const fourth = await invite(A, `same-${STAMP}@test.local`);
+const fourth = await reinvite(A, `same-${STAMP}@test.local`);
 t.check('the fourth is refused', tooMany(fourth), JSON.stringify(fourth.data));
 t.check('but the invite is STILL created, with its link', fourth.status === 201 && !!fourth.data.token);
 t.check('and the refusal used no slot', ledger(`to_email = 'same-${STAMP}@test.local'`) === 3);
-t.check('address case does not dodge the cap', tooMany(await invite(A, `SAME-${STAMP}@Test.Local`)));
+t.check('address case does not dodge the cap', tooMany(await reinvite(A, `SAME-${STAMP}@Test.Local`)));
 
 t.section('the address cap is across every organization');
 const other = await invite(B, `same-${STAMP}@test.local`);
@@ -106,11 +156,11 @@ t.section('revoking gives nothing back');
 const pending = sql(`SELECT id FROM invites WHERE org_id = '${A.orgId}' AND email = 'same-${STAMP}@test.local' LIMIT 1`)[0];
 t.check('revoke works', (await post(`/api/team/invites/${pending.id}/revoke`, {}, A.j)).status === 200);
 t.check('the ledger still says 3', ledger(`to_email = 'same-${STAMP}@test.local'`) === 3);
-t.check('so create → email → revoke is no way round the cap', tooMany(await invite(A, `same-${STAMP}@test.local`)));
+t.check('so create → email → revoke is no way round the cap', tooMany(await reinvite(A, `same-${STAMP}@test.local`)));
 
 t.section('10 emails per organization per hour');
-// Org A has used 4 (three to `same`, one to `noswitch`). Six more distinct addresses fill it.
-for (let i = 0; i < 6; i++) {
+// Earlier sections already spent some of org A's allowance; top it up to 10 with distinct addresses.
+for (let i = 0; ledger(`org_id = '${A.orgId}'`) < 10 && i < 12; i++) {
   const r = await invite(A, `fill${i}-${STAMP}@test.local`);
   if (!reserved(r)) t.check(`filler ${i} reserved`, false, JSON.stringify(r.data));
 }
@@ -125,7 +175,7 @@ t.section('an old ledger row stops counting');
 sql(`UPDATE invite_emails SET created_at = datetime('now', '-2 hours') WHERE org_id = '${A.orgId}'`);
 t.check("two hours on, org A's hourly allowance is back", reserved(await invite(A, `later-${STAMP}@test.local`)));
 sql(`UPDATE invite_emails SET created_at = datetime('now', '-2 days') WHERE to_email = 'same-${STAMP}@test.local'`);
-t.check('and two days on, the address is open again', reserved(await invite(A, `same-${STAMP}@test.local`)));
+t.check('and two days on, the address is open again', reserved(await reinvite(A, `same-${STAMP}@test.local`)));
 
 t.section('resend');
 const mine = sql(`SELECT id FROM invites WHERE org_id = '${A.orgId}' AND email = 'later-${STAMP}@test.local'`)[0].id;
