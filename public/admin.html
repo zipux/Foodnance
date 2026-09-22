@@ -6,7 +6,7 @@
   <title>Admin — Foodnance</title>
   <meta name="robots" content="noindex, nofollow" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <meta name="theme-color" content="#4f46e5" />
+  <meta name="theme-color" content="#0369a1" />
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -16,7 +16,7 @@
        does not load app chrome. Tokens copied from static/style.css. */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --primary: #4f46e5; --primary-d: #3730a3; --border: #e2e8f0;
+      --primary: #0369a1; --primary-d: #075985; --border: #e2e8f0;
       --text: #1e293b; --text-muted: #64748b; --radius-sm: 8px;
       --success: #059669; --danger: #dc2626;
     }
@@ -64,7 +64,7 @@
       width: 100%; font-family: inherit; font-size: .92rem; padding: .55rem .7rem;
       border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff; color: var(--text);
     }
-    input:focus, select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,70,229,.12); }
+    input:focus, select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(3,105,161,.12); }
     .row { display: flex; gap: .5rem; }
     .row input { flex: 1; }
     .btn {
@@ -85,7 +85,7 @@
        the password is never recoverable afterwards, only resettable. */
     .handoff {
       margin-top: 1rem; padding: .85rem; border-radius: var(--radius-sm);
-      background: #eef2ff; border: 1px solid #c7d2fe; font-size: .85rem;
+      background: #f0f9ff; border: 1px solid #bae6fd; font-size: .85rem;
     }
     .handoff h3 { font-size: .82rem; text-transform: uppercase; letter-spacing: .04em; color: var(--primary-d); margin-bottom: .5rem; }
     .handoff code { display: block; background: #fff; border: 1px solid var(--border); border-radius: 6px;
@@ -100,7 +100,7 @@
          white-space: nowrap; }
     td { padding: .55rem .5rem; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
     tr:last-child td { border-bottom: none; }
-    .pill { font-size: .7rem; font-weight: 600; padding: .12rem .45rem; border-radius: 4px; background: #eef2ff; color: var(--primary-d); }
+    .pill { font-size: .7rem; font-weight: 600; padding: .12rem .45rem; border-radius: 4px; background: #f0f9ff; color: var(--primary-d); }
     .empty { color: var(--text-muted); font-size: .88rem; padding: 1rem .5rem; }
     .tablenote { margin-top: .9rem; font-size: .76rem; line-height: 1.55; color: var(--text-muted); }
 
@@ -131,7 +131,7 @@
       background-repeat: no-repeat; background-position: right .15rem center; background-size: 1rem;
     }
     .planpick:hover { border-color: var(--border); }
-    .planpick.pro { background-color: #eef2ff; color: var(--primary-d); }
+    .planpick.pro { background-color: #f0f9ff; color: var(--primary-d); }
 
     /* Monthly parse cap. Same badge treatment as the plan picker so the two read
        as one setting; the input is sized for 3-4 digits, not a full field. */

@@ -171,7 +171,7 @@ function applyPlanGating(me) {
     <div style="max-width:520px;margin:4rem auto;text-align:center;
                 background:#fff;border:1px solid var(--border,#e2e8f0);
                 border-radius:12px;padding:2.5rem 2rem">
-      <i class="fas fa-lock" style="font-size:1.75rem;color:var(--primary,#4f46e5)"></i>
+      <i class="fas fa-lock" style="font-size:1.75rem;color:var(--primary,#0369a1)"></i>
       <h2 style="margin:.9rem 0 .5rem;font-size:1.25rem">${esc(here.name)} is part of Pro</h2>
       <p style="color:var(--text-muted,#64748b);font-size:.92rem;line-height:1.6;margin:0 0 1.5rem">
         Your plan covers everything that runs off your invoices — costs, price
@@ -1037,7 +1037,7 @@ async function renderManageUnitsList() {
     // Clarify the ounce ambiguity: 'oz' is treated as weight everywhere; fluid
     // ounces are the separate 'fl oz' unit. They never convert into each other.
     const hint = `<div style="font-size:.76rem;color:var(--text-muted);background:#f8fafc;border:1px solid var(--border);border-radius:6px;padding:.45rem .6rem;margin-bottom:.6rem;line-height:1.5">
-      <i class="fas fa-circle-info" style="color:#6366f1"></i>
+      <i class="fas fa-circle-info" style="color:#0ea5e9"></i>
       <strong>oz</strong> means weight (28&nbsp;g). For fluid ounces use <strong>fl&nbsp;oz</strong> (30&nbsp;ml) — the two never convert into each other.
     </div>`;
     if (!_manageUnitsCache.length) {
@@ -1045,7 +1045,7 @@ async function renderManageUnitsList() {
       return;
     }
     container.innerHTML = hint + _manageUnitsCache.map(u => `
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:.45rem .65rem;border:1px solid var(--border);border-radius:6px;margin-bottom:.35rem;background:#fafbff">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:.45rem .65rem;border:1px solid var(--border);border-radius:6px;margin-bottom:.35rem;background:#f8fafc">
         <span style="font-weight:500;font-size:.92rem">${esc(u.name)}</span>
         <button class="btn btn-danger btn-icon" onclick="deleteUnit(${u.id}, this.dataset.name)" data-name="${esc(u.name)}" title="Delete unit" style="padding:.3rem .55rem;font-size:.78rem">
           <i class="fas fa-trash"></i>
@@ -1171,7 +1171,7 @@ async function renderManageCategoriesList() {
       .map(t => `<option value="${t}"${(sel || 'food') === t ? ' selected' : ''}>${t.charAt(0).toUpperCase() + t.slice(1)}</option>`)
       .join('');
     container.innerHTML = _manageCategoriesCache.map(c => `
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;padding:.45rem .65rem;border:1px solid var(--border);border-radius:6px;margin-bottom:.35rem;background:#fafbff">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;padding:.45rem .65rem;border:1px solid var(--border);border-radius:6px;margin-bottom:.35rem;background:#f8fafc">
         <span style="font-weight:500;font-size:.92rem;flex:1">${esc(c.name)}</span>
         <select onchange="editCategoryType(${c.id}, this.value)" title="Category type" style="font-size:.8rem;padding:.2rem .4rem">
           ${typeOpts(c.type)}

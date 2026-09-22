@@ -6,7 +6,7 @@
   <title>Log in — Foodnance</title>
   <meta name="robots" content="noindex" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <meta name="theme-color" content="#4f46e5" />
+  <meta name="theme-color" content="#0369a1" />
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -17,8 +17,8 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --primary:    #4f46e5;
-      --primary-d:  #3730a3;
+      --primary:    #0369a1;
+      --primary-d:  #075985;
       --border:     #e2e8f0;
       --text:       #1e293b;
       --text-muted: #64748b;
@@ -28,7 +28,7 @@
     body {
       font-family: 'Inter', system-ui, -apple-system, sans-serif;
       color: var(--text);
-      background: linear-gradient(160deg, #eef2ff 0%, #f8fafc 45%, #f1f5f9 100%);
+      background: linear-gradient(160deg, #f0f9ff 0%, #f8fafc 45%, #f1f5f9 100%);
       min-height: 100vh;
       display: flex; align-items: center; justify-content: center;
       padding: 1.5rem;
@@ -66,7 +66,7 @@
     }
     input:focus {
       outline: none; border-color: var(--primary);
-      box-shadow: 0 0 0 3px rgba(79,70,229,.12);
+      box-shadow: 0 0 0 3px rgba(3,105,161,.12);
     }
 
     .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.25rem; }
@@ -80,11 +80,11 @@
       padding: .75rem 1rem; border: none; border-radius: var(--radius-sm);
       color: #fff; cursor: pointer;
       background: linear-gradient(180deg, var(--primary), var(--primary-d));
-      box-shadow: 0 2px 10px rgba(79,70,229,.28);
+      box-shadow: 0 2px 10px rgba(3,105,161,.28);
       transition: transform .15s ease, box-shadow .15s ease;
       display: flex; align-items: center; justify-content: center; gap: .5rem;
     }
-    button.submit:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(79,70,229,.34); }
+    button.submit:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(3,105,161,.34); }
 
     /* Sign-in failure message. Hidden until the server rejects a login. */
     .error {
@@ -101,7 +101,7 @@
     .below a { color: var(--primary); text-decoration: none; font-weight: 500; }
     .below a:hover { text-decoration: underline; }
     .hidden { display: none !important; }
-    .hint { display: none; margin-bottom: 1rem; padding: .7rem .85rem; background: #eef2ff; border: 1px solid #c7d2fe;
+    .hint { display: none; margin-bottom: 1rem; padding: .7rem .85rem; background: #f0f9ff; border: 1px solid #bae6fd;
       border-radius: var(--radius-sm); font-size: .85rem; color: var(--primary-d); }
     .hint.show { display: block; }
     .ok { display: none; margin-bottom: 1rem; padding: .8rem .9rem; background: #f0fdf4; border: 1px solid #bbf7d0;

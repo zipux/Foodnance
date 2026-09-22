@@ -498,7 +498,7 @@ function buildFpUnitOptions(selectedUnit, product) {
   let html  = '';
   if (su) {
     const isSel = sel === su.toLowerCase() ? 'selected' : '';
-    html += `<option value="${esc(su)}" ${isSel} style="font-weight:700;color:#4f46e5">${esc(su)} ← sub-unit</option>`;
+    html += `<option value="${esc(su)}" ${isSel} style="font-weight:700;color:#0369a1">${esc(su)} ← sub-unit</option>`;
   }
   // The unit this line is ACTUALLY costed in always appears, even when it isn't
   // in the master list — otherwise the <select> matches nothing and the browser

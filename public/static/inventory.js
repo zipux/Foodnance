@@ -358,7 +358,7 @@ function buildPriceCell(r) {
     return `<div style="line-height:1.5">
       <div><span style="font-weight:600;color:#0f172a">${fmt(info.totalCost)}</span>
         <span style="color:var(--text-muted);font-size:.78rem"> total</span></div>
-      <div style="font-size:.8rem;color:#4f46e5">${fmt(info.cpu)} / ${esc(info.unit)}</div>
+      <div style="font-size:.8rem;color:#0369a1">${fmt(info.cpu)} / ${esc(info.unit)}</div>
     </div>`;
   }
 
@@ -397,7 +397,7 @@ function renderInvStats() {
       <div class="stat-chip${sel(null)}" style="cursor:pointer" onclick="setInvFilter(null)" title="Show all items"><i class="fas fa-layer-group"></i> ${total} All</div>
       <div class="stat-chip${sel('food')}" style="cursor:pointer;background:#ccfbf1;color:#0f766e" onclick="setInvFilter('food')" title="Show food ingredients"><i class="fas fa-carrot"></i> ${food} Food</div>
       <div class="stat-chip${sel('supplies')}" style="cursor:pointer;background:#fef3c7;color:#92400e" onclick="setInvFilter('supplies')" title="Show supplies (packaging, disposables, linen…)"><i class="fas fa-box"></i> ${sup} Supplies</div>
-      <div class="stat-chip${sel('batch')}" style="cursor:pointer;background:#e0e7ff;color:#3730a3" onclick="setInvFilter('batch')" title="Show batches"><i class="fas fa-blender"></i> ${bat} Batches</div>
+      <div class="stat-chip${sel('batch')}" style="cursor:pointer;background:#e0f2fe;color:#075985" onclick="setInvFilter('batch')" title="Show batches"><i class="fas fa-blender"></i> ${bat} Batches</div>
       <div class="stat-chip${sel('finished_product')}" style="cursor:pointer;background:#dcfce7;color:#166534" onclick="setInvFilter('finished_product')" title="Show finished products"><i class="fas fa-box-open"></i> ${fin} Finished Products</div>
       <div class="stat-chip${sel('low_stock')}" style="cursor:pointer;${low > 0 ? 'background:#fef3c7;color:#92400e' : 'background:#f1f5f9;color:#94a3b8'}" onclick="setInvFilter('low_stock')" title="Show items at or below their reorder level"><i class="fas fa-triangle-exclamation"></i> ${low} Low Stock</div>
       <div class="stat-chip${sel('out_of_stock')}" style="cursor:pointer;${oos > 0 ? 'background:#fee2e2;color:#991b1b' : 'background:#f1f5f9;color:#94a3b8'}" onclick="setInvFilter('out_of_stock')" title="Show out-of-stock items"><i class="fas fa-exclamation-circle"></i> ${oos} Out of Stock</div>

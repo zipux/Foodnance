@@ -41,7 +41,7 @@
 .sl-section.is-unassigned { border-style: dashed; background: #fcfcfd; }
 
 .sl-section-header {
-  background: #f8faff;
+  background: #f0f9ff;
   padding: .7rem .9rem;
   border-bottom: 1px solid var(--border);
   display: flex;
@@ -78,7 +78,7 @@
   min-height: 44px;
   font-size: .95rem;
 }
-.sl-icon-btn:hover { background: #eef2ff; color: var(--primary); }
+.sl-icon-btn:hover { background: #f0f9ff; color: var(--primary); }
 .sl-icon-btn.danger:hover { background: #fef2f2; color: var(--danger); }
 
 .sl-items { list-style: none; margin: 0; padding: .35rem; min-height: 52px; }
@@ -103,7 +103,7 @@
   border: 1px solid transparent;
 }
 .sl-item + .sl-item { margin-top: .2rem; }
-.sl-item:hover { background: #f8faff; }
+.sl-item:hover { background: #f0f9ff; }
 
 .sl-handle {
   /* touch-action:none is what lets a drag start without the page scrolling. */
@@ -118,7 +118,7 @@
   flex-shrink: 0;
   border-radius: 6px;
 }
-.sl-handle:hover { color: var(--text-muted); background: #eef2ff; }
+.sl-handle:hover { color: var(--text-muted); background: #f0f9ff; }
 .sl-handle:active { cursor: grabbing; }
 
 .sl-item-name {
@@ -143,7 +143,7 @@
   letter-spacing: .03em;
   padding: .12rem .35rem;
   border-radius: 4px;
-  background: #eef2ff;
+  background: #f0f9ff;
   color: var(--primary);
   white-space: nowrap;
 }

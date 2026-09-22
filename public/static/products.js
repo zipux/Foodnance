@@ -261,7 +261,7 @@ function renderProductTable() {
         <td>${latestCpu !== null ? esc(fmtUnitCost(latestCpu, latestUnit)) : '—'}</td>
         <td style="color:var(--text-muted);font-size:.85rem">${lastPurchase}</td>
         <td onclick="event.stopPropagation()" style="white-space:nowrap">
-          <button class="btn btn-icon" style="background:#4f46e5;color:#fff" onclick="openGroupProductsModal('${esc(g.id)}')" title="Group with interchangeable products">
+          <button class="btn btn-icon" style="background:#0369a1;color:#fff" onclick="openGroupProductsModal('${esc(g.id)}')" title="Group with interchangeable products">
             <i class="fas fa-object-group"></i>
           </button>
           <button class="btn btn-icon" style="background:#6b7280;color:#fff" onclick="openMergeModal('${esc(g.id)}')" title="Merge into another product">
@@ -1515,7 +1515,7 @@ function openEntryInvPrompt({ genericId, itemName, packQty, packUnit, category, 
   // Show product details
   document.getElementById('entryInvDetails').innerHTML = `
     <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-      <i class="fas fa-box" style="color:#4f46e5"></i>
+      <i class="fas fa-box" style="color:#0369a1"></i>
       <strong>${esc(itemName)}</strong>
       <span style="color:var(--text-muted)">— 1 pack = ${packQty} ${esc(packUnit)}</span>
     </div>

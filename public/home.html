@@ -8,7 +8,7 @@
   <meta name="robots" content="noindex, nofollow" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <title>Price Movers — Foodnance</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260921-2" />
+  <link rel="stylesheet" href="/static/style.css?v=20260922-1" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <style>
@@ -43,7 +43,7 @@
     .pm-filter-row input:focus {
       outline: none;
       border-color: var(--primary);
-      box-shadow: 0 0 0 3px rgba(79,70,229,.1);
+      box-shadow: 0 0 0 3px rgba(3,105,161,.1);
     }
     .pm-search-wrap { position: relative; flex: 1; min-width: 160px; }
     .pm-search-wrap input { width: 100%; }
@@ -67,7 +67,7 @@
       border-bottom: 1px solid var(--border);
     }
     .pm-suggestion:last-child { border-bottom: none; }
-    .pm-suggestion:hover { background: #eef2ff; }
+    .pm-suggestion:hover { background: #f0f9ff; }
     .pm-suggestion .sub {
       font-size: .75rem;
       color: var(--text-muted);
@@ -87,10 +87,10 @@
       cursor: pointer;
       transition: var(--transition);
     }
-    .pm-row:hover { border-color: var(--primary); box-shadow: 0 2px 8px rgba(79,70,229,.12); }
+    .pm-row:hover { border-color: var(--primary); box-shadow: 0 2px 8px rgba(3,105,161,.12); }
     .pm-row.selected {
       border-color: var(--primary);
-      box-shadow: 0 0 0 2px rgba(79,70,229,.2);
+      box-shadow: 0 0 0 2px rgba(3,105,161,.2);
     }
     .pm-row.up   { background: #fef2f2; border-color: #fecaca; }
     .pm-row.down { background: #f0fdf4; border-color: #bbf7d0; }
@@ -109,11 +109,11 @@
     /* A supplier switch / substituted item is a comparison between two
        different purchases, not one vendor changing price — styled neutrally so
        it doesn't read as a red-alert price rise. */
-    .pm-row.switch    { background: #eef2ff; border-color: #c7d2fe; }
-    .pm-change.switch { color: #4338ca; }
+    .pm-row.switch    { background: #f0f9ff; border-color: #bae6fd; }
+    .pm-change.switch { color: #075985; }
     .pm-switch {
       font-size: .72rem;
-      color: #4338ca;
+      color: #075985;
       margin-top: .2rem;
       display: flex;
       align-items: center;
@@ -373,7 +373,7 @@
       cursor: pointer;
       transition: var(--transition);
     }
-    .sb-row:hover { background: #eef2ff; }
+    .sb-row:hover { background: #f0f9ff; }
     .sb-cat { font-size: .88rem; color: var(--text); }
     .sb-cat-amount {
       font-size: .88rem;
@@ -449,7 +449,7 @@
     .sb-custom input[type="date"]:focus {
       outline: none;
       border-color: var(--primary);
-      box-shadow: 0 0 0 3px rgba(79,70,229,.1);
+      box-shadow: 0 0 0 3px rgba(3,105,161,.1);
     }
     .sb-apply-btn {
       padding: .28rem .75rem;
@@ -698,7 +698,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="/static/env-banner.js?v=20260807-2"></script>
-  <script src="/static/utils.js?v=20260921-3"></script>
-  <script src="/static/home.js?v=20260809-1"></script>
+  <script src="/static/utils.js?v=20260922-1"></script>
+  <script src="/static/home.js?v=20260922-1"></script>
 </body>
 </html>

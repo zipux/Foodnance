@@ -30,7 +30,7 @@ function formatDate(s) {
 
 // ── Vendor color palette (stable assignment by vendor name) ──
 const VENDOR_PALETTE = [
-  '#4f46e5', '#059669', '#dc2626', '#d97706', '#0891b2',
+  '#0369a1', '#059669', '#dc2626', '#d97706', '#0891b2',
   '#7c3aed', '#db2777', '#2563eb', '#65a30d', '#ea580c',
   '#0d9488', '#9333ea', '#be123c'
 ];
@@ -758,7 +758,7 @@ function sbSetActivePreset(preset) {
 }
 
 const SB_PALETTE = [
-  '#4f46e5', '#059669', '#dc2626', '#d97706', '#0891b2',
+  '#0369a1', '#059669', '#dc2626', '#d97706', '#0891b2',
   '#7c3aed', '#db2777', '#2563eb', '#65a30d', '#ea580c',
   '#0d9488', '#9333ea', '#be123c', '#78716c'
 ];

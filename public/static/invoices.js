@@ -1160,13 +1160,13 @@ function renderLinesTable() {
       <td>
         <div style="display:flex;align-items:center;gap:.2rem">
           <input type="text" class="line-input" data-idx="${i}" data-f="product_name" value="${esc(l.product_name||'')}" title="${esc(l.product_name||'')}" placeholder="Product" style="width:110px"/>
-          <button class="btn btn-icon" style="padding:.2rem .35rem;font-size:.7rem;background:#e0e7ff;color:#4338ca"
+          <button class="btn btn-icon" style="padding:.2rem .35rem;font-size:.7rem;background:#e0f2fe;color:#075985"
                   onclick="openLinkProductModal(${i})" title="This is one of my existing products">
             <i class="fas fa-link"></i>
           </button>
         </div>
         ${l._link_product_id ? `
-          <div style="font-size:.68rem;color:#4338ca;margin-top:.15rem;display:flex;align-items:center;gap:.25rem;white-space:nowrap">
+          <div style="font-size:.68rem;color:#075985;margin-top:.15rem;display:flex;align-items:center;gap:.25rem;white-space:nowrap">
             <i class="fas fa-arrow-turn-up" style="transform:rotate(90deg)"></i>
             <span title="Files under this product; the vendor's wording is remembered">${esc(l._link_product_name || '')}</span>
             <button onclick="unlinkProduct(${i})" title="Undo link"
@@ -2240,7 +2240,7 @@ async function openInvPrompt(lines, invoiceRef, supplierId = null) {
     const note = !target
       ? `<div style="font-size:.74rem;color:#b45309"><i class="fas fa-triangle-exclamation"></i> No matching product — won't be stocked in</div>`
       : ((target.name || '').trim().toLowerCase() !== (r.product_name || '').trim().toLowerCase()
-          ? `<div style="font-size:.74rem;color:#4338ca"><i class="fas fa-arrow-right"></i> ${esc(target.name)}</div>`
+          ? `<div style="font-size:.74rem;color:#075985"><i class="fas fa-arrow-right"></i> ${esc(target.name)}</div>`
           : '');
     return `
       <div style="display:flex;align-items:center;gap:.75rem;padding:.5rem 0;border-bottom:1px solid var(--border)">

@@ -260,7 +260,7 @@ function buildUnitOptions(selectedUnit, product) {
   // Sub-unit option at top (highlighted) if defined
   if (su) {
     const isSelected = sel === su.toLowerCase() ? 'selected' : '';
-    html += `<option value="${esc(su)}" ${isSelected} style="font-weight:700;color:#4f46e5">${esc(su)} ← sub-unit</option>`;
+    html += `<option value="${esc(su)}" ${isSelected} style="font-weight:700;color:#0369a1">${esc(su)} ← sub-unit</option>`;
   }
 
   // The unit this line is ACTUALLY costed in always appears, even when it isn't
@@ -1264,10 +1264,10 @@ function printRecipe(id) {
   <style>
     * { box-sizing: border-box; }
     body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #1f2937; margin: 32px; }
-    .print-header { border-bottom: 2px solid #4f46e5; padding-bottom: 12px; margin-bottom: 20px; }
+    .print-header { border-bottom: 2px solid #0369a1; padding-bottom: 12px; margin-bottom: 20px; }
     .print-header h1 { margin: 0; font-size: 24px; color: #111827; }
     .print-header .meta { margin-top: 4px; font-size: 12px; color: #6b7280; }
-    .detail-section-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #4f46e5; margin: 20px 0 8px; }
+    .detail-section-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #0369a1; margin: 20px 0 8px; }
     .detail-info-grid { display: grid; gap: 6px; margin-bottom: 8px; }
     .detail-info-item { display: flex; justify-content: space-between; gap: 16px; font-size: 14px; padding: 4px 0; border-bottom: 1px dashed #e5e7eb; }
     .detail-info-item span:first-child { color: #6b7280; }
@@ -1276,7 +1276,7 @@ function printRecipe(id) {
     th { background: #f3f4f6; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: #374151; }
     td:nth-child(2), td:nth-child(3), td:nth-child(4),
     th:nth-child(2), th:nth-child(3), th:nth-child(4) { text-align: right; white-space: nowrap; }
-    .detail-cost-box { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding: 12px 16px; border: 1px solid #c7d2fe; border-radius: 8px; background: #eef2ff; }
+    .detail-cost-box { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding: 12px 16px; border: 1px solid #bae6fd; border-radius: 8px; background: #f0f9ff; }
     .detail-cost-box .label { font-weight: 600; font-size: 14px; }
     .detail-cost-box .amount { font-size: 18px; font-weight: 700; }
     .table-scroll { overflow: visible; }
