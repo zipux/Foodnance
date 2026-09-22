@@ -15,12 +15,12 @@
   <title>Foodnance — Food Cost Software for Canadian Restaurants</title>
   <meta name="description" content="Food cost software for independent Canadian restaurants and bakeries. Photograph a supplier invoice; recipe costs, margins and your P&amp;L update themselves." />
   <link rel="canonical" href="https://foodnance.com/" />
-  <meta name="theme-color" content="#4f46e5" />
+  <meta name="theme-color" content="#0369a1" />
 
   <!-- Favicon. SVG covers every current browser; see README note on adding
        a PNG/ICO fallback for older clients and an apple-touch-icon. -->
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <link rel="mask-icon" href="/favicon.svg" color="#4f46e5" />
+  <link rel="mask-icon" href="/favicon.svg" color="#0369a1" />
 
   <!-- Open Graph: controls the preview when the link is shared -->
   <meta property="og:type" content="website" />
@@ -47,7 +47,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560;9..144,620&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
 
   <!-- Structured data. SoftwareApplication is the right type for a SaaS tool
        and is what powers rich results for software queries. Deliberately no
@@ -208,30 +208,32 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --primary:    #4f46e5;
-      --primary-d:  #3730a3;
+      --primary:    #0369a1;
+      --primary-d:  #075985;
+      --nav-bg:     #0f172a;
+      --nav-bg-d:   #1e293b;
       --success:    #059669;
       --danger:     #dc2626;
       --warning:    #d97706;
-      --bg:         #ffffff;
-      --bg-alt:     #f8fafc;
-      --border:     #e2e8f0;
-      --text:       #1e293b;
-      --text-muted: #64748b;
+      --bg:         #faf9f6;
+      --bg-alt:     #f3f1ec;
+      --border:     #e4e0d8;
+      --text:       #171512;
+      --text-muted: #6b6659;
       --radius:     12px;
-      --radius-sm:  8px;
-      --shadow:     0 2px 16px rgba(0,0,0,.08);
-      --shadow-lg:  0 18px 48px rgba(15,23,42,.14);
+      --radius-sm:  6px;
+      --shadow:     0 2px 16px rgba(0,0,0,.06);
+      --shadow-lg:  0 18px 48px rgba(15,23,42,.12);
       --maxw:       1080px;
     }
 
     html { scroll-behavior: smooth; }
     body {
-      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
       color: var(--text);
       background: var(--bg);
       font-size: 16px;
-      line-height: 1.6;
+      line-height: 1.65;
       -webkit-font-smoothing: antialiased;
     }
     .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 1.25rem; }
@@ -239,11 +241,12 @@
     /* Inline SVG icons (sprite at the top of <body>). Height follows the text;
        each icon carries its own width so it keeps Font Awesome's proportions. */
     .ic { height: 1em; fill: currentColor; vertical-align: -.125em; flex: none; }
+    .kicker { font-family: 'IBM Plex Mono', monospace; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
 
     /* ===== NAV ===== */
     header.nav {
       position: sticky; top: 0; z-index: 50;
-      background: rgba(255,255,255,.86);
+      background: rgba(250,249,246,.88);
       backdrop-filter: blur(10px);
       border-bottom: 1px solid var(--border);
     }
@@ -253,7 +256,7 @@
     }
     .brand {
       display: flex; align-items: center; gap: .55rem;
-      font-weight: 800; font-size: 1.15rem; letter-spacing: -.01em;
+      font-weight: 700; font-size: 1.15rem; letter-spacing: -.01em;
       color: var(--text); text-decoration: none;
     }
     .brand .ic { color: var(--primary); }
@@ -268,174 +271,139 @@
     /* ===== BUTTONS ===== */
     .btn {
       display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
-      font-family: inherit; font-size: .95rem; font-weight: 600;
-      padding: .7rem 1.25rem; border-radius: var(--radius-sm);
+      font-family: inherit; font-size: .93rem; font-weight: 600;
+      padding: .7rem 1.2rem; border-radius: var(--radius-sm);
       text-decoration: none; border: 1px solid transparent; cursor: pointer;
-      transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
-      white-space: nowrap;
+      transition: background .15s ease; white-space: nowrap;
     }
-    .btn-primary {
-      background: linear-gradient(180deg, var(--primary), var(--primary-d));
-      color: #fff; box-shadow: 0 2px 10px rgba(79,70,229,.28);
-    }
-    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(79,70,229,.34); }
+    .btn-primary { background: var(--nav-bg); color: #fff; }
+    .btn-primary:hover { background: var(--nav-bg-d); }
     .btn-ghost { background: #fff; color: var(--text); border-color: var(--border); }
     .btn-ghost:hover { background: var(--bg-alt); }
-    .btn-lg { font-size: 1rem; padding: .85rem 1.6rem; }
+    .btn-lg { font-size: .98rem; padding: .85rem 1.5rem; }
 
     /* ===== HERO ===== */
-    .hero { padding: 4.5rem 0 3rem; text-align: center; }
+    .hero { padding: 4.5rem 0 3.5rem; }
+    .hero-row { display: flex; gap: 3.25rem; align-items: flex-start; flex-wrap: wrap; }
+    .hero-main { flex: 1 1 460px; max-width: 540px; }
     .eyebrow {
-      display: inline-flex; align-items: center; gap: .45rem;
-      font-size: .8rem; font-weight: 600; letter-spacing: .02em;
-      color: var(--primary); background: #eef2ff;
-      border: 1px solid #e0e7ff; border-radius: 999px;
-      padding: .35rem .8rem; margin-bottom: 1.4rem;
+      display: inline-flex; align-items: center; gap: .55rem;
+      color: var(--primary); margin-bottom: 1.3rem;
     }
+    .eyebrow .rule { width: 22px; height: 1px; background: var(--primary); display: inline-block; }
+    .eyebrow .kicker { font-size: .72rem; }
     h1 {
-      font-size: clamp(2.1rem, 5.5vw, 3.4rem);
-      line-height: 1.1; letter-spacing: -.03em; font-weight: 800;
-      max-width: 20ch; margin: 0 auto 1.1rem;
+      font-family: 'Fraunces', Georgia, serif; font-weight: 600;
+      font-size: clamp(2.1rem, 4.6vw, 3rem);
+      line-height: 1.1; letter-spacing: -.01em;
+      max-width: 20ch; margin: 0 0 1.1rem;
     }
-    h1 .accent {
-      background: linear-gradient(120deg, var(--primary), #7c6cf0);
-      -webkit-background-clip: text; background-clip: text; color: transparent;
-    }
+    h1 .accent { color: var(--primary); border-bottom: 3px solid #bae6fd; padding-bottom: 2px; }
     .def {
-      font-size: clamp(1.02rem, 2.3vw, 1.2rem); font-weight: 600;
-      max-width: 50ch; margin: 0 auto .8rem;
+      font-size: clamp(1rem, 2.2vw, 1.06rem); font-weight: 600;
+      max-width: 50ch; margin: 0 0 .8rem;
     }
     .sub {
-      font-size: clamp(1rem, 2.2vw, 1.18rem); color: var(--text-muted);
-      max-width: 56ch; margin: 0 auto 2rem;
+      font-size: clamp(.95rem, 2vw, 1rem); color: var(--text-muted);
+      max-width: 48ch; margin: 0 0 1.6rem;
     }
-    .cta-row { display: flex; gap: .7rem; justify-content: center; flex-wrap: wrap; }
+    .cta-row { display: flex; gap: .7rem; flex-wrap: wrap; }
     .cta-note { font-size: .84rem; color: var(--text-muted); margin-top: .9rem; }
     .cta-note + .cta-note { margin-top: .25rem; }
     .cta-note a { color: var(--primary); font-weight: 600; text-decoration: none; }
     .cta-note a:hover { text-decoration: underline; }
 
-    /* ===== PRODUCT PREVIEW ===== */
-    .preview {
-      margin: 3rem auto 0; max-width: 940px;
-      background: #fff; border: 1px solid var(--border);
-      border-radius: 14px; box-shadow: var(--shadow-lg);
-      overflow: hidden; text-align: left;
+    /* ===== PRODUCT PREVIEW — asymmetric right column, no boxed chrome ===== */
+    .hero-preview { flex: 1 1 380px; max-width: 420px; padding-left: 1.6rem; border-left: 1px solid var(--border); margin-top: .3rem; }
+    .hp-head { display: flex; align-items: center; gap: .5rem; margin-bottom: 1.1rem; }
+    .hp-head .kicker { font-size: .7rem; color: var(--text-muted); }
+    .hp-head .example-tag {
+      margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: .62rem; font-weight: 600;
+      letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted);
+      border: 1px solid var(--border); border-radius: 4px; padding: .1rem .4rem;
     }
-    .preview-bar {
-      display: flex; align-items: center; gap: .45rem;
-      padding: .7rem .9rem; background: linear-gradient(90deg, var(--primary-d), var(--primary));
-    }
-    .preview-bar .dot { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,.35); }
-    .preview-bar .title {
-      color: #fff; font-size: .85rem; font-weight: 600; margin-left: .5rem;
-      display: flex; align-items: center; gap: .4rem;
-    }
-    .preview-bar .example-tag {
-      margin-left: auto; font-size: .68rem; font-weight: 600; letter-spacing: .04em;
-      text-transform: uppercase; color: rgba(255,255,255,.8);
-      border: 1px solid rgba(255,255,255,.3); border-radius: 4px; padding: .1rem .4rem;
-    }
-    .preview-body { padding: 1.1rem; background: #f8fafc; }
-    .kpi-row {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: .7rem; margin-bottom: 1rem;
-    }
-    .kpi {
-      background: #fff; border: 1px solid var(--border);
-      border-radius: var(--radius-sm); padding: .7rem .85rem;
-    }
+    .kpi-row { display: flex; margin-bottom: 1.3rem; }
+    .kpi { flex: 1; padding-right: 1rem; }
+    .kpi + .kpi { padding-left: 1rem; border-left: 1px solid var(--border); }
     .kpi .label {
-      font-size: .68rem; font-weight: 600; letter-spacing: .05em;
-      text-transform: uppercase; color: var(--text-muted); margin-bottom: .25rem;
+      font-size: .66rem; font-weight: 600; letter-spacing: .04em;
+      text-transform: uppercase; color: var(--text-muted); margin-bottom: .3rem;
     }
-    .kpi .value { font-size: 1.35rem; font-weight: 700; letter-spacing: -.02em; }
-    .kpi .delta { font-size: .76rem; font-weight: 600; }
+    .kpi .value { font-family: 'Fraunces', Georgia, serif; font-size: 1.5rem; font-weight: 560; letter-spacing: -.01em; }
+    .kpi .delta { font-size: .72rem; font-weight: 600; margin-top: .15rem; }
     .up   { color: var(--danger); }
     .down { color: var(--success); }
 
-    .mover-list { background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm); }
-    .mover {
-      display: flex; align-items: center; gap: .7rem;
-      padding: .62rem .85rem; border-bottom: 1px solid #f1f5f9; font-size: .88rem;
-    }
-    .mover:last-child { border-bottom: none; }
+    .mover-list { display: flex; flex-direction: column; }
+    .mover { display: flex; align-items: center; gap: .6rem; padding: .6rem 0; border-top: 1px solid var(--border); font-size: .85rem; }
     .mover .name { font-weight: 600; }
-    .mover .vendor { color: var(--text-muted); font-size: .78rem; }
+    .mover .vendor { color: var(--text-muted); font-size: .75rem; }
     .mover .num { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
     .pill {
-      font-size: .68rem; font-weight: 600; padding: .12rem .45rem;
-      border-radius: 4px; background: #eef2ff; color: var(--primary-d);
+      font-family: 'IBM Plex Mono', monospace; font-size: .62rem; font-weight: 600; padding: .1rem .4rem;
+      border-radius: 4px; background: #f0f9ff; color: var(--primary-d);
     }
 
     /* ===== SECTIONS ===== */
-    section { padding: 3.5rem 0; }
+    section { padding: 3.75rem 0; }
     .section-alt { background: var(--bg-alt); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-    .section-head { text-align: center; max-width: 60ch; margin: 0 auto 2.5rem; }
+    .section-head { text-align: center; max-width: 60ch; margin: 0 auto 2.75rem; }
     h2 {
-      font-size: clamp(1.5rem, 3.4vw, 2.1rem); letter-spacing: -.02em;
-      font-weight: 800; line-height: 1.2; margin-bottom: .7rem;
+      font-family: 'Fraunces', Georgia, serif; font-weight: 600;
+      font-size: clamp(1.5rem, 3.2vw, 2.05rem); letter-spacing: -.01em;
+      line-height: 1.2; margin-bottom: .6rem;
     }
-    .section-head p { color: var(--text-muted); font-size: 1.02rem; }
+    .section-head p { color: var(--text-muted); font-size: 1rem; }
 
-    .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(268px, 1fr)); }
-    .card {
-      background: #fff; border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 1.4rem;
-      transition: transform .15s ease, box-shadow .15s ease;
-    }
-    .card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
-    .card .icon {
-      width: 40px; height: 40px; border-radius: 10px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1.05rem; margin-bottom: .9rem;
-      background: #eef2ff; color: var(--primary);
-    }
-    .card h3 { font-size: 1.04rem; font-weight: 700; margin-bottom: .4rem; letter-spacing: -.01em; }
-    .card p { font-size: .92rem; color: var(--text-muted); }
+    /* ===== FEATURES — hairline mark + kicker, no icon tiles ===== */
+    .grid { display: grid; gap: 2.2rem 1.75rem; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+    .card .mark { display: flex; align-items: center; gap: .5rem; color: var(--primary); margin-bottom: .7rem; }
+    .card .mark .rule { width: 20px; height: 2px; background: var(--primary); display: inline-block; }
+    .card .mark .kicker { font-size: .68rem; }
+    .card h3 { font-size: 1.05rem; font-weight: 600; margin-bottom: .4rem; letter-spacing: -.005em; }
+    .card p { font-size: .9rem; color: var(--text-muted); }
 
-    /* ===== STEPS ===== */
-    .steps { display: grid; gap: 1.6rem; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); counter-reset: step; }
-    .step { position: relative; padding-top: 2.9rem; }
+    /* ===== STEPS — outlined numeral, not a filled gradient disc ===== */
+    .steps { display: grid; gap: 1.8rem; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); counter-reset: step; }
+    .step { position: relative; padding-top: 3rem; }
     .step::before {
       counter-increment: step; content: counter(step);
       position: absolute; top: 0; left: 0;
-      width: 2.1rem; height: 2.1rem; border-radius: 50%;
-      background: linear-gradient(180deg, var(--primary), var(--primary-d));
-      color: #fff; font-weight: 700; font-size: .95rem;
+      width: 2.1rem; height: 2.1rem;
+      border: 1.5px solid var(--nav-bg); border-radius: 50%; color: var(--nav-bg);
+      font-family: 'Fraunces', Georgia, serif; font-weight: 600; font-size: 1rem;
       display: flex; align-items: center; justify-content: center;
-      box-shadow: 0 2px 8px rgba(79,70,229,.3);
     }
-    .step h3 { font-size: 1.04rem; font-weight: 700; margin-bottom: .35rem; }
-    .step p { font-size: .92rem; color: var(--text-muted); }
+    .step h3 { font-size: 1.05rem; font-weight: 600; margin-bottom: .35rem; }
+    .step p { font-size: .9rem; color: var(--text-muted); }
 
     /* ===== AUDIENCE ===== */
     .who { display: flex; gap: .6rem; flex-wrap: wrap; justify-content: center; }
     .who span {
       background: #fff; border: 1px solid var(--border); border-radius: 999px;
-      padding: .45rem 1rem; font-size: .9rem; font-weight: 500;
+      padding: .45rem 1rem; font-size: .88rem; font-weight: 500;
       display: inline-flex; align-items: center; gap: .45rem;
     }
     .who .ic { color: var(--primary); }
 
     /* ===== FAQ ===== */
-    .faq { max-width: 760px; margin: 0 auto; display: grid; gap: .7rem; }
-    .faq-item { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); }
+    .faq { max-width: 760px; margin: 0 auto; display: grid; gap: .65rem; }
+    .faq-item { background: #fff; border: 1px solid var(--border); border-radius: 8px; }
     .faq-item summary {
-      cursor: pointer; list-style: none; padding: 1rem 1.2rem; font-weight: 600;
+      cursor: pointer; list-style: none; padding: 1rem 1.2rem; font-weight: 600; font-size: .96rem;
       display: flex; align-items: center; justify-content: space-between; gap: 1rem;
     }
     .faq-item summary::-webkit-details-marker { display: none; }
     .faq-item summary::after {
-      content: "+"; font-size: 1.3rem; font-weight: 500; line-height: 1;
+      content: "+"; font-size: 1.25rem; font-weight: 500; line-height: 1;
       color: var(--primary); flex-shrink: 0;
     }
     .faq-item[open] summary::after { content: "\2212"; }
     .faq-item summary:hover { color: var(--primary-d); }
-    .faq-item summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: var(--radius); }
-    .faq-group { font-size: .8rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--primary); margin: 1.2rem 0 .1rem; }
+    .faq-item summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 8px; }
+    .faq-group { font-family: 'IBM Plex Mono', monospace; font-size: .72rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--primary); margin: 1.2rem 0 .1rem; }
     .faq-group:first-child { margin-top: 0; }
-    .faq-answer { padding: 0 1.2rem 1.1rem; color: var(--text-muted); font-size: .95rem; }
+    .faq-answer { padding: 0 1.2rem 1.1rem; color: var(--text-muted); font-size: .93rem; }
     .faq-answer p + p, .faq-answer p + ul, .faq-answer ul + p { margin-top: .7rem; }
     .faq-answer ul { padding-left: 1.3rem; }
     .faq-answer a { color: var(--primary); font-weight: 600; text-decoration: none; }
@@ -443,26 +411,28 @@
 
     /* ===== FINAL CTA ===== */
     .final {
-      background: linear-gradient(135deg, var(--primary-d), var(--primary));
-      color: #fff; border-radius: 16px; padding: 3rem 1.5rem; text-align: center;
+      background: var(--nav-bg);
+      color: #fff; border-radius: 14px; padding: 3rem 1.5rem; text-align: center;
     }
     .final h2 { color: #fff; }
-    .final p { color: rgba(255,255,255,.88); max-width: 52ch; margin: 0 auto 1.6rem; }
-    .final .btn-primary {
-      background: #fff; color: var(--primary-d);
-      box-shadow: 0 4px 16px rgba(15,23,42,.2);
-    }
-    .final .cta-note { color: rgba(255,255,255,.75); }
+    .final p { color: rgba(255,255,255,.82); max-width: 52ch; margin: 0 auto 1.6rem; }
+    .final .btn-primary { background: #fff; color: var(--nav-bg); }
+    .final .btn-primary:hover { background: #f1f5f9; }
+    .final .cta-note { color: rgba(255,255,255,.68); }
 
     /* ===== FOOTER ===== */
     footer {
       border-top: 1px solid var(--border); padding: 2rem 0;
-      font-size: .87rem; color: var(--text-muted);
+      font-size: .86rem; color: var(--text-muted);
     }
     .foot-inner { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
     footer a { color: var(--text-muted); text-decoration: none; }
     footer a:hover { color: var(--text); text-decoration: underline; }
 
+    @media (max-width: 760px) {
+      .hero-row { flex-direction: column; }
+      .hero-preview { border-left: none; border-top: 1px solid var(--border); padding-left: 0; padding-top: 1.4rem; max-width: none; }
+    }
     @media (max-width: 640px) {
       .hero { padding: 3rem 0 2rem; }
       section { padding: 2.5rem 0; }
@@ -523,49 +493,52 @@
 
   <!-- ══ HERO ══ -->
   <div class="hero wrap">
-    <div class="eyebrow"><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-bolt"/></svg> Now onboarding first Canadian customers</div>
+    <div class="hero-row">
+      <div class="hero-main">
+        <div class="eyebrow"><span class="rule"></span><span class="kicker"><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-bolt"/></svg> Now onboarding first Canadian customers</span></div>
 
-    <h1>Know your <span class="accent">real food cost</span></h1>
+        <h1>Know your <span class="accent">real food cost</span></h1>
 
-    <p class="def">Foodnance is food cost software for independent restaurants, bakeries and commissaries in Canada.</p>
+        <p class="def">Foodnance is food cost software for independent restaurants, bakeries and commissaries in Canada.</p>
 
-    <p class="sub">
-      Photograph a supplier invoice. Foodnance reads every line, updates the cost of every
-      recipe that uses those ingredients, and tells you which vendor just raised prices —
-      before it quietly eats your margin.
-    </p>
+        <p class="sub">
+          Photograph a supplier invoice. Foodnance reads every line, updates the cost of every
+          recipe that uses those ingredients, and tells you which vendor just raised prices —
+          before it quietly eats your margin.
+        </p>
 
-    <div class="cta-row">
-      <a class="btn btn-primary btn-lg" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
-        <svg class="ic" style="width:1em" aria-hidden="true" focusable="false"><use href="#i-envelope"/></svg> Request access
-      </a>
-    </div>
-    <p class="cta-note">Early access — we set your account up with you, one business at a time.</p>
-    <p class="cta-note">Already a customer? <a href="/login">Log in</a></p>
-
-    <!-- Illustrative UI, not a customer's data. Swap for a real screenshot when ready. -->
-    <div class="preview">
-      <div class="preview-bar">
-        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-        <span class="title"><svg class="ic" style="width:1em" aria-hidden="true" focusable="false"><use href="#i-chart-line"/></svg> Price Movers</span>
-        <span class="example-tag">Example</span>
+        <div class="cta-row">
+          <a class="btn btn-primary btn-lg" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
+            <svg class="ic" style="width:1em" aria-hidden="true" focusable="false"><use href="#i-envelope"/></svg> Request access
+          </a>
+        </div>
+        <p class="cta-note">Early access — we set your account up with you, one business at a time.</p>
+        <p class="cta-note">Already a customer? <a href="/login">Log in</a></p>
       </div>
-      <div class="preview-body">
+
+      <!-- Illustrative UI, not a customer's data. Swap for a real screenshot when ready. -->
+      <div class="hero-preview">
+        <div class="hp-head">
+          <svg class="ic" style="width:.9em;color:var(--primary)" aria-hidden="true" focusable="false"><use href="#i-chart-line"/></svg>
+          <span class="kicker">Price Movers</span>
+          <span class="example-tag">Example</span>
+        </div>
+
         <div class="kpi-row">
           <div class="kpi">
             <div class="label">Food cost %</div>
             <div class="value">31.4%</div>
-            <div class="delta down"><svg class="ic" style="width:.75em" aria-hidden="true" focusable="false"><use href="#i-arrow-down"/></svg> 2.1 pts vs last month</div>
+            <div class="delta down"><svg class="ic" style="width:.7em" aria-hidden="true" focusable="false"><use href="#i-arrow-down"/></svg> 2.1 pts</div>
           </div>
           <div class="kpi">
             <div class="label">Purchases (Jul)</div>
             <div class="value">$18,240</div>
-            <div class="delta">42 invoices processed</div>
+            <div class="delta" style="color:var(--text-muted)">42 invoices</div>
           </div>
           <div class="kpi">
             <div class="label">Overpaying by</div>
             <div class="value up">$412</div>
-            <div class="delta">vs cheapest vendor</div>
+            <div class="delta" style="color:var(--text-muted)">vs cheapest</div>
           </div>
         </div>
 
@@ -615,37 +588,37 @@
 
       <div class="grid">
         <div class="card">
-          <div class="icon"><svg class="ic" style="width:1em" aria-hidden="true" focusable="false"><use href="#i-camera"/></svg></div>
-          <h3>Invoices read for you</h3>
+          <div class="mark"><span class="rule"></span><svg class="ic" style="width:.85em" aria-hidden="true" focusable="false"><use href="#i-camera"/></svg><span class="kicker">Invoices</span></div>
+          <h3>Read for you</h3>
           <p>Photo or PDF in, itemised lines out — product, pack size, unit price. It flags a
              total that doesn't add up, so a typo never becomes a wrong food cost.</p>
         </div>
         <div class="card">
-          <div class="icon"><svg class="ic" style="width:1.125em" aria-hidden="true" focusable="false"><use href="#i-arrow-trend-up"/></svg></div>
-          <h3>Price movers &amp; vendor compare</h3>
+          <div class="mark"><span class="rule"></span><svg class="ic" style="width:.85em" aria-hidden="true" focusable="false"><use href="#i-arrow-trend-up"/></svg><span class="kicker">Price movers</span></div>
+          <h3>Vendor compare</h3>
           <p>See exactly which items went up, by how much, and which supplier is cheapest for
              the same item — with the dollar figure you'd save by switching.</p>
         </div>
         <div class="card">
-          <div class="icon"><svg class="ic" style="width:1.125em" aria-hidden="true" focusable="false"><use href="#i-book-open"/></svg></div>
-          <h3>Recipe &amp; product costing</h3>
+          <div class="mark"><span class="rule"></span><svg class="ic" style="width:.85em" aria-hidden="true" focusable="false"><use href="#i-book-open"/></svg><span class="kicker">Recipes</span></div>
+          <h3>Product costing</h3>
           <p>Cost every recipe from live ingredient prices, then build finished products from
              recipes. When flour goes up, every affected margin updates itself.</p>
         </div>
         <div class="card">
-          <div class="icon"><svg class="ic" style="width:1.125em" aria-hidden="true" focusable="false"><use href="#i-boxes-stacked"/></svg></div>
-          <h3>Stock takes that reconcile</h3>
+          <div class="mark"><span class="rule"></span><svg class="ic" style="width:.85em" aria-hidden="true" focusable="false"><use href="#i-boxes-stacked"/></svg><span class="kicker">Stock takes</span></div>
+          <h3>That reconcile</h3>
           <p>Count by storage area in walk order, on a phone, offline if the walk-in has no
              signal. See counted versus expected, and what the variance cost you.</p>
         </div>
         <div class="card">
-          <div class="icon"><svg class="ic" style="width:1.125em" aria-hidden="true" focusable="false"><use href="#i-chart-pie"/></svg></div>
-          <h3>P&amp;L with true COGS</h3>
+          <div class="mark"><span class="rule"></span><svg class="ic" style="width:.85em" aria-hidden="true" focusable="false"><use href="#i-chart-pie"/></svg><span class="kicker">P&amp;L</span></div>
+          <h3>True COGS</h3>
           <p>Monthly profit and loss from real purchases, with the option to swap in
              stock-take-based true cost of goods instead of purchases alone.</p>
         </div>
         <div class="card">
-          <div class="icon"><svg class="ic" style="width:1.125em" aria-hidden="true" focusable="false"><use href="#i-id-card"/></svg></div>
+          <div class="mark"><span class="rule"></span><svg class="ic" style="width:.85em" aria-hidden="true" focusable="false"><use href="#i-id-card"/></svg><span class="kicker">Staff</span></div>
           <h3>Certifications that don't lapse</h3>
           <p>Track food-safety certificates per staff member and get told what's expiring
              before an inspector is the one who notices.</p>
