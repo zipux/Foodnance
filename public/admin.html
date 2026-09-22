@@ -9,28 +9,29 @@
   <meta name="theme-color" content="#0369a1" />
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560;9..144,620&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
 
   <style>
     /* Standalone like login.html — this is not an app page and deliberately
        does not load app chrome. Tokens copied from static/style.css. */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --primary: #0369a1; --primary-d: #075985; --border: #e2e8f0;
-      --text: #1e293b; --text-muted: #64748b; --radius-sm: 8px;
+      --primary: #0369a1; --primary-d: #075985; --nav-bg: #0f172a; --border: #e4e0d8;
+      --text: #171512; --text-muted: #6b6659; --radius-sm: 6px;
       --success: #059669; --danger: #dc2626;
     }
     body {
-      font-family: 'Inter', system-ui, -apple-system, sans-serif;
-      background: #f1f5f9; color: var(--text); font-size: 15px; line-height: 1.6;
+      font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+      background: #f3f1ec; color: var(--text); font-size: 15px; line-height: 1.6;
       -webkit-font-smoothing: antialiased; min-height: 100vh;
     }
+    .mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
     .bar {
-      background: linear-gradient(90deg, var(--primary-d), var(--primary));
+      background: linear-gradient(90deg, var(--nav-bg), #1e293b);
       color: #fff; padding: .85rem 1.25rem;
       display: flex; align-items: center; gap: .6rem;
     }
-    .bar .brand { font-weight: 800; display: flex; align-items: center; gap: .5rem; }
+    .bar .brand { font-weight: 700; display: flex; align-items: center; gap: .5rem; }
     .bar .spacer { flex: 1; }
     .bar .who { font-size: .85rem; opacity: .9; }
     .bar button {
@@ -52,9 +53,9 @@
 
     .card {
       background: #fff; border: 1px solid var(--border);
-      border-radius: 12px; padding: 1.25rem; box-shadow: 0 2px 16px rgba(0,0,0,.05);
+      border-radius: 12px; padding: 1.25rem; box-shadow: 0 2px 16px rgba(0,0,0,.04);
     }
-    .card h2 { font-size: 1.05rem; font-weight: 700; margin-bottom: .25rem; }
+    .card h2 { font-family: 'Fraunces', Georgia, serif; font-size: 1.1rem; font-weight: 600; letter-spacing: -.005em; margin-bottom: .25rem; }
     .card .lede { font-size: .85rem; color: var(--text-muted); margin-bottom: 1.1rem; }
     .field .hint { display: block; margin-top: .35rem; font-size: .78rem; color: var(--text-muted); }
 
@@ -72,7 +73,8 @@
       border: none; border-radius: var(--radius-sm); padding: .6rem 1rem;
       display: inline-flex; align-items: center; justify-content: center; gap: .45rem;
     }
-    .btn-primary { width: 100%; color: #fff; background: linear-gradient(180deg, var(--primary), var(--primary-d)); }
+    .btn-primary { width: 100%; color: #fff; background: var(--nav-bg); }
+    .btn-primary:hover { background: #1e293b; }
     .btn-primary[disabled] { opacity: .6; cursor: default; }
     .btn-ghost { background: #f1f5f9; color: var(--text); border: 1px solid var(--border); font-size: .78rem; padding: .4rem .6rem; }
 
@@ -115,7 +117,7 @@
 
     /* Anthropic spend per customer. Tabular figures so the decimal points line
        up down the column and an outlier is obvious at a glance. */
-    .cost { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .cost { text-align: right; white-space: nowrap; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
     .cost .amt { font-weight: 600; }
     .cost .sub { display: block; font-size: .7rem; color: var(--text-muted); }
     .cost.zero .amt { color: var(--text-muted); font-weight: 400; }
