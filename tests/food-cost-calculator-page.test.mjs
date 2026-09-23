@@ -11,8 +11,8 @@
 //     copy they find; the two must not drift apart.
 //   - The worked example printed on the page must be what the calculator really
 //     returns for those inputs, or the page teaches a wrong number.
-//   - It is wired into the site: sitemap, homepage and pricing links, shared
-//     structured-data ids, and held out of search like its siblings.
+//   - It is wired into the site: sitemap, homepage and pricing links, and
+//     shared structured-data ids.
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -59,7 +59,7 @@ t.check('title is a name of sensible length', title.length >= 25 && title.length
 t.check('description fits a search snippet', desc.length >= 100 && desc.length <= 160, `${desc.length}`);
 t.check('exactly one h1', (page.match(/<h1\b/g) || []).length === 1);
 t.check('canonical is the extensionless URL', /<link rel="canonical" href="https:\/\/foodnance\.com\/food-cost-calculator"/.test(page));
-t.check('held out of search like the other marketing pages', /<meta name="robots" content="noindex, nofollow"/.test(page));
+t.check('launched — no longer held out of search', !/<meta name="robots" content="noindex/.test(page));
 t.check('language is en-CA like the rest of the site', /<html lang="en-CA">/.test(page));
 
 const ld = JSON.parse(page.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1]);
