@@ -207,6 +207,8 @@
     .ticks .ic { color: var(--primary); margin-top: .3em; }
     .plan .btn { margin-top: auto; }
     .plans-note { text-align: center; color: var(--text-muted); font-size: .88rem; margin-top: 1.1rem; }
+    .plans-note a { color: var(--primary); font-weight: 600; text-decoration: none; }
+    .plans-note a:hover { text-decoration: underline; }
 
     /* ===== SECTIONS ===== */
     section { padding: 3.75rem 0; }
@@ -313,7 +315,7 @@
         <svg class="ic ic-open" aria-hidden="true" focusable="false"><use href="#i-bars"/></svg>
         <svg class="ic ic-close" aria-hidden="true" focusable="false"><use href="#i-xmark"/></svg>
       </button>
-      <a class="btn btn-primary" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">Request access</a>
+      <a class="btn btn-primary js-request-access" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">Request access</a>
     </div>
     <nav class="nav-menu" id="navMenu" aria-label="Mobile">
       <a class="nav-link" href="/#features">Features</a>
@@ -370,7 +372,7 @@
             <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> Recipe and dish costing that updates itself</li>
             <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> Monthly P&amp;L</li>
           </ul>
-          <a class="btn btn-ghost btn-lg" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">Request access</a>
+          <a class="btn btn-ghost btn-lg js-request-access" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">Request access</a>
         </div>
 
         <div class="plan">
@@ -383,10 +385,11 @@
             <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> Inventory, so you know what you have</li>
             <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> Stock counts that show what a variance cost you</li>
           </ul>
-          <a class="btn btn-primary btn-lg" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">Request access</a>
+          <a class="btn btn-primary btn-lg js-request-access" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">Request access</a>
         </div>
       </div>
       <p class="plans-note">All prices are in Canadian dollars. No setup fee on either plan.</p>
+      <p class="plans-note">Mail app not opening? Email <a href="mailto:hello@foodnance.com">hello@foodnance.com</a> directly.</p>
     </div>
   </section>
 
@@ -464,8 +467,9 @@
       <div class="final">
         <h2>Find out what your food actually costs</h2>
         <p>We're onboarding the first businesses now, hands-on. Tell us a little about your operation and we'll set you up.</p>
-        <a class="btn btn-primary btn-lg" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">Request access</a>
+        <a class="btn btn-primary btn-lg js-request-access" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">Request access</a>
         <p class="more">Questions first? <a href="/#faq">Read the FAQ</a></p>
+        <p class="more">Nothing happened? Email <a href="mailto:hello@foodnance.com">hello@foodnance.com</a> directly.</p>
       </div>
     </div>
   </section>
@@ -485,5 +489,6 @@
   </footer>
 
   <script src="/static/env-banner.js?v=20260807-2"></script>
+  <script src="/static/request-access.js?v=20260923-1"></script>
 </body>
 </html>

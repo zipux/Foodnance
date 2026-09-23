@@ -53,6 +53,7 @@ const PUBLIC_API = new Set([
   '/api/auth/forgot-password', // by definition called without a session; answers identically for every address
   '/api/auth/reset-lookup',    // is this emailed link still good? — gated by the token
   '/api/auth/reset-password',  // sets a new password — gated by the emailed token
+  '/api/interest',              // the marketing "Request access" form — no account exists yet
 ])
 
 // Still allowed while an account is suspended: everything about the session
@@ -2064,6 +2065,92 @@ Foodnance`
 </div>`
   return sendEmail(env, { to, subject: 'Reset your Foodnance password', html, text })
 }
+
+// ── Marketing "Request access" leads ────────────────────────────
+// The landing/pricing/calculator pages' CTA opens a small form (see
+// public/static/request-access.js) that posts here instead of relying only on
+// a mailto: link — a mailto silently does nothing on a device with no mail
+// client configured. See migrations/0053_access_requests.sql. Public: there is
+// no session yet, by definition. Guarded by a honeypot field plus a dual rate
+// limit shaped like INVITE_EMAILS_* above — a global per-hour cap (this is a
+// low-traffic pre-launch site) and a per-email per-day cap — reserved in one
+// INSERT ... SELECT ... WHERE so two simultaneous submissions can't both slip
+// under either limit. A refusal here still leaves the page's own mailto
+// fallback text working.
+const ACCESS_REQUESTS_PER_HOUR = 20
+const ACCESS_REQUESTS_PER_EMAIL_PER_DAY = 3
+
+function sendAccessRequestNotification(env: Bindings, r: {
+  name: string; email: string; businessName: string; businessType: string; invoicesPerWeek: string; sourcePage: string
+}) {
+  const lines = [
+    `Name: ${r.name}`,
+    `Email: ${r.email}`,
+    `Business: ${r.businessName}`,
+    r.businessType ? `Type: ${r.businessType}` : '',
+    r.invoicesPerWeek ? `Invoices/week: ${r.invoicesPerWeek}` : '',
+    `From: ${r.sourcePage || '(unknown page)'}`,
+  ].filter(Boolean)
+  const text = `New access request from the website.\n\n${lines.join('\n')}`
+  const html =
+`<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:480px;margin:0 auto;color:#1e293b;line-height:1.55">
+  <p>New access request from the website.</p>
+  <ul>${lines.map(l => `<li>${escHtml(l)}</li>`).join('')}</ul>
+</div>`
+  return sendEmail(env, { to: 'hello@foodnance.com', subject: `Access request — ${r.businessName}`, html, text })
+}
+
+// POST /api/interest
+//   { name, email, business_name, business_type?, invoices_per_week?, source_page?, website? } — PUBLIC.
+// `website` is a honeypot: real visitors never see that field (it's visually
+// hidden in the form), so a filled one gets the same {ok:true} a real
+// submission gets — never saved, never emailed, never tipped off.
+app.post('/api/interest', async (c) => {
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  if (String(body.website || '').trim()) return c.json({ ok: true })
+
+  const name = String(body.name || '').trim().slice(0, 200)
+  const email = normalizeEmail(body.email)
+  const businessName = String(body.business_name || '').trim().slice(0, 200)
+  const businessType = String(body.business_type || '').trim().slice(0, 60)
+  const invoicesPerWeek = String(body.invoices_per_week || '').trim().slice(0, 60)
+  const sourcePage = String(body.source_page || '').trim().slice(0, 120)
+
+  if (!name) return c.json({ error: 'Your name is required.' }, 400)
+  if (!email.includes('@')) return c.json({ error: 'A valid email is required.' }, 400)
+  if (!businessName) return c.json({ error: 'Business name is required.' }, 400)
+
+  const id = uid()
+  let slot
+  try {
+    slot = await c.env.DB.prepare(
+      `INSERT INTO access_requests (id, name, email, business_name, business_type, invoices_per_week, source_page)
+       SELECT ?, ?, ?, ?, ?, ?, ?
+        WHERE (SELECT COUNT(*) FROM access_requests
+                WHERE created_at > datetime('now', '-1 hour')) < ?
+          AND (SELECT COUNT(*) FROM access_requests
+                WHERE email = ? AND created_at > datetime('now', '-1 day')) < ?`,
+    ).bind(id, name, email, businessName, businessType, invoicesPerWeek, sourcePage,
+      ACCESS_REQUESTS_PER_HOUR, email, ACCESS_REQUESTS_PER_EMAIL_PER_DAY).run()
+  } catch (e) {
+    console.error('POST /api/interest: insert failed', e)
+    return c.json({ error: 'Could not save your request right now. Email hello@foodnance.com directly.' }, 500)
+  }
+  if (!slot.meta.changes) {
+    return c.json({ error: 'Too many requests right now. Email hello@foodnance.com directly.' }, 429)
+  }
+
+  const delivery = sendAccessRequestNotification(c.env, { name, email, businessName, businessType, invoicesPerWeek, sourcePage })
+    .then(res => {
+      if (!res.ok) {
+        return c.env.DB.prepare('UPDATE access_requests SET notify_error = ? WHERE id = ?').bind(res.error || 'unknown', id).run()
+      }
+    })
+    .catch(e => console.error('POST /api/interest: notification failed', e))
+  try { c.executionCtx.waitUntil(delivery) } catch (_) { await delivery }
+
+  return c.json({ ok: true })
+})
 
 // POST /api/admin/organizations
 //   { name, owner_email, owner_name?, account_type? }        → emails the owner an invite
