@@ -1499,6 +1499,9 @@ async function saveInvDetail() {
           price:        parseFloat(l.price) || 0,
           qty:          parseFloat(l.qty)   || 0,
           line_total:   (parseFloat(l.price)||0) * (parseFloat(l.qty)||0),
+          // Carried back unchanged: the route deletes and re-inserts every
+          // line, so leaving this out would unlink the whole invoice on save.
+          generic_product_id: l.generic_product_id || null,
         };
       }),
       tax_pst:        taxPst,
@@ -1929,6 +1932,12 @@ async function confirmAndSaveInvoice() {
         qty:          parseFloat(l.qty)        || 0,
         line_total:   parseFloat(l.line_total) || 0,
         _original_ocr: l._original_ocr        || '',
+        // The product the reviewer linked this line to ("Link to existing
+        // product" or an accepted "did you mean"). Dropping these here used to
+        // discard the choice: the purchase was filed by the invoice's wording
+        // instead, and the wording was never learned as an alias.
+        _link_product_id:   l._link_product_id   || '',
+        _link_product_name: l._link_product_name || '',
       };
     })
     .filter(l => l.product_name);
@@ -1989,8 +1998,9 @@ async function confirmAndSaveInvoice() {
       parsed_data:    '',
     });
 
-    // 2. Write line items to invoice_lines (replaces any existing)
-    await apiPost(`invoice-lines/${id}/replace`, {
+    // 2. Write line items to invoice_lines (replaces any existing). The new
+    //    line ids come back in the same order as validLines.
+    const linesResult = await apiPost(`invoice-lines/${id}/replace`, {
       lines: validLines.map(l => ({
         product_name: l.product_name,
         vendor_item:  l.vendor_item,
@@ -2013,11 +2023,15 @@ async function confirmAndSaveInvoice() {
 
     // 3. Bulk-create suppliers / generic_products / product_entries
     //    — same backend route used by the old upload flow.
-    const productsForBulk = validLines.map(l => ({
+    const lineIds = linesResult?.line_ids || [];
+    const productsForBulk = validLines.map((l, i) => ({
       // A linked line imports under the product the user picked, so THIS
       // invoice files correctly. The vendor's wording is registered as an
       // alias just below, which is what routes FUTURE invoices.
       name:        l._link_product_name || l.product_name,
+      // Lets the import record on the invoice line which product this
+      // purchase was filed under (migration 0054).
+      invoice_line_id: lineIds[i] || '',
       brand:       l.category,           // category column doubles as brand on the line
       sku:         l.item_code,
       pack_size:   l.packaging,

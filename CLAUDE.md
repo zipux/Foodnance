@@ -277,6 +277,35 @@ yet). It calls the very helpers the parse cap uses (`effectiveInvoiceCap`,
 `monthlyInvoiceParses`), so the card can never disagree with the block; cap `0` = no limit.
 The local sandbox has no `RESEND_API_KEY`, so it only proves the caps; a real send was checked on staging 2026-09-22 (staging *does* hold `RESEND_API_KEY`): the email arrived in the inbox, not spam, and the link resolved.
 
+### Invoice lines carry their product id (added 2026-09-23, migration `0054`)
+
+**Applied and deployed 2026-09-23** on both environments, neither recorded in
+`d1_migrations`. **Production already had the column** (TEXT, plus an index
+`idx_invoice_lines_generic_product_id`), hand-added at some point and holding one
+correct link — so only 0054's three backfill `UPDATE`s were run there (74 + 26 lines;
+all 101 now linked, every one to a product in the same org). Pre-change Time Travel
+bookmark: `0000058c-00000000-000050ef-b065e42a46b84223cb325fdcf013da6b`. Staging got the
+full file (it had no invoice lines). `--file` against remote fails with an auth error
+(code 10000) from this machine; the statements were sent with `--command`. Any NEW
+database built from the files must still apply 0054 before running this code — it
+reads and writes `invoice_lines.generic_product_id`, and an earlier attempt that wrote
+the column where it didn't exist 500'd every Merge for weeks.
+
+Why: the spending breakdown and the P&L found a line's category by matching its **name**
+against product names, so any drift (a supplier alias filing "Fingerling" under "Yellow
+Fingerling Potato", a rename or merge whose name cascade missed the line) put real spend
+under "Uncategorized". Now the id is read first and the name match is only a fallback for
+lines without one. How it's kept: Confirm & Save gets the new line ids back from
+`/api/invoice-lines/:id/replace` and passes each as `invoice_line_id` to
+`/api/bulk/upsert-products`, which records the product the purchase was actually filed
+under; Save Changes sends each line's id back (the route deletes and re-inserts every line,
+so dropping it would unlink the invoice); `mergeInto` re-points it; a rename needs nothing.
+The migration's backfill links only unambiguous lines (a read-only preview on 2026-09-23
+linked all 101 production lines). Lines that can still be unlinked: one added by hand while
+editing a saved invoice (it has no purchase record), or a save interrupted between writing
+the lines and the product import. `tests/invoice-line-product.test.mjs` (static) +
+`npm run test:line-product` (needs the sandbox and `db:migrate:local`).
+
 ### Tests
 
 ```bash
@@ -338,7 +367,7 @@ This is a core invariant for anything with financial or stock history:
 - When adding features that consume this data, filter out voided/archived rows (`voided_at IS NULL`, `deleted_at IS NULL`).
 
 ### Denormalized names cascade on rename
-Product names are copied into `product_entries`, `invoice_lines`, `product_mappings`, `inventory`, `recipe_items`, `stock_log` (some features join by name, not id). `PUT /api/generic_products/:id` cascades a name change to all of these. If you add another place a product name is stored, add it to that cascade.
+Product names are copied into `product_entries`, `invoice_lines`, `product_mappings`, `inventory`, `recipe_items`, `stock_log` (some features join by name, not id). `PUT /api/generic_products/:id` cascades a name change to all of these. If you add another place a product name is stored, add it to that cascade. `invoice_lines` also carries `generic_product_id` (migration `0054`) — anything that needs a line's product should use that, not the name.
 
 ### AI invoice/recipe parsing
 `/api/ai/parse-invoice` and `/api/ai/parse-recipe` call the Anthropic API directly (`fetch` to `api.anthropic.com/v1/messages`, model `claude-opus-4-8`) — there is no SDK dependency. They return JSON matching an inline schema. Supplier dedup (`classifySupplierMatch` + Levenshtein) and `parsePackSize`/`inferCategory` heuristics in `src/index.ts` clean up extracted data before it hits the DB. Outages come from the key, not the code — see "Secrets" above.

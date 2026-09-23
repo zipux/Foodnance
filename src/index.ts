@@ -3864,17 +3864,35 @@ app.post('/api/invoice-lines/:invoice_id/replace', async (c) => {
   ).bind(invoiceId, org).first()
   if (!owner) return c.json({ error: 'Invoice not found' }, 404)
 
+  // Each line may carry the id of the product it is filed under (migration 0054).
+  // This route deletes and re-inserts every line, so an edit that didn't send
+  // the id back would silently unlink the whole invoice — the editor round-trips
+  // it. Only ids of this business's own products are kept; anything else is
+  // stored as NULL, which falls back to the name match.
+  const wantedIds = [...new Set((body.lines || [])
+    .map(l => String(l.generic_product_id || '').trim()).filter(Boolean))]
+  const ownIds = new Set<string>()
+  if (wantedIds.length) {
+    const found = await c.env.DB.prepare(
+      `SELECT id FROM generic_products WHERE id IN (${wantedIds.map(() => '?').join(',')}) AND org_id IS ?`
+    ).bind(...wantedIds, org).all<{ id: string }>()
+    for (const r of (found.results ?? [])) ownIds.add(r.id)
+  }
+
   // Delete existing lines
   await c.env.DB.prepare('DELETE FROM invoice_lines WHERE invoice_id = ? AND org_id IS ?').bind(invoiceId, org).run()
 
-  // Insert new lines
+  // Insert new lines. Their ids come back in order, so Confirm & Save can tell
+  // the product import which line each purchase belongs to.
+  const lineIds: string[] = []
   for (const line of (body.lines || [])) {
     const id = uid()
     const qty   = parseFloat(line.qty   as string) || 0
     const price = parseFloat(line.price as string) || 0
+    const productId = String(line.generic_product_id || '').trim()
     await c.env.DB.prepare(
-      `INSERT INTO invoice_lines (id, invoice_id, product_name, vendor_item, category, item_code, packaging, price, qty, line_total, org_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO invoice_lines (id, invoice_id, product_name, vendor_item, category, item_code, packaging, price, qty, line_total, generic_product_id, org_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       id, invoiceId,
       (line.product_name as string) || '',
@@ -3884,8 +3902,10 @@ app.post('/api/invoice-lines/:invoice_id/replace', async (c) => {
       (line.packaging    as string) || '',
       price, qty,
       parseFloat(line.line_total as string) || (price * qty),
+      ownIds.has(productId) ? productId : null,
       org
     ).run()
+    lineIds.push(id)
   }
 
   // Update extra cost fields on invoice
@@ -3903,7 +3923,7 @@ app.post('/api/invoice-lines/:invoice_id/replace', async (c) => {
     org
   ).run()
 
-  return c.json({ saved: (body.lines || []).length })
+  return c.json({ saved: (body.lines || []).length, line_ids: lineIds })
 })
 
 // ─── Vendor Fee Templates ──────────────────────────────────────
@@ -4396,6 +4416,19 @@ app.post('/api/bulk/upsert-products', async (c) => {
       org
     ).run()
 
+    // Tie the invoice line to the product this purchase was just filed under
+    // (migration 0054) — resolved above by name or supplier alias, which is
+    // exactly the step where the line's wording and the product's name part
+    // ways. Scoped to the line's own invoice and business, so a stray id can
+    // only miss, never re-point someone else's line.
+    const invoiceLineId = String(p.invoice_line_id || '').trim()
+    const invoiceIdForLine = String(p.invoice_id || '').trim()
+    if (invoiceLineId && invoiceIdForLine) {
+      await c.env.DB.prepare(
+        `UPDATE invoice_lines SET generic_product_id = ? WHERE id = ? AND invoice_id = ? AND org_id IS ?`
+      ).bind(genericId, invoiceLineId, invoiceIdForLine, org).run()
+    }
+
     saved++
   }
 
@@ -4880,13 +4913,15 @@ async function mergeInto(
   // Without this the absorbed rows keep the old name and stock_log keeps pointing
   // at the now-deleted product id, so spending breakdown / stock history drift.
   //
-  // invoice_lines is matched BY NAME ONLY — it stores the line as read off the
-  // invoice and has no product id column (see migrations 0002 and 0035). An
-  // earlier version of this cascade also set `invoice_lines.generic_product_id`,
-  // which has never existed, so every Merge and Group failed here. Nothing
-  // anywhere reads such a column; the name is the whole link. Matches
-  // cascadeRename below, which has always done it this way.
+  // invoice_lines carries the product id since migration 0054 — that re-point is
+  // the exact link, and it is what the reports read first. The name rewrite is
+  // kept for lines saved before 0054 that could not be linked (they still match
+  // by name). An earlier version of this cascade wrote
+  // `invoice_lines.generic_product_id` before any migration created it, which
+  // 500'd every Merge and Group — so 0054 must be applied before this deploys.
   writes.push(
+    db.prepare('UPDATE invoice_lines SET generic_product_id = ? WHERE generic_product_id = ? AND org_id IS ?')
+      .bind(surviving.id, merged.id, org),
     db.prepare('UPDATE invoice_lines SET product_name = ? WHERE LOWER(TRIM(product_name)) = LOWER(TRIM(?)) AND org_id IS ?')
       .bind(surviving.name, merged.name, org),
     db.prepare('UPDATE product_mappings SET corrected_name = ? WHERE LOWER(TRIM(corrected_name)) = LOWER(TRIM(?)) AND org_id IS ?')
@@ -6115,13 +6150,16 @@ app.get('/api/spending-breakdown', async (c) => {
     ORDER BY amount DESC
   `).bind(from, to, org).all<{ vendor: string; amount: number }>()
 
-  // By category: resolve from generic_products (real category) via product_entries,
-  // falling back to invoice_lines.category (brand field) if no match found.
+  // By category: the line's own product (by id, migration 0054) first, then —
+  // only for lines with no id — the old name match via product_entries and
+  // generic_products. A name that matches nothing is 'Uncategorized'.
   const categoryRows = await c.env.DB.prepare(`
     WITH line_cats AS (
       SELECT
         il.line_total,
         COALESCE(
+          (SELECT gp.category FROM generic_products gp
+            WHERE gp.id = il.generic_product_id AND gp.org_id IS ?),
           (SELECT gp.category
            FROM product_entries pe
            JOIN generic_products gp ON gp.id = pe.generic_product_id
@@ -6147,7 +6185,7 @@ app.get('/api/spending-breakdown', async (c) => {
     FROM line_cats
     GROUP BY category
     ORDER BY amount DESC
-  `).bind(org, org, org, from, to, org, org).all<{ category: string; amount: number }>()
+  `).bind(org, org, org, org, from, to, org, org).all<{ category: string; amount: number }>()
 
   const round2 = (n: number) => Math.round(n * 100) / 100
   const pct    = (n: number) => total > 0 ? Math.round((n / total) * 1000) / 10 : 0
@@ -6210,15 +6248,18 @@ app.get('/api/pnl', async (c) => {
     return c.json({ error: `'to' (${to}) is before 'from' (${from}).` }, 400)
 
   // Cost by category TYPE. Resolve each invoice line's real category from
-  // generic_products (via product_entries name match, then direct name match,
-  // then the line's own category), map that category → its type, defaulting an
-  // unknown/unmatched category to 'food' (same convention as the Inventory
-  // buckets). Only Closed, non-voided invoices dated in the month.
+  // generic_products (the line's own product id first — migration 0054 — then,
+  // for lines with no id, the product_entries name match, then direct name
+  // match, then the line's own category), map that category → its type,
+  // defaulting an unknown/unmatched category to 'food' (same convention as the
+  // Inventory buckets). Only Closed, non-voided invoices dated in the month.
   const typeRows = await c.env.DB.prepare(`
     WITH line_cats AS (
       SELECT
         il.line_total AS amt,
         COALESCE(
+          (SELECT gp.category FROM generic_products gp
+            WHERE gp.id = il.generic_product_id AND gp.org_id IS ?),
           (SELECT gp.category FROM product_entries pe
              JOIN generic_products gp ON gp.id = pe.generic_product_id
             WHERE LOWER(TRIM(pe.generic_product_name)) = LOWER(TRIM(il.product_name))
@@ -6247,7 +6288,7 @@ app.get('/api/pnl', async (c) => {
       SUM(COALESCE(amt, 0)) AS amount
     FROM line_cats
     GROUP BY type, category
-  `).bind(org, org, org, from, to, org, org, org).all<{ type: string; category: string; amount: number }>()
+  `).bind(org, org, org, org, from, to, org, org, org).all<{ type: string; category: string; amount: number }>()
 
   // Grouped by category as well as type so the statement can break the supplies
   // line down. Six built-in categories roll into it — packaging, disposables,
