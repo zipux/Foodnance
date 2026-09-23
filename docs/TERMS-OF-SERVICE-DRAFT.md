@@ -18,9 +18,11 @@
 
 ### 1. Who these terms are between
 
-These Terms of Service ("Terms") are between `[LEGAL ENTITY NAME]` ("we", "us"),
-a `[PROVINCE]` `[corporation / sole proprietorship]`, and the business that
-subscribes to Foodnance ("Customer", "you").
+These Terms of Service ("Terms") are between `[LEGAL/TRADE NAME]` ("we", "us"),
+a sole proprietorship operated by an individual resident in Japan, and the
+business that subscribes to Foodnance ("Customer", "you"). `[Japan sole-proprietor
+detail: does the operator hold a registered kojin jigyo trade name to put here,
+or does this contract in the operator's own personal name?]`
 
 Foodnance is business software sold to businesses. It is **not** a consumer
 product, and you confirm you are subscribing for business purposes. Individuals
@@ -69,9 +71,37 @@ extraction is limited per organization per calendar month on lower plans.
 Reaching a limit blocks further use of that feature until the next period; it
 does not affect data you have already saved.
 
-Fees are `[in CAD / exclusive of GST/PST and other applicable taxes]`, billed
-`[monthly / annually]` in advance, `[non-refundable except as required by law]`.
-Late payment may result in suspension under section 12.
+Fees are billed **monthly, in advance**, in `[CAD, since Canada is the launch
+market — revisit once selling outside Canada]`. Applicable taxes (e.g. GST/HST
+for Canadian customers) are calculated and added at checkout, not included in
+the listed price. Late payment may result in suspension under section 12.
+
+**Refunds.** Fees already paid are non-refundable. Cancelling stops future
+billing; it does not unwind the period you are currently in — you keep full
+access through the end of it (section 12). We do not offer refunds for
+dissatisfaction, non-use, or a decision to switch products.
+
+**Billing errors are not refund requests.** If we charge you the wrong amount,
+charge you twice for the same period, or charge you after a cancellation should
+already have taken effect, that is our mistake to fix, not a claim you have to
+argue for. Tell us at `billing@foodnance.com` and we will correct the charge —
+refund the erroneous amount to the original payment method — within **7
+business days**. This is a correction, not an exception to the no-refund rule
+above, and it does not require you to show the Service was unsatisfactory.
+
+**Downgrades.** A plan downgrade takes effect at your next billing date; we do
+not refund the difference for the period already billed at the higher rate.
+
+> **Resolved 2026-09-23.** This follows MarginEdge, MarketMan and Meez, who all
+> land on the same position: no refund for the period paid, access continues to
+> its end, cancellation is forward-only. (WISK is the outlier — a 60-day
+> money-back guarantee — but WISK doesn't offer month-to-month billing at all;
+> the guarantee substitutes for the cancel-anytime flexibility we already give
+> by not locking customers into a quarterly/annual term. Given cancel-anytime,
+> a customer's exposure is already capped at one month's fee, so a
+> satisfaction-guarantee refund isn't solving a problem this pricing model
+> creates.) Monthly billing only, no annual option. Billing-error correction:
+> `billing@foodnance.com`, 7 business days.
 
 ### 5. Your data, and who is responsible for it
 
@@ -221,8 +251,8 @@ may retain data longer where the law requires it.
 
 ### 12. Suspension, termination and account states
 
-You may cancel at any time, effective at the end of your current billing period.
-`[Refund position: recommend none for the period already paid.]`
+You may cancel at any time, effective at the end of your current billing
+period. See section 4 for the refund position.
 
 We may **suspend** your account, restricting it to read-only access, for
 non-payment or for breach of section 9. Suspension is reversible; your data is
@@ -233,8 +263,8 @@ within `[30]` days of notice, for repeated or serious breach of section 9, or if
 you become insolvent. On termination access to the Service ends and section 11
 retention applies.
 
-We may terminate for convenience on `[60]` days' notice with a pro-rata refund of
-fees paid for the unused period.
+We may terminate for convenience on `[60]` days' notice with a **full refund of
+your most recent monthly payment** — not prorated to the days remaining.
 
 ### 13. Intellectual property
 
@@ -292,15 +322,24 @@ authority.
 We may change these Terms. For material changes we will give at least `[30]`
 days' notice by email or in-app notice. Continuing to use the Service after the
 change takes effect means you accept it; if you do not, you may cancel and
-receive a pro-rata refund for the unused paid period.
+receive a full refund of your most recent monthly payment.
 
 ### 18. General
 
-**Governing law:** the laws of `[PROVINCE]` and the federal laws of Canada
-applicable there. **Courts:** the courts of `[PROVINCE]`, exclusive jurisdiction.
-`[Arbitration: recommend NOT adding a mandatory arbitration clause — it is a US
-pattern, it costs more than it saves at this scale, and Canadian enforceability
-in a B2B context is fine either way.]`
+**Governing law / courts:** `[OPEN — bigger than a bracket now. The operator is
+a Japan resident selling worldwide, starting with Canada. Picking Japanese law
+is natural for the seller but unfamiliar and harder to enforce for a Canadian
+restaurant customer; picking a Canadian province's law is the opposite trade —
+familiar to the customer, but means the sole proprietor is submitting to a
+foreign court over their own home law. Neither is free of cross-border
+wrinkles, and this is a genuinely different question from the domestic-Canada
+version this draft assumed until 2026-09-23. Needs a lawyer who can speak to
+both sides, not just a Canadian one.]`
+`[Arbitration: worth reconsidering now — unlike the pure-Canada case, a neutral
+arbitration seat (e.g. Singapore, or online arbitration) is a common way
+solo cross-border sellers avoid asking every customer to sue them in Japan or
+asking themselves to be sued in every customer's home country. Still probably
+overkill pre-revenue; revisit once sales exist outside Canada.]`
 
 Entire agreement; no assignment by you without consent; we may assign on a sale
 of the business; severability; no waiver by delay; notices by email to the
@@ -352,27 +391,52 @@ customers is to freeze a valuation when a period is reported.
 
 ## Part 3 — Decisions only you can make
 
-1. **Legal entity and province.** Incorporated or sole proprietor? Which
-   province? The schema's GST/PST fields suggest BC. This sets governing law,
-   which consumer-protection statute is in play, and how much of §14 survives.
+1. **Legal entity and province — answered 2026-09-23, changes the shape of the
+   doc.** Sole proprietorship, operator resident in Japan, selling worldwide
+   starting with Canada. Not a Canadian entity at all — §1 updated to say so,
+   but §18 (governing law/courts) is now an open cross-border question, not a
+   fill-in-the-bracket one. Still need: the trade/registered name to put in
+   §1, and whether GST/HST needs collecting (Canada requires non-resident
+   vendors of digital services to register once sales to Canadian customers
+   cross ~$30,000 CAD over 12 months — below that, nothing to collect yet).
 2. **The liability cap.** Recommend 12 months of fees, not a flat $100.
 3. **Whether §7 exists at all.** Include the review disclaimer, or follow the
    industry and say nothing? Lawyer's call, and it depends on how strongly the
    marketing site promises a human check.
 4. **Retention period after termination.** Recommend 30 days, then purge.
-5. **Refunds.** None for the paid period is standard; pro-rata on termination for
-   convenience.
-6. **Billing model.** Nothing is built. Whoever writes §4 properly needs the
-   answer first.
+5. **Refunds — answered 2026-09-23, drafted in §4.** Monthly billing only, tax
+   added at checkout, no refund for the period paid, billing errors corrected
+   within 7 business days to `billing@foodnance.com`, full refund of the most
+   recent payment (not prorated) if Foodnance ends the relationship for
+   convenience or changes these Terms in a way you don't accept.
+6. **Billing model.** Monthly billing decided (see #5); the payment processor
+   itself still isn't chosen/built.
 
 ## Part 4 — What a lawyer must fix, not you
 
-- Whether a `[PROVINCE]` court will enforce §14 and §15 at all, and against
-  whom. These are US-style clauses lifted from US competitors.
-- Whether any provincial consumer-protection statute reaches a small restaurant
-  customer despite §1's business-purpose statement.
-- Privacy law compliance — PIPEDA and any provincial equivalent — for staff
-  personal information and for cross-border transfer to the AI provider.
+- **New as of 2026-09-23 — this is now a cross-border contract, not a domestic
+  Canadian one.** The seller is a Japan-resident sole proprietor; customers
+  start in Canada and the business intends to sell worldwide. Needs someone
+  who can speak to both Japanese and Canadian (and eventually other) law, not
+  a Canada-only lawyer:
+  - Which country's law and courts govern (§18) — and whether that choice is
+    even enforceable against a customer in a different country.
+  - Whether Canada's simplified GST/HST regime for non-resident digital-service
+    vendors applies once Canadian sales cross the registration threshold, and
+    what the Japanese tax/invoicing obligations are for a kojin jigyo selling
+    services abroad.
+  - Whether selling to consumers vs. businesses matters here — §1 already
+    says business-only, but a solo restaurant owner signing up personally is
+    exactly the edge case Canadian consumer-protection law tends to worry
+    about, now combined with the seller being outside the country entirely.
+- Whether the chosen court will enforce §14 and §15 at all, and against whom.
+  These are US-style clauses lifted from US competitors.
+- Whether any consumer-protection statute (Canadian or Japanese) reaches a
+  small restaurant customer despite §1's business-purpose statement.
+- Privacy law compliance — PIPEDA and any provincial equivalent, **plus
+  Japan's APPI** now that the operator and infrastructure decisions sit with a
+  Japan resident — for staff personal information and for cross-border
+  transfer to the AI provider.
 - Whether §7 creates a duty of care despite saying it doesn't.
 - A Privacy Policy. This document assumes one exists; none does.
 
@@ -380,4 +444,9 @@ customers is to freeze a valuation when a period is reported.
 
 *Draft prepared 2026-08-09. Competitor terms reviewed the same day:
 [MarginEdge](https://www.marginedge.com/terms) ·
-[MarketMan](https://www.marketman.com/saas-subscription-agreement).*
+[MarketMan](https://www.marketman.com/saas-subscription-agreement).
+Refund policy (§4) added 2026-09-23 after re-checking
+[MarginEdge](https://www.marginedge.com/terms),
+[MarketMan](https://www.marketman.com/saas-subscription-agreement),
+[Meez](https://www.getmeez.com/terms-of-use) and
+[WISK](https://www.wisk.ai/price)'s live pricing/refund pages.*

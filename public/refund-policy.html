@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en-CA">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Held out of search on purpose, exactly like index.html: reachable, not
+       announced. TO LAUNCH: delete the robots meta line below together with the
+       one in index.html (see the checklist in robots.txt), then add this page to
+       the sitemap submission in Search Console. -->
+  <meta name="robots" content="noindex, nofollow" />
+
+  <title>Foodnance Refund Policy</title>
+  <meta name="description" content="How refunds work for Foodnance: no refund for the month you're already in, but billing mistakes are fixed within 7 business days." />
+  <link rel="canonical" href="https://foodnance.com/refund-policy" />
+  <meta name="theme-color" content="#0369a1" />
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="mask-icon" href="/favicon.svg" color="#0369a1" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560;9..144,620&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
+
+  <style>
+    /* Standalone like index.html / pricing.html: no shared stylesheet, tokens copied from it. */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary:    #0369a1;
+      --primary-d:  #075985;
+      --nav-bg:     #0f172a;
+      --nav-bg-d:   #1e293b;
+      --bg:         #faf9f6;
+      --bg-alt:     #f3f1ec;
+      --border:     #e4e0d8;
+      --text:       #171512;
+      --text-muted: #6b6659;
+      --radius:     12px;
+      --radius-sm:  6px;
+      --shadow:     0 2px 16px rgba(0,0,0,.06);
+      --maxw:       1080px;
+      --maxw-prose: 700px;
+    }
+
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+      color: var(--text); background: var(--bg);
+      font-size: 16px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 1.25rem; }
+    .prose { max-width: var(--maxw-prose); margin: 0 auto; padding: 0 1.25rem; }
+    .ic { height: 1em; fill: currentColor; vertical-align: -.125em; flex: none; }
+    .kicker { font-family: 'IBM Plex Mono', monospace; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+
+    /* ===== NAV (same as pricing.html) ===== */
+    header.nav {
+      position: sticky; top: 0; z-index: 50;
+      background: rgba(250,249,246,.88); backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: var(--maxw); margin: 0 auto; padding: .85rem 1.25rem;
+      display: flex; align-items: center; gap: 1rem;
+    }
+    .brand {
+      display: flex; align-items: center; gap: .55rem;
+      font-weight: 700; font-size: 1.15rem; letter-spacing: -.01em;
+      color: var(--text); text-decoration: none;
+    }
+    .brand .ic { color: var(--primary); }
+    .nav-spacer { flex: 1; }
+    .nav-link {
+      color: var(--text-muted); text-decoration: none; font-size: .92rem;
+      font-weight: 500; padding: .4rem .6rem; border-radius: 6px;
+      white-space: nowrap;
+    }
+    .nav-link:hover { color: var(--text); background: var(--bg-alt); }
+    .nav-link[aria-current="page"] { color: var(--text); font-weight: 600; }
+    .nav-toggle { display: none; }
+    .nav-menu { display: none; }
+
+    /* ===== BUTTONS ===== */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+      font-family: inherit; font-size: .93rem; font-weight: 600;
+      padding: .7rem 1.2rem; border-radius: var(--radius-sm);
+      text-decoration: none; border: 1px solid transparent; cursor: pointer;
+      transition: background .15s ease; white-space: nowrap;
+    }
+    .btn-primary { background: var(--nav-bg); color: #fff; }
+    .btn-primary:hover { background: var(--nav-bg-d); }
+    .btn-ghost { background: #fff; color: var(--text); border-color: var(--border); }
+    .btn-ghost:hover { background: var(--bg-alt); }
+    .btn:focus-visible, .nav-link:focus-visible, .brand:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+    /* ===== HERO ===== */
+    .hero { padding: 4rem 0 1.6rem; text-align: center; }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: .5rem;
+      color: var(--primary); margin-bottom: 1.2rem;
+    }
+    .eyebrow .rule { width: 22px; height: 1px; background: var(--primary); display: inline-block; }
+    .eyebrow .kicker { font-size: .72rem; }
+    h1 {
+      font-family: 'Fraunces', Georgia, serif; font-weight: 600;
+      font-size: clamp(1.9rem, 4.6vw, 2.8rem); line-height: 1.14; letter-spacing: -.01em;
+      max-width: 22ch; margin: 0 auto 1rem;
+    }
+    .sub { font-size: clamp(.98rem, 2.2vw, 1.06rem); color: var(--text-muted); max-width: 54ch; margin: 0 auto; }
+    .updated { font-size: .82rem; color: var(--text-muted); margin-top: 1.2rem; }
+
+    /* ===== SUMMARY CARD ===== */
+    .summary {
+      background: #fff; border: 1px solid var(--border); border-radius: var(--radius);
+      box-shadow: var(--shadow); padding: 1.6rem 1.8rem; margin: 2rem auto 0;
+    }
+    .summary h2 { font-size: .8rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--primary); margin-bottom: .9rem; }
+    .summary ul { list-style: none; display: grid; gap: .7rem; font-size: .95rem; }
+    .summary li { display: flex; gap: .65rem; align-items: flex-start; }
+    .summary .ic { color: var(--primary); margin-top: .3em; }
+
+    /* ===== POLICY BODY ===== */
+    .policy { padding: 3rem 0; }
+    .policy h2 {
+      font-family: 'Fraunces', Georgia, serif; font-weight: 600;
+      font-size: clamp(1.2rem, 2.6vw, 1.5rem); letter-spacing: -.01em;
+      line-height: 1.25; margin: 2.2rem 0 .7rem;
+    }
+    .policy h2:first-child { margin-top: 0; }
+    .policy p { margin-bottom: .9rem; color: var(--text); }
+    .policy p.muted { color: var(--text-muted); font-size: .92rem; }
+    .policy strong { font-weight: 600; }
+    .policy a { color: var(--primary); }
+
+    /* ===== FOOTER ===== */
+    footer { border-top: 1px solid var(--border); padding: 2rem 0; font-size: .86rem; color: var(--text-muted); }
+    .foot-inner { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    footer a { color: var(--text-muted); text-decoration: none; }
+    footer a:hover { color: var(--text); text-decoration: underline; }
+
+    @media (max-width: 640px) {
+      .hero { padding: 2.8rem 0 1.2rem; }
+      .policy { padding: 2rem 0; }
+      .summary { padding: 1.3rem 1.4rem; }
+      .nav-inner { padding: .7rem 1rem; gap: .4rem; }
+      .brand { font-size: 1.05rem; }
+      .nav-anchor { display: none; }
+      .nav-inner .btn { padding: .5rem .85rem; font-size: .88rem; }
+
+      .nav-toggle {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 2.2rem; height: 2.2rem; margin-right: -.3rem;
+        background: none; border: none; border-radius: 6px;
+        color: var(--text); cursor: pointer; flex: none;
+      }
+      .nav-toggle:hover { background: var(--bg-alt); }
+      .nav-toggle .ic { width: 1.1rem; height: 1.1rem; }
+      .nav-toggle .ic-close { display: none; }
+      .nav-toggle[aria-expanded="true"] .ic-open { display: none; }
+      .nav-toggle[aria-expanded="true"] .ic-close { display: block; }
+
+      .nav-menu.open {
+        display: flex; flex-direction: column; gap: .1rem;
+        position: absolute; top: 100%; left: 0; right: 0;
+        background: #faf9f6; border-bottom: 1px solid var(--border);
+        padding: .5rem 1rem 1rem;
+        box-shadow: 0 16px 28px rgba(15,23,42,.1);
+      }
+      .nav-menu .nav-link { padding: .75rem .5rem; font-size: .98rem; }
+    }
+    @media (max-width: 359px) {
+      .nav-login { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Icons: Font Awesome Free 6.4.0 by @fontawesome, https://fontawesome.com/license/free
+       (icons CC BY 4.0). Inlined so the page loads no icon font. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="i-receipt" viewBox="0 0 384 512"><path d="M14 2.2C22.5-1.7 32.5-.3 39.6 5.8L80 40.4 120.4 5.8c9-7.7 22.3-7.7 31.2 0L192 40.4 232.4 5.8c9-7.7 22.3-7.7 31.2 0L304 40.4 344.4 5.8c7.1-6.1 17.1-7.5 25.6-3.6s14 12.4 14 21.8V488c0 9.4-5.5 17.9-14 21.8s-18.5 2.5-25.6-3.6L304 471.6l-40.4 34.6c-9 7.7-22.3 7.7-31.2 0L192 471.6l-40.4 34.6c-9 7.7-22.3 7.7-31.2 0L80 471.6 39.6 506.2c-7.1 6.1-17.1 7.5-25.6 3.6S0 497.4 0 488V24C0 14.6 5.5 6.1 14 2.2zM96 144c-8.8 0-16 7.2-16 16s7.2 16 16 16H288c8.8 0 16-7.2 16-16s-7.2-16-16-16H96zM80 352c0 8.8 7.2 16 16 16H288c8.8 0 16-7.2 16-16s-7.2-16-16-16H96c-8.8 0-16 7.2-16 16zM96 240c-8.8 0-16 7.2-16 16s7.2 16 16 16H288c8.8 0 16-7.2 16-16s-7.2-16-16-16H96z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 448 512"><path d="M438.6 105.4c12.5 12.5 12.5 32.8 0 45.3l-256 256c-12.5 12.5-32.8 12.5-45.3 0l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L160 338.7 393.4 105.4c12.5-12.5 32.8-12.5 45.3 0z"/></symbol>
+    <symbol id="i-bars" viewBox="0 0 448 512"><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></symbol>
+    <symbol id="i-xmark" viewBox="0 0 384 512"><path d="M342.6 150.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L192 210.7 86.6 105.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3L146.7 256 41.4 361.4c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L192 301.3 297.4 406.6c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L237.3 256 342.6 150.6z"/></symbol>
+  </svg>
+
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="/"><svg class="ic" style="width:.75em" aria-hidden="true" focusable="false"><use href="#i-receipt"/></svg> Foodnance</a>
+      <div class="nav-spacer"></div>
+      <a class="nav-link nav-anchor" href="/#features">Features</a>
+      <a class="nav-link nav-anchor" href="/food-cost-calculator">Food cost calculator</a>
+      <a class="nav-link nav-anchor" href="/pricing">Pricing</a>
+      <a class="nav-link nav-anchor" href="/#faq">FAQ</a>
+      <a class="nav-link nav-login" href="/login">Log in</a>
+      <button class="nav-toggle" id="navToggle" type="button" aria-expanded="false" aria-controls="navMenu" aria-label="Open menu">
+        <svg class="ic ic-open" aria-hidden="true" focusable="false"><use href="#i-bars"/></svg>
+        <svg class="ic ic-close" aria-hidden="true" focusable="false"><use href="#i-xmark"/></svg>
+      </button>
+      <a class="btn btn-primary" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">Request access</a>
+    </div>
+    <nav class="nav-menu" id="navMenu" aria-label="Mobile">
+      <a class="nav-link" href="/#features">Features</a>
+      <a class="nav-link" href="/food-cost-calculator">Food cost calculator</a>
+      <a class="nav-link" href="/pricing">Pricing</a>
+      <a class="nav-link" href="/#faq">FAQ</a>
+      <a class="nav-link" href="/login">Log in</a>
+    </nav>
+  </header>
+
+  <script>
+    (function () {
+      var toggle = document.getElementById('navToggle');
+      var menu = document.getElementById('navMenu');
+      if (!toggle || !menu) return;
+      function close() { menu.classList.remove('open'); toggle.setAttribute('aria-expanded', 'false'); }
+      function open() { menu.classList.add('open'); toggle.setAttribute('aria-expanded', 'true'); }
+      toggle.addEventListener('click', function () {
+        if (menu.classList.contains('open')) close(); else open();
+      });
+      menu.addEventListener('click', function (e) { if (e.target.tagName === 'A') close(); });
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+      document.addEventListener('click', function (e) {
+        if (!menu.classList.contains('open')) return;
+        if (!menu.contains(e.target) && !toggle.contains(e.target)) close();
+      });
+      window.addEventListener('resize', function () { if (window.innerWidth > 640) close(); });
+    })();
+  </script>
+
+  <main>
+  <!-- ══ HERO ══ -->
+  <div class="hero wrap">
+    <div class="eyebrow"><span class="rule"></span><span class="kicker">Billing</span></div>
+    <h1>Refunds, plainly.</h1>
+    <p class="sub">Foodnance bills monthly. Here's exactly what happens to your money if you cancel, downgrade, or we get a charge wrong.</p>
+
+    <div class="summary prose">
+      <h2>The short version</h2>
+      <ul>
+        <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> Cancel any time. You keep access through the end of the month you've already paid for.</li>
+        <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> We don't refund that month, whether you stop using it or just change your mind.</li>
+        <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> If we charge you wrong, we fix it — no need to convince us.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ══ POLICY ══ -->
+  <div class="policy prose">
+    <h2>No refunds for the month you're in</h2>
+    <p>Foodnance is billed monthly, in advance, in Canadian dollars, with applicable tax added at checkout. When you cancel, billing stops going forward — it doesn't undo the payment you already made. You keep full access until the end of the period you paid for, then your account closes.</p>
+    <p class="muted">We don't offer refunds for not using the Service, changing your mind, or switching to something else. This is the same position taken by the other invoice and inventory software in this space.</p>
+
+    <h2>Billing mistakes are different</h2>
+    <p>If we charge you the wrong amount, charge you twice for the same month, or charge you after your cancellation should already have taken effect — that's our mistake, not a request you have to justify. Email <a href="mailto:billing@foodnance.com">billing@foodnance.com</a> and we'll correct it: the erroneous amount refunded to your original payment method within <strong>7 business days</strong>.</p>
+
+    <h2>Downgrading your plan</h2>
+    <p>Moving to a lower plan takes effect at your next billing date. We don't refund the difference for the period already billed at the higher rate.</p>
+
+    <h2>If we're the ones who end it</h2>
+    <p>If we end your subscription for our own reasons — not because you broke the rules — or change our terms in a way you don't accept, you get a <strong>full refund of your most recent payment</strong>, not a prorated one.</p>
+
+    <h2>Questions</h2>
+    <p>Write to <a href="mailto:billing@foodnance.com">billing@foodnance.com</a> for anything about a charge, or <a href="mailto:hello@foodnance.com">hello@foodnance.com</a> for everything else.</p>
+  </div>
+  </main>
+
+  <footer>
+    <div class="wrap foot-inner">
+      <a class="brand" href="/" style="font-size:1rem"><svg class="ic" style="width:.75em" aria-hidden="true" focusable="false"><use href="#i-receipt"/></svg> Foodnance</a>
+      <div class="nav-spacer"></div>
+      <span>&copy; 2026 Foodnance</span>
+      <a href="/">Home</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/food-cost-calculator">Food cost calculator</a>
+      <a href="/login">Log in</a>
+      <a href="/refund-policy">Refund policy</a>
+      <a href="mailto:hello@foodnance.com">Contact</a>
+    </div>
+  </footer>
+
+  <script src="/static/env-banner.js?v=20260807-2"></script>
+</body>
+</html>
