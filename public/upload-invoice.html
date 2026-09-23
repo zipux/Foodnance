@@ -135,6 +135,18 @@
       flex-shrink: 0;
     }
     .staged-item .remove-btn:hover { background: #fee2e2; }
+    .staged-item .rotate-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--text-muted);
+      padding: .25rem .4rem;
+      border-radius: 6px;
+      font-size: .85rem;
+      transition: background var(--transition);
+      flex-shrink: 0;
+    }
+    .staged-item .rotate-btn:hover { background: #f1f5f9; color: var(--text); }
 
     /* ── Drop-zone when files are already staged ─────────── */
     .drop-zone.has-files {
@@ -427,6 +439,6 @@
   <script src="/static/env-banner.js?v=20260807-2"></script>
   <script src="/static/utils.js?v=20260922-1"></script>
   <script src="/static/image-preproc.js?v=20260806-1"></script>
-  <script src="/static/invoice.js?v=20260806-5"></script>
+  <script src="/static/invoice.js?v=20260923-1"></script>
 </body>
 </html>

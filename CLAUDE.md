@@ -306,6 +306,21 @@ editing a saved invoice (it has no purchase record), or a save interrupted betwe
 the lines and the product import. `tests/invoice-line-product.test.mjs` (static) +
 `npm run test:line-product` (needs the sandbox and `db:migrate:local`).
 
+### Rotating sideways invoice photos (added 2026-09-23, migration `0055`)
+
+Images only (PDFs use the browser's own viewer). Rotate-left/right buttons on the invoice
+screen (review and saved) and on each staged photo on the upload page. **Display only**:
+the uploaded file is never changed — the turned page is drawn to a canvas and shown as a
+new image, so the zoom/fit code sees an ordinary picture; Open / Download still serve the
+original. The turn is remembered on `invoices.page_rotations`, a JSON object keyed by the
+page's **file key** (not page number — review and saved mode list pages differently),
+degrees clockwise; the upload page writes it with the new invoice. **Apply `0055` before
+deploying** (the upload page sends `page_rotations` on every image invoice, so a missing
+column fails the save); applied and deployed on staging and production 2026-09-23 (by `--command`, not recorded in
+`d1_migrations`; pre-change production bookmark `00000590-00000000-000050ef-b3d29d3bb046edc239bafeb4b6e5521d`).
+`tests/invoice-rotation.test.mjs`. Side note: the upload page's pre-existing auto-deskew
+(`image-preproc.js`) can tilt a clean page a few degrees — seen on a synthetic test image.
+
 ### Tests
 
 ```bash

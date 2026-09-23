@@ -336,6 +336,13 @@ let _invPageUrls = [];
 let _invPageIdx  = 0;
 let _invPageIsPdf = false;
 
+// Image page rotation for the detail modal (see invRotate). Keyed by file key,
+// degrees clockwise, persisted on invoices.page_rotations (migration 0055).
+let _invRotations  = {};
+let _invRotInvId   = null;
+let _invRotBlobUrl = null;   // rotated copy currently shown (revoked on replace)
+let _invRotToken   = 0;      // ignores a slow render that a newer click superseded
+
 // Try to JSON-parse a parsed_data field; returns null if missing or invalid.
 function tryParseParsedData(raw) {
   if (!raw) return null;
@@ -532,6 +539,18 @@ async function openInvDetail(id) {
   _invPageUrls  = pageUrls;
   _invPageIdx   = 0;
   _invPageIsPdf = isPdf;
+  _invRotInvId  = inv.id;
+  _invRotations = (() => {
+    try {
+      const r = JSON.parse(inv.page_rotations || '{}');
+      return r && typeof r === 'object' && !Array.isArray(r) ? r : {};
+    } catch (_) { return {}; }
+  })();
+  const rotateBtns = isImage ? `
+      <div style="display:flex;align-items:center;gap:.3rem;margin-left:.5rem">
+        <button class="btn btn-secondary btn-sm" onclick="invRotate(-90)" title="Rotate left"><i class="fas fa-rotate-left"></i></button>
+        <button class="btn btn-secondary btn-sm" onclick="invRotate(90)" title="Rotate right"><i class="fas fa-rotate-right"></i></button>
+      </div>` : '';
   const pager = pageUrls.length > 1 ? `
       <div style="display:flex;align-items:center;gap:.4rem;margin-left:.5rem">
         <button id="invPagePrev" class="btn btn-secondary btn-sm" onclick="invGotoPage(-1)" disabled><i class="fas fa-chevron-left"></i></button>
@@ -582,6 +601,7 @@ async function openInvDetail(id) {
       <i class="fas fa-${fileIcon}" style="color:var(--primary);font-size:1.1rem"></i>
       <span style="font-weight:600;font-size:.9rem">${esc(inv.invoice_number || 'N/A')}</span>
       ${pager}
+      ${rotateBtns}
       ${openBtn}
       <a href="${esc(fileUrl)}" download="${esc(fileName)}" class="btn btn-secondary btn-sm">
         <i class="fas fa-download"></i> Download
@@ -604,7 +624,7 @@ async function openInvDetail(id) {
         ${preview}`;
     }
     activeBox.classList.remove('hidden');
-    if (isImage) _initInvImgZoom();
+    if (isImage) _showInvImagePage();
   } else {
     activeBox.innerHTML = `<span style="color:var(--text-muted);font-size:.85rem"><i class="fas fa-paperclip"></i> No file attached</span>`;
     activeBox.classList.remove('hidden');
@@ -1668,8 +1688,7 @@ function invGotoPage(delta) {
     const frame = document.getElementById('invPageFrame');
     if (frame) frame.src = url;
   } else {
-    const img = document.getElementById('invZoomImg');
-    if (img) { img.src = url; _initInvImgZoom(); }
+    _showInvImagePage();
   }
   const lbl  = document.getElementById('invPageLabel');
   const prev = document.getElementById('invPagePrev');
@@ -1677,6 +1696,79 @@ function invGotoPage(delta) {
   if (lbl)  lbl.textContent = `Page ${_invPageIdx + 1} of ${_invPageUrls.length}`;
   if (prev) prev.disabled = _invPageIdx === 0;
   if (next) next.disabled = _invPageIdx === _invPageUrls.length - 1;
+}
+
+// ── Invoice image rotation ──────────────────────────────────────
+// Photos often arrive with the page turned sideways. Rotation is display only:
+// the uploaded file is never changed (Open / Download still serve it as
+// received). The turned page is drawn to a canvas and shown as a new image, so
+// the zoom/pan/fit code above sees an ordinary picture with its width and
+// height swapped and needs no rotation maths of its own.
+function _invRotKey(url) {
+  return String(url || '').replace(/^\/api\/files\//, '');
+}
+
+function _showInvImagePage() {
+  const img = document.getElementById('invZoomImg');
+  const url = _invPageUrls[_invPageIdx];
+  if (!img || !url) return;
+  const deg   = ((Number(_invRotations[_invRotKey(url)]) || 0) % 360 + 360) % 360;
+  const token = ++_invRotToken;
+
+  const show = (src) => {
+    if (token !== _invRotToken) return;           // a newer click already won
+    if (_invRotBlobUrl && _invRotBlobUrl !== src) {
+      URL.revokeObjectURL(_invRotBlobUrl);
+      _invRotBlobUrl = null;
+    }
+    if (src.startsWith('blob:')) _invRotBlobUrl = src;
+    img.src = src;
+    _initInvImgZoom();
+  };
+
+  if (!deg) { show(url); return; }
+
+  const source = new Image();
+  source.onload = () => {
+    if (token !== _invRotToken) return;
+    const w = source.naturalWidth, h = source.naturalHeight;
+    const quarter = deg === 90 || deg === 270;
+    const canvas = document.createElement('canvas');
+    canvas.width  = quarter ? h : w;
+    canvas.height = quarter ? w : h;
+    const ctx = canvas.getContext('2d');
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate(deg * Math.PI / 180);
+    ctx.drawImage(source, -w / 2, -h / 2);
+    canvas.toBlob(blob => {
+      // Can't render the turned copy (very large photo, old browser): show the
+      // page as uploaded rather than nothing.
+      show(blob ? URL.createObjectURL(blob) : url);
+    }, 'image/jpeg', 0.95);
+  };
+  source.onerror = () => show(url);
+  source.src = url;
+}
+
+async function invRotate(delta) {
+  const url = _invPageUrls[_invPageIdx];
+  if (!url || _invPageIsPdf) return;
+  const key = _invRotKey(url);
+  const deg = (((Number(_invRotations[key]) || 0) + delta) % 360 + 360) % 360;
+  if (deg) _invRotations[key] = deg; else delete _invRotations[key];
+  _showInvImagePage();
+
+  // Remember it for next time (and for the rest of the team). The turn on
+  // screen doesn't depend on this succeeding, so a failure only warns.
+  const invId = _invRotInvId;
+  const value = Object.keys(_invRotations).length ? JSON.stringify(_invRotations) : '';
+  try {
+    await apiPatch(`tables/${INV_LIST_TABLE}/${invId}`, { page_rotations: value });
+    const cached = allInvoices.find(i => i.id === invId);
+    if (cached) cached.page_rotations = value;
+  } catch (e) {
+    showToast("Rotated, but couldn't remember it for next time.", 'warning');
+  }
 }
 
 function _initInvImgZoom() {

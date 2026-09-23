@@ -213,7 +213,7 @@ async function addFilesToStage(files) {
     if (stagedFiles.some(sf => sameFile(sf.file, file))) { skipped.push(file.name); continue; }
     const id = 'sf-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
     const entry = { file, id, thumbUrl: null, type: newType, pageCount: 1,
-                    qualityIssue: '', checking: newType === 'img' };
+                    qualityIssue: '', checking: newType === 'img', rotation: 0 };
     stagedFiles.push(entry);
     added.push(entry);
   }
@@ -323,7 +323,7 @@ function renderStagedList() {
     item.draggable = true;
 
     const thumbHtml = sf.thumbUrl
-      ? `<img src="${sf.thumbUrl}" class="file-thumb" alt="thumb" />`
+      ? `<img src="${sf.thumbUrl}" class="file-thumb" alt="thumb"${sf.rotation ? ` style="transform:rotate(${sf.rotation}deg)"` : ''} />`
       : sf.checking
         ? `<div class="file-thumb pdf-thumb"><i class="fas fa-spinner fa-spin" style="color:var(--text-muted)"></i></div>`
         : `<div class="file-thumb pdf-thumb"><i class="fas fa-${sf.type === 'pdf' ? 'file-pdf' : 'image'}"></i></div>`;
@@ -355,6 +355,9 @@ function renderStagedList() {
         </div>` : ''}
       </div>
       <span class="page-label">${pageLabel}</span>
+      ${sf.type === 'img' ? `
+      <button class="rotate-btn" data-deg="-90" title="Rotate left"><i class="fas fa-rotate-left"></i></button>
+      <button class="rotate-btn" data-deg="90" title="Rotate right"><i class="fas fa-rotate-right"></i></button>` : ''}
       <button class="remove-btn" data-id="${sf.id}" title="Remove this file">
         <i class="fas fa-times"></i>
       </button>
@@ -384,6 +387,14 @@ function renderStagedList() {
       dragSrcIndex = null;
       renderStagedList();
     });
+
+    // A photo taken with the page sideways. Display only — the file sent to
+    // Claude and stored is untouched; the turn is saved with the invoice
+    // (page_rotations, migration 0055) so the review screen opens it upright.
+    item.querySelectorAll('.rotate-btn').forEach(btn => btn.addEventListener('click', () => {
+      sf.rotation = (((sf.rotation || 0) + Number(btn.dataset.deg)) % 360 + 360) % 360;
+      renderStagedList();
+    }));
 
     item.querySelector('.remove-btn').addEventListener('click', () => {
       stagedFiles = stagedFiles.filter(s => s.id !== sf.id);
@@ -899,6 +910,7 @@ async function saveQuickInvoice() {
       other_cost:      currentOtherCost     || 0,
       other_desc:      currentOtherDesc     || '',
       parsed_data:     JSON.stringify(parsedData),
+      page_rotations:  stagedPageRotations(),
       ai_input_tokens:  currentAiInputTokens  || 0,
       ai_output_tokens: currentAiOutputTokens || 0,
       ai_cost:          currentAiCost         || 0,
@@ -922,6 +934,20 @@ async function saveQuickInvoice() {
   document.getElementById('fileStage').classList.add('hidden');
   document.getElementById('submitBar').style.display = 'none';
   resetSubmitButton();
+}
+
+// Rotations picked on the staged photos, keyed by each page's uploaded file key
+// — the shape the invoice screen reads (invoices.page_rotations, 0055). Image
+// batches upload one file per staged photo, in staged order, so staged index i
+// is currentPageKeys[i]. '' when nothing was turned.
+function stagedPageRotations() {
+  if (batchType !== 'img') return '';
+  const out = {};
+  stagedFiles.forEach((sf, i) => {
+    const key = currentPageKeys[i];
+    if (key && sf.rotation) out[key] = sf.rotation;
+  });
+  return Object.keys(out).length ? JSON.stringify(out) : '';
 }
 
 function showSavedBanner(parsedData, invoiceId) {

@@ -1,0 +1,17 @@
+-- ============================================================
+-- Remember how each invoice image page is rotated
+-- ============================================================
+-- Invoice photos are often taken with the page turned sideways (YEN BROS
+-- 2815403: a portrait file with the text running top to bottom). The invoice
+-- screen now has rotate-left / rotate-right buttons for images, and the turn a
+-- reviewer leaves a page at is remembered here so it opens that way next time,
+-- for everyone in the business.
+--
+-- Display only: the uploaded file in R2 is never modified — it stays the record
+-- of what the supplier sent, and Open / Download still serve it untouched.
+--
+-- JSON object keyed by the page's file key (the part after /api/files/), value
+-- in degrees clockwise: {"<file key>": 90}. Keyed by file rather than page
+-- number because a saved invoice and one still in review list their pages
+-- differently; the file is the same. '' (or a missing key) = not rotated.
+ALTER TABLE invoices ADD COLUMN page_rotations TEXT DEFAULT '';
