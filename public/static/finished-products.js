@@ -37,6 +37,29 @@ function rebuildFpCostIndex() {
     fpItems:          allFpItems_fp,
     plan:             window.__accountPlan || '',
   });
+  // Same defect as the recipe form (see rebuildRecipeCostIndex): the product
+  // lines of this form priced from allProducts_fp, filled by a FIFO walk that
+  // never knew the plan, so on Essential the form could cost a product at an
+  // older price than the list. Take the price from this same index.
+  for (const p of allProducts_fp) {
+    const pc = fpCostIndex.product.get(p.id);
+    if (!pc || !pc.priced) continue;
+    p._cpu = p.cost_per_unit = pc.cost_per_unit;
+    p._packUnit = p.pack_unit = pc.pack_unit;
+    p.pack_qty = pc.pack_qty;
+  }
+  // Product lines already open in the form hold the price they were loaded with.
+  if (Array.isArray(fpProductRows)) {
+    fpProductRows.forEach((r, i) => {
+      const p = r && r.ref_id ? allProducts_fp.find(x => x.id === r.ref_id) : null;
+      if (!p || p._cpu === undefined) return;
+      r.unit_cost = p._cpu;
+      r.pack_unit = p._packUnit;
+      r.pack_qty  = p.pack_qty;
+      _updateFpProductCostDisplay(i);
+    });
+    if (fpProductRows.some(r => r && r.ref_id)) recalcFpCosts();
+  }
   // Same race as recipes.js: loadFinishedProducts (one fetch) beats
   // loadFpCatalogues (six), so the first render comes off a half-built index
   // and prints $0. Repaint once the index is complete.

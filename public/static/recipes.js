@@ -20,6 +20,29 @@ function rebuildRecipeCostIndex() {
   rCostIndex = buildLiveCostIndex({
     ..._rCatalogue, recipes: allRecipes, plan: window.__accountPlan || '',
   });
+  // The edit form prices each ingredient from allProducts, which
+  // loadProductCatalogue() fills with its own FIFO walk — one that never knew
+  // the plan. On Essential (always the latest invoice) the form therefore used
+  // an OLDER price whenever stock was on hand: Calzone Filling read $9.67 on the
+  // list and $9.37 in the form, and Save stored the $9.37. Take the price from
+  // this same index instead, so the list, the detail and the form can't differ;
+  // this also runs again when the plan arrives (dm:plan-known).
+  for (const p of allProducts) {
+    const pc = rCostIndex.product.get(p.id);
+    if (!pc || !pc.priced) continue;
+    p._cpu = p.cost_per_unit = pc.cost_per_unit;
+    p._packUnit = p.pack_unit = pc.pack_unit;
+    p.pack_qty = pc.pack_qty;
+  }
+  // A recipe already open in the form holds the price it was loaded with.
+  ingredientRows.forEach((r, i) => {
+    const p = r && r.product_id ? allProducts.find(x => x.id === r.product_id) : null;
+    if (!p || p._cpu === undefined) return;
+    r.unit_cost = p._cpu;
+    r.pack_unit = p._packUnit;
+    _updateIngCostDisplay(i);
+  });
+  if (ingredientRows.some(r => r && r.product_id)) recalcCosts();
   // The catalogue and the recipe list load CONCURRENTLY, and the list wins the
   // race — one fetch against four. Its first render therefore comes off a
   // half-built index and prints $0 for everything. Repaint here so whichever
@@ -48,6 +71,22 @@ async function refreshRecipeItems() {
     const rid = await apiGet(`tables/${RECIPE_ITEMS_TABLE}?page=1&limit=1000`);
     _rCatalogue = { ..._rCatalogue, recipeItems: rid.data || [] };
   } catch (_) { /* keep the last good items */ }
+}
+
+// The ingredient lines of ONE recipe, asked of the server by recipe_id.
+//
+// These five callers (detail, edit, save, delete, Produce Batch) used to fetch
+// the first 200 recipe_items of the whole business and filter them here. Past
+// 200 lines in total — about 40 recipes — a recipe's newer lines simply weren't
+// in the batch: it opened with ingredients missing, a save rewrote only the
+// visible ones (so the stored cost dropped), a delete left the rest orphaned,
+// and Produce Batch took only part of the stock. The server filters by column
+// (`?recipe_id=`), so the answer is complete however many recipes exist. The
+// client-side filter stays as a guard, never as the thing doing the work.
+async function fetchRecipeItemsFor(recipeId) {
+  const data = await apiGet(
+    `tables/${RECIPE_ITEMS_TABLE}?recipe_id=${encodeURIComponent(recipeId)}&page=1&limit=500`);
+  return (data.data || []).filter(i => i.recipe_id === recipeId);
 }
 
 // Live total for a saved recipe; the stored column is a last resort only while
@@ -984,8 +1023,7 @@ async function saveRecipe() {
       await apiPut(`tables/${RECIPES_TABLE}/${editId}`, { name, description: desc, servings: yieldQty, yield_unit: yieldUnit, total_cost: total, production_mode: prodMode });
       recipeId = editId;
       // Delete old items
-      const oldItems = await apiGet(`tables/${RECIPE_ITEMS_TABLE}?page=1&limit=200`);
-      const mine = (oldItems.data || []).filter(i => i.recipe_id === recipeId);
+      const mine = await fetchRecipeItemsFor(recipeId);
       for (const it of mine) {
         await apiDelete(`tables/${RECIPE_ITEMS_TABLE}/${it.id}`);
       }
@@ -1124,8 +1162,7 @@ async function openRecipeDetail(id) {
 
   let items = [];
   try {
-    const data = await apiGet(`tables/${RECIPE_ITEMS_TABLE}?page=1&limit=200`);
-    items = (data.data || []).filter(i => i.recipe_id === id);
+    items = await fetchRecipeItemsFor(id);
   } catch (_) {}
 
   const yieldQty  = recipe.servings   || 1;
@@ -1324,8 +1361,7 @@ async function loadRecipeIntoForm(id) {
   // Load items
   let items = [];
   try {
-    const data = await apiGet(`tables/${RECIPE_ITEMS_TABLE}?page=1&limit=200`);
-    items = (data.data || []).filter(i => i.recipe_id === id);
+    items = await fetchRecipeItemsFor(id);
   } catch (_) {}
 
   // Clear existing lines
@@ -1362,8 +1398,7 @@ async function deleteRecipe(id) {
   if (!confirm('Delete this recipe? This cannot be undone.')) return;
   try {
     // Delete items first
-    const data = await apiGet(`tables/${RECIPE_ITEMS_TABLE}?page=1&limit=200`);
-    const mine = (data.data || []).filter(i => i.recipe_id === id);
+    const mine = await fetchRecipeItemsFor(id);
     for (const it of mine) await apiDelete(`tables/${RECIPE_ITEMS_TABLE}/${it.id}`);
     await apiDelete(`tables/${RECIPES_TABLE}/${id}`);
     closeModal('recipeDetailModal');
@@ -1393,8 +1428,7 @@ async function openProduceBatchModal(recipeId) {
 
   // Fetch recipe items
   try {
-    const data = await apiGet(`tables/${RECIPE_ITEMS_TABLE}?page=1&limit=200`);
-    pbItems = (data.data || []).filter(i => i.recipe_id === recipeId);
+    pbItems = await fetchRecipeItemsFor(recipeId);
   } catch (_) { pbItems = []; }
 
   document.getElementById('pbRecipeName').textContent = recipe.name;
