@@ -193,6 +193,38 @@
               "@type": "Answer",
               "text": "<p>Foodnance reads a typical one-page invoice in about 30 seconds. You then check the lines, which usually takes a minute or two, and confirm. Longer, multi-page invoices take longer to read, and you can upload several at once.</p>"
             }
+          },
+          {
+            "@type": "Question",
+            "name": "How do I get started, and how long does setup take?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "<p>Press Request access above and send us a short email about your business. We usually reply within 24 hours with a link to set your own password. Once you're signed in, you can upload your first invoice straight away — we're onboarding new businesses hands-on right now, so we're there to help if you get stuck.</p>"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Do I need to install anything?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "<p>No. Foodnance is a website, not an app to download. It works in a browser on your computer or your phone — on a phone, signing in takes you straight to the invoice camera, since that's what you're usually there to do.</p>"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can my whole team use it?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "<p>Yes. Once you're signed in, go to Settings → Team to invite staff by email. Each person gets their own login.</p>"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "If I have questions, who should I reach out to?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "<p>Email <a href=\"mailto:hello@foodnance.com\">hello@foodnance.com</a> with any questions, and we'll get back to you within 24 hours.</p>"
+            }
           }
         ]
       }
@@ -267,6 +299,8 @@
       white-space: nowrap;
     }
     .nav-link:hover { color: var(--text); background: var(--bg-alt); }
+    .nav-toggle { display: none; }
+    .nav-menu { display: none; }
 
     /* ===== BUTTONS ===== */
     .btn {
@@ -280,6 +314,10 @@
     .btn-primary:hover { background: var(--nav-bg-d); }
     .btn-ghost { background: #fff; color: var(--text); border-color: var(--border); }
     .btn-ghost:hover { background: var(--bg-alt); }
+    /* Transparent, not white — so a secondary CTA sits on the page's own
+       background instead of reading as a stray white box next to it. */
+    .btn-outline { background: transparent; color: var(--nav-bg); border: 1.5px solid var(--nav-bg); }
+    .btn-outline:hover { background: rgba(15,23,42,.06); }
     .btn-lg { font-size: .98rem; padding: .85rem 1.5rem; }
 
     /* ===== HERO ===== */
@@ -442,9 +480,33 @@
          button on a phone, and the page is one scroll anyway. */
       .nav-anchor { display: none; }
       .nav-inner .btn { padding: .5rem .85rem; font-size: .88rem; }
+
+      /* The links dropped above (Features/How/Calculator/Pricing/FAQ) move
+         into this menu instead of disappearing — the footer repeats them,
+         but nobody should have to scroll the whole page to find Pricing. */
+      .nav-toggle {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 2.2rem; height: 2.2rem; margin-right: -.3rem;
+        background: none; border: none; border-radius: 6px;
+        color: var(--text); cursor: pointer; flex: none;
+      }
+      .nav-toggle:hover { background: var(--bg-alt); }
+      .nav-toggle .ic { width: 1.1rem; height: 1.1rem; }
+      .nav-toggle .ic-close { display: none; }
+      .nav-toggle[aria-expanded="true"] .ic-open { display: none; }
+      .nav-toggle[aria-expanded="true"] .ic-close { display: block; }
+
+      .nav-menu.open {
+        display: flex; flex-direction: column; gap: .1rem;
+        position: absolute; top: 100%; left: 0; right: 0;
+        background: #faf9f6; border-bottom: 1px solid var(--border);
+        padding: .5rem 1rem 1rem;
+        box-shadow: 0 16px 28px rgba(15,23,42,.1);
+      }
+      .nav-menu .nav-link { padding: .75rem .5rem; font-size: .98rem; }
     }
     /* Narrow phones (measured: brand + Log in + button stop fitting below 360px).
-       The hero and footer both carry a Log in link, so nobody loses the way in. */
+       Log in still lives in the hamburger menu, so nobody loses the way in. */
     @media (max-width: 359px) {
       .nav-login { display: none; }
     }
@@ -455,6 +517,8 @@
   <!-- Icons: Font Awesome Free 6.4.0 by @fontawesome, https://fontawesome.com/license/free
        (icons CC BY 4.0). Inlined so the page loads no icon font. -->
   <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="i-bars" viewBox="0 0 448 512"><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></symbol>
+    <symbol id="i-xmark" viewBox="0 0 384 512"><path d="M342.6 150.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L192 210.7 86.6 105.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3L146.7 256 41.4 361.4c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L192 301.3 297.4 406.6c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L237.3 256 342.6 150.6z"/></symbol>
     <symbol id="i-arrow-down" viewBox="0 0 384 512"><path d="M169.4 470.6c12.5 12.5 32.8 12.5 45.3 0l160-160c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L224 370.8 224 64c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 306.7L54.6 265.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l160 160z"/></symbol>
     <symbol id="i-arrow-trend-up" viewBox="0 0 576 512"><path d="M384 160c-17.7 0-32-14.3-32-32s14.3-32 32-32H544c17.7 0 32 14.3 32 32V288c0 17.7-14.3 32-32 32s-32-14.3-32-32V205.3L342.6 374.6c-12.5 12.5-32.8 12.5-45.3 0L192 269.3 54.6 406.6c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3l160-160c12.5-12.5 32.8-12.5 45.3 0L320 306.7 466.7 160H384z"/></symbol>
     <symbol id="i-bolt" viewBox="0 0 448 512"><path d="M349.4 44.6c5.9-13.7 1.5-29.7-10.6-38.5s-28.6-8-39.9 1.8l-256 224c-10 8.8-13.6 22.9-8.9 35.3S50.7 288 64 288H175.5L98.6 467.4c-5.9 13.7-1.5 29.7 10.6 38.5s28.6 8 39.9-1.8l256-224c10-8.8 13.6-22.9 8.9-35.3s-16.6-20.7-30-20.7H272.5L349.4 44.6z"/></symbol>
@@ -479,15 +543,47 @@
       <div class="nav-spacer"></div>
       <a class="nav-link nav-anchor" href="#features">Features</a>
       <a class="nav-link nav-anchor" href="#how">How it works</a>
-      <a class="nav-link nav-anchor" href="/food-cost-calculator">Free calculator</a>
+      <a class="nav-link nav-anchor" href="/food-cost-calculator">Food cost calculator</a>
       <a class="nav-link nav-anchor" href="/pricing">Pricing</a>
       <a class="nav-link nav-anchor" href="#faq">FAQ</a>
       <a class="nav-link nav-login" href="/login">Log in</a>
+      <button class="nav-toggle" id="navToggle" type="button" aria-expanded="false" aria-controls="navMenu" aria-label="Open menu">
+        <svg class="ic ic-open" aria-hidden="true" focusable="false"><use href="#i-bars"/></svg>
+        <svg class="ic ic-close" aria-hidden="true" focusable="false"><use href="#i-xmark"/></svg>
+      </button>
       <a class="btn btn-primary" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
         Request access
       </a>
     </div>
+    <nav class="nav-menu" id="navMenu" aria-label="Mobile">
+      <a class="nav-link" href="#features">Features</a>
+      <a class="nav-link" href="#how">How it works</a>
+      <a class="nav-link" href="/food-cost-calculator">Food cost calculator</a>
+      <a class="nav-link" href="/pricing">Pricing</a>
+      <a class="nav-link" href="#faq">FAQ</a>
+      <a class="nav-link" href="/login">Log in</a>
+    </nav>
   </header>
+
+  <script>
+    (function () {
+      var toggle = document.getElementById('navToggle');
+      var menu = document.getElementById('navMenu');
+      if (!toggle || !menu) return;
+      function close() { menu.classList.remove('open'); toggle.setAttribute('aria-expanded', 'false'); }
+      function open() { menu.classList.add('open'); toggle.setAttribute('aria-expanded', 'true'); }
+      toggle.addEventListener('click', function () {
+        if (menu.classList.contains('open')) close(); else open();
+      });
+      menu.addEventListener('click', function (e) { if (e.target.tagName === 'A') close(); });
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+      document.addEventListener('click', function (e) {
+        if (!menu.classList.contains('open')) return;
+        if (!menu.contains(e.target) && !toggle.contains(e.target)) close();
+      });
+      window.addEventListener('resize', function () { if (window.innerWidth > 640) close(); });
+    })();
+  </script>
 
   <a id="top"></a>
 
@@ -511,8 +607,10 @@
           <a class="btn btn-primary btn-lg" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
             <svg class="ic" style="width:1em" aria-hidden="true" focusable="false"><use href="#i-envelope"/></svg> Request access
           </a>
+          <a class="btn btn-outline btn-lg" href="/food-cost-calculator">Try the free food cost calculator</a>
         </div>
         <p class="cta-note">Early access — we set your account up with you, one business at a time.</p>
+        <p class="cta-note">No signup for the calculator — see your dish cost in under a minute.</p>
         <p class="cta-note">Already a customer? <a href="/login">Log in</a></p>
       </div>
 
@@ -764,6 +862,31 @@
           <summary>How long does it take?</summary>
           <div class="faq-answer">
             <p>Foodnance reads a typical one-page invoice in about 30 seconds. You then check the lines, which usually takes a minute or two, and confirm. Longer, multi-page invoices take longer to read, and you can upload several at once.</p>
+          </div>
+        </details>
+        <h3 class="faq-group">Getting started</h3>
+        <details class="faq-item">
+          <summary>How do I get started, and how long does setup take?</summary>
+          <div class="faq-answer">
+            <p>Press Request access above and send us a short email about your business. We usually reply within 24 hours with a link to set your own password. Once you're signed in, you can upload your first invoice straight away — we're onboarding new businesses hands-on right now, so we're there to help if you get stuck.</p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary>Do I need to install anything?</summary>
+          <div class="faq-answer">
+            <p>No. Foodnance is a website, not an app to download. It works in a browser on your computer or your phone — on a phone, signing in takes you straight to the invoice camera, since that's what you're usually there to do.</p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary>Can my whole team use it?</summary>
+          <div class="faq-answer">
+            <p>Yes. Once you're signed in, go to Settings → Team to invite staff by email. Each person gets their own login.</p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary>If I have questions, who should I reach out to?</summary>
+          <div class="faq-answer">
+            <p>Email <a href="mailto:hello@foodnance.com">hello@foodnance.com</a> with any questions, and we'll get back to you within 24 hours.</p>
           </div>
         </details>
       </div>
