@@ -136,6 +136,17 @@
     }
     .pm-chart-title { font-weight: 600; font-size: 1rem; color: var(--text); }
     .pm-chart-sub { font-size: .82rem; color: var(--text-muted); margin-top: .2rem; }
+    /* Trend headline: first → latest price over the range, then two context lines. */
+    .pm-hl-big { display: flex; align-items: baseline; flex-wrap: wrap; gap: .5rem; margin: .1rem 0 .15rem; }
+    .pm-hl-from { font-family: var(--font-mono); font-weight: 500; font-size: .95rem; color: var(--text-muted); text-decoration: line-through; text-decoration-thickness: 1px; }
+    .pm-hl-arrow { color: var(--text-muted); }
+    .pm-hl-now { font-family: var(--font-mono); font-weight: 700; font-size: 1.4rem; color: var(--text); font-variant-numeric: tabular-nums; }
+    .pm-hl-now small { font-size: .78rem; font-weight: 500; color: var(--text-muted); }
+    .pm-hl-pill { font-family: var(--font-mono); font-weight: 600; font-size: .78rem; padding: .12rem .5rem; border-radius: 999px; background: #f1efe9; color: var(--text-muted); }
+    .pm-hl-pill.up { background: #fef2f2; color: #b91c1c; }
+    .pm-hl-pill.down { background: #dcfce7; color: #15803d; }
+    .pm-hl-ctx { display: block; }
+    .pm-hl-ctx b { color: var(--text); font-weight: 600; }
     .pm-chart-change {
       font-weight: 700;
       font-size: 1.1rem;
@@ -177,12 +188,13 @@
       align-items: center;
       gap: .35rem;
     }
-    .pm-vendor-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
+    .pm-vendor-seg {
+      width: 18px;
+      height: 3px;
+      border-radius: 2px;
       display: inline-block;
     }
+    .pm-vendor-seg.dash { height: 0; border-top: 2px dashed #b8b2a5; border-radius: 0; }
     /* Secondary note on a price cell — the supplier's own unit, or a warning
        that the purchase couldn't be converted into the stocking unit. */
     .pm-unit-note {
@@ -274,6 +286,7 @@
       font-size: .9rem;
       margin-bottom: 1rem;
     }
+    .pm-savings > i { align-self: flex-start; margin-top: .2rem; }
     .pm-savings .amt {
       font-weight: 700;
       font-family: ui-monospace, monospace;
@@ -281,56 +294,109 @@
     }
     .pm-savings.flat { background: #f8fafc; border-color: var(--border); color: var(--text-muted); }
 
-    /* Per-vendor strip (Vendor Compare) */
-    .pm-vstrip { display: flex; flex-direction: column; gap: .35rem; margin-top: .85rem; }
-    /* Header and rows share one column template, and every numeric track is a
-       fixed width, so figures line up vertically across every row. */
-    .pm-vhead, .pm-vrow {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 96px 150px 84px;
-      align-items: center;
-      gap: .75rem;
+    /* Vendor Compare: one row per vendor — name + volume, bar, price + gap.
+       Every row shares one column template (fixed price column), so the bars
+       sit on one scale and line up with the ticks above them. */
+    .pm-vstrip { margin-top: .25rem; }
+    .pm-vc-list { --pm-vc-cols: minmax(0, 1.25fr) minmax(0, 1.5fr) 6.5rem; display: grid; gap: .5rem; }
+    .pm-vc-scale { display: grid; grid-template-columns: var(--pm-vc-cols); gap: .9rem; padding: 0 .8rem; font-size: .68rem; color: var(--text-muted); }
+    .pm-vc-ticks { position: relative; height: 1rem; font-family: var(--font-mono); }
+    .pm-vc-ticks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+    .pm-vc-ticks span:first-child { transform: none; }
+    .pm-vc-ticks span:last-child { transform: translateX(-100%); }
+    .pm-vc-row {
+      display: grid; grid-template-columns: var(--pm-vc-cols); gap: .9rem; align-items: center;
+      padding: .7rem .8rem; border: 1px solid var(--border); border-radius: var(--radius-sm);
     }
-    .pm-vhead {
-      padding: 0 .65rem .1rem;
-      font-size: .68rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: .03em;
-      color: var(--text-muted);
+    .pm-vc-row.cheapest { border-color: #86efac; background: linear-gradient(90deg, #f0fdf4, #fff 70%); }
+    .pm-vc-who { min-width: 0; }
+    .pm-vc-name { font-weight: 600; font-size: .88rem; display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; color: var(--text); }
+    .pm-vc-name-txt { overflow-wrap: anywhere; }
+    .pm-vc-meta { color: var(--text-muted); font-size: .76rem; margin-top: .1rem; font-variant-numeric: tabular-nums; }
+    .pm-vc-meta .old { display: block; color: #b45309; font-weight: 500; }
+    .pm-chip {
+      font-size: .64rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+      padding: .1rem .4rem; border-radius: 4px; background: #e0f2fe; color: #075985; white-space: nowrap;
     }
-    .pm-vhead .r { text-align: right; }
-    .pm-vrow {
-      padding: .5rem .65rem;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      font-size: .82rem;
+    .pm-vc-track {
+      position: relative; height: 22px; border-radius: 4px; border-left: 1px solid var(--border);
     }
-    .pm-vrow.cheapest { border-color: #86efac; background: #f0fdf4; }
-    .pm-vrow .vname { display: inline-flex; align-items: center; gap: .4rem; min-width: 0; font-weight: 500; color: var(--text); }
-    .pm-vrow .vname-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .pm-vrow .vprice { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text); }
-    .pm-vrow .vmeta  { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+    .pm-vc-bar { position: absolute; inset-block: 0; left: 0; border-radius: 4px; background: #a8b3c4; }
+    .pm-vc-row.cheapest .pm-vc-bar { background-color: #16a34a; }
+    .pm-vc-bar.stale, .pm-pf-bar.stale, .pm-key .k-stale, .pm-key .k-stale-cheap {
+      background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.7) 0 3px, transparent 3px 7px);
+    }
+    .pm-vc-bar.stale { background-color: #c5ccd7; }
+    .pm-vc-row.cheapest .pm-vc-bar.stale { background-color: #7dd3a0; }
+    .pm-vc-price { display: grid; justify-items: end; gap: .15rem; text-align: right; }
+    .pm-vc-price .v { font-family: var(--font-mono); font-weight: 700; font-size: .95rem; font-variant-numeric: tabular-nums; color: var(--text); }
+    .pm-vc-price .v small { font-weight: 500; font-size: .72rem; color: var(--text-muted); }
     .pm-vbadge {
       justify-self: end;
       font-weight: 600;
-      font-family: ui-monospace, monospace;
-      padding: .15rem .5rem;
+      font-family: var(--font-mono);
+      padding: .12rem .5rem;
       border-radius: 999px;
       font-size: .72rem;
       white-space: nowrap;
+      background: #f1efe9;
+      color: var(--text-muted);
     }
     .pm-vbadge.up { background: #fef2f2; color: #b91c1c; }
     .pm-vbadge.base { background: #dcfce7; color: #15803d; }
-    .pm-stale { color: #b45309; font-size: .72rem; margin-left: .35rem; flex: none; }
-    /* Narrow screens: drop the volume/spend column, keep name · price · badge. */
+    .pm-key { display: flex; flex-wrap: wrap; gap: .4rem 1rem; margin-top: .7rem; font-size: .74rem; color: var(--text-muted); }
+    .pm-key i { display: inline-block; width: 18px; height: 10px; border-radius: 2px; margin-right: .35rem; vertical-align: -1px; }
+    .pm-key .k-cheap { background: #16a34a; }
+    .pm-key .k-other { background: #a8b3c4; }
+    .pm-key .k-stale { background-color: #c5ccd7; }
+    .pm-key .k-stale-cheap { background-color: #7dd3a0; }
+    /* Narrow screens: the vendor name moves above its bar. */
     @media (max-width: 560px) {
-      .pm-vhead, .pm-vrow { grid-template-columns: minmax(0, 1fr) 84px 72px; }
-      .pm-vcol-vol { display: none; }
+      .pm-vc-list { --pm-vc-cols: minmax(0, 1fr) 6rem; }
+      .pm-vc-row .pm-vc-who { grid-column: 1 / -1; }
+      .pm-vc-scale { display: none; }
     }
 
-    /* Portfolio table */
-    .pm-portfolio-save { font-weight: 700; font-family: ui-monospace, monospace; color: #15803d; white-space: nowrap; }
+    /* Savings headline extras: the period / top-2 line and the stale warning. */
+    .pm-savings-sub { display: block; font-size: .8rem; opacity: .85; margin-top: .15rem; }
+    .pm-savings-caveat { display: block; font-size: .8rem; color: #b45309; margin-top: .1rem; }
+
+    /* Portfolio: share strip + ranked, clickable rows. */
+    .pm-share { display: grid; gap: .35rem; margin-bottom: .9rem; }
+    .pm-share-bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; gap: 2px; background: #efece6; }
+    .pm-share-bar span { background: #16a34a; min-width: 2px; }
+    .pm-share-bar span:nth-child(2) { background: #3fb56b; }
+    .pm-share-bar span:nth-child(3) { background: #6cc68d; }
+    .pm-share-bar span:nth-child(n+4) { background: #a7dcb9; }
+    .pm-share-cap { display: flex; justify-content: space-between; gap: .3rem 1rem; flex-wrap: wrap; font-size: .74rem; color: var(--text-muted); }
+    .pm-share-cap b { color: var(--text); font-weight: 600; }
+    .pm-pf-list { --pm-pf-cols: 1.6rem minmax(0, 1.5fr) minmax(0, 1fr) 5.6rem 1rem; display: grid; gap: .5rem; }
+    .pm-pf-row {
+      display: grid; grid-template-columns: var(--pm-pf-cols); gap: .8rem; align-items: center;
+      padding: .7rem .8rem; border: 1px solid var(--border); border-radius: var(--radius-sm);
+      background: #fff; cursor: pointer; transition: border-color .15s, background-color .15s;
+    }
+    .pm-pf-row:hover, .pm-pf-row:focus-visible { border-color: var(--primary); background: #f7fbfe; outline: none; }
+    .pm-pf-rank { font-family: var(--font-mono); font-weight: 600; font-size: .78rem; color: var(--text-muted); text-align: center; }
+    .pm-pf-what { min-width: 0; }
+    .pm-pf-name { font-weight: 600; font-size: .88rem; color: var(--text); }
+    .pm-pf-swap { font-size: .76rem; color: var(--text-muted); margin-top: .1rem; overflow-wrap: anywhere; }
+    .pm-pf-swap .from { color: #b91c1c; }
+    .pm-pf-swap .to { color: #166534; font-weight: 500; }
+    .pm-pf-old { display: block; color: #b45309; font-size: .74rem; font-weight: 500; }
+    .pm-pf-track { position: relative; height: 14px; border-radius: 4px; background: #efece6; }
+    .pm-pf-bar { position: absolute; inset-block: 0; left: 0; border-radius: 4px; background: #16a34a; }
+    .pm-pf-bar.stale { background-color: #7dd3a0; }
+    .pm-pf-pct { display: block; font-family: var(--font-mono); font-size: .7rem; color: var(--text-muted); margin-top: .2rem; }
+    .pm-pf-amt { text-align: right; font-family: var(--font-mono); font-weight: 700; font-size: .95rem; color: #166534; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .pm-pf-chev { color: #b8b2a5; font-size: .75rem; }
+    .pm-pf-row:hover .pm-pf-chev, .pm-pf-row:focus-visible .pm-pf-chev { color: var(--primary); }
+    @media (max-width: 560px) {
+      .pm-pf-list { --pm-pf-cols: 1.2rem minmax(0, 1fr) auto; }
+      .pm-pf-row { row-gap: .45rem; }
+      .pm-pf-row .pm-pf-barcell { grid-column: 2 / -1; grid-row: 2; }
+      .pm-pf-chev { display: none; }
+    }
     .pm-portfolio-empty { padding: 2.5rem 1rem; text-align: center; color: var(--text-muted); }
     .pm-portfolio-empty i { font-size: 2rem; color: #cbd5e1; display: block; margin-bottom: .5rem; }
 
@@ -607,7 +673,7 @@
             </div>
             <span class="pm-tab-help" id="pmTabHelp" tabindex="0" role="note"
                   aria-label="About this tab"
-                  data-tip="Trend shows how this product's price per unit has moved over time — each point is one purchase, coloured by supplier. Use it to spot creeping price rises, one-off spikes, or seasonal swings on the items you buy most."><i class="fas fa-circle-info"></i></span>
+                  data-tip="Trend shows how this product's price per unit has moved over time — each dot is one purchase, and the line takes the colour of the supplier who charged that price. Use it to spot creeping price rises, one-off spikes, or seasonal swings on the items you buy most."><i class="fas fa-circle-info"></i></span>
           </div>
           <div id="pmProductView">
           <div id="pmWarning" class="pm-warning hidden"></div>
@@ -619,7 +685,7 @@
             <div class="pm-chart-change" id="pmChartChange"></div>
           </div>
           <div id="pmSavings" class="pm-savings hidden"></div>
-          <div class="pm-chart-wrap">
+          <div class="pm-chart-wrap" id="pmChartWrap">
             <canvas id="pmChart"></canvas>
             <div id="pmChartPlaceholder" class="pm-chart-placeholder">
               <i class="fas fa-chart-line"></i>
@@ -699,6 +765,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="/static/env-banner.js?v=20260807-2"></script>
   <script src="/static/utils.js?v=20260922-1"></script>
-  <script src="/static/home.js?v=20260922-1"></script>
+  <script src="/static/home.js?v=20260924-1"></script>
 </body>
 </html>

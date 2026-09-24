@@ -28,23 +28,6 @@ function formatDate(s) {
   return `${yyyy}/${mm}/${dd}`;
 }
 
-// ── Vendor color palette (stable assignment by vendor name) ──
-const VENDOR_PALETTE = [
-  '#0369a1', '#059669', '#dc2626', '#d97706', '#0891b2',
-  '#7c3aed', '#db2777', '#2563eb', '#65a30d', '#ea580c',
-  '#0d9488', '#9333ea', '#be123c'
-];
-const _vendorColorCache = new Map();
-function vendorColor(vendor) {
-  const key = (vendor || '—').trim() || '—';
-  if (_vendorColorCache.has(key)) return _vendorColorCache.get(key);
-  let hash = 0;
-  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
-  const color = VENDOR_PALETTE[hash % VENDOR_PALETTE.length];
-  _vendorColorCache.set(key, color);
-  return color;
-}
-
 // ── Change class & formatting ────────────────────────────────
 function changeClass(pct) {
   if (pct === null || pct === undefined) return 'flat';
@@ -226,6 +209,7 @@ function clearDetail() {
   document.getElementById('pmVendorLegend').innerHTML = '';
   document.getElementById('pmDetailBody').innerHTML =
     '<tr><td colspan="5" class="empty-row">Select a product to see its purchase history.</td></tr>';
+  document.getElementById('pmChartWrap').classList.remove('hidden');
   const ph = document.getElementById('pmChartPlaceholder');
   ph.querySelector('div').textContent = 'No product selected yet';
   ph.classList.remove('hidden');
@@ -233,7 +217,7 @@ function clearDetail() {
   if (pmChart) { pmChart.destroy(); pmChart = null; }
 }
 
-// Hide the Vendor-Compare-only elements (savings headline + per-vendor strip).
+// Hide the Vendor-Compare-only elements (savings headline + vendor list).
 function hideVendorExtras() {
   document.getElementById('pmSavings').classList.add('hidden');
   document.getElementById('pmVendorStrip').innerHTML = '';
@@ -246,6 +230,7 @@ function renderDetail(product) {
   const changeEl  = document.getElementById('pmChartChange');
   const legendEl  = document.getElementById('pmVendorLegend');
   const bodyEl    = document.getElementById('pmDetailBody');
+  const wrapEl    = document.getElementById('pmChartWrap');
   const placeholderEl = document.getElementById('pmChartPlaceholder');
 
   titleEl.innerHTML = `<a href="/products.html#${esc(product.product_id)}" style="color:inherit;text-decoration:none" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${esc(product.product_name)}</a>`;
@@ -257,6 +242,7 @@ function renderDetail(product) {
     changeEl.textContent = '';
     legendEl.innerHTML = '';
     bodyEl.innerHTML = '<tr><td colspan="5" class="empty-row">No purchases in this range.</td></tr>';
+    wrapEl.classList.remove('hidden');
     placeholderEl.classList.remove('hidden');
     hideVendorExtras();
     if (pmChart) { pmChart.destroy(); pmChart = null; }
@@ -271,94 +257,291 @@ function renderDetail(product) {
   }
 
   const unit = product.unit || product.purchases[0].pack_unit || 'unit';
-  // Say which baseline the % is measured against. Trend compares the latest
-  // purchase with the one before it; Vendor Compare measures each vendor against
-  // the cheapest. Same product, same prices, two different reference points — so
-  // the two tabs legitimately show different numbers, and with no label that
-  // reads as a bug. (A $6 gap on prosciutto is -18% against the dearer earlier
-  // price and +22% against the cheaper vendor: the same gap from either end.)
-  subEl.textContent = `Last ${product.purchases.length} purchase${product.purchases.length === 1 ? '' : 's'} · unit: ${unit}`
-    + ` · % is the change since your previous purchase`;
-
-  const cls = changeClass(product.pct_change);
-  changeEl.textContent = product.pct_change === null ? '' : `${formatPct(product.pct_change)}`;
-  changeEl.className = `pm-chart-change ${cls === 'up' ? 'up' : cls === 'down' ? 'down' : 'flat'}`;
-  changeEl.style.color = cls === 'up' ? '#b91c1c' : cls === 'down' ? '#15803d' : 'var(--text-muted)';
+  // The big % in the headline is no longer the only one on screen, so neither
+  // sits on its own. Trend states both of its baselines in words (first →
+  // latest in the range, and the latest invoice vs the one before); Vendor
+  // Compare measures each vendor against the cheapest. Same product, same
+  // prices, different reference points — without a label that reads as a bug.
+  // (A $6 gap on prosciutto is -18% against the dearer earlier price and +22%
+  // against the cheaper vendor: the same gap from either end.)
+  changeEl.textContent = '';
+  changeEl.className = 'pm-chart-change';
 
   // Build chronological series (oldest → newest).
   const chrono = [...product.purchases].reverse();
   if (pmTab === 'vendor') {
-    renderVendorChart(product, unit);   // manages the placeholder itself
-    renderSavings(product, unit);
-    renderVendorStrip(product, unit);
-    // Vendor identity and the price gap live in the strip below; the trend %
-    // and the per-point colour legend belong to the Trend tab, so keep them
-    // out of the way here.
-    changeEl.textContent = '';
+    // Vendor Compare is a list, not a chart: each vendor's bar sits on its own
+    // row with the price and gap, so nothing is shown twice.
+    if (pmChart) { pmChart.destroy(); pmChart = null; }
+    wrapEl.classList.add('hidden');
     legendEl.innerHTML = '';
+    renderSavings(product, unit);
+    renderVendorCompare(product, unit);
     const nv = product.vendor_count || (product.vendors || []).length;
-    subEl.textContent = `${nv} vendor${nv === 1 ? '' : 's'} · latest price per ${unit}`
-      + ` · % is how much more than your cheapest vendor`;
+    subEl.textContent = `${nv} vendor${nv === 1 ? '' : 's'} · latest price per ${unit}`;
   } else {
-    renderChart(chrono, unit);
+    wrapEl.classList.remove('hidden');
     hideVendorExtras();
-    renderLegend(chrono);
-    placeholderEl.classList.add('hidden');
+    const colors = pmVendorColors(chrono);
+    subEl.innerHTML = trendHeadline(product, chrono, unit);
+    const runOn = renderChart(chrono, unit, colors);
+    renderLegend(chrono, colors, runOn);
   }
   renderDetailTable(product.purchases, unit);
 }
 
-function renderChart(chrono, unit) {
-  const ctx = document.getElementById('pmChart').getContext('2d');
-  if (pmChart) pmChart.destroy();
+// ── Trend tab ────────────────────────────────────────────────
+// Supplier colours are assigned per chart, in order of first appearance. They
+// used to be hashed from the name into one shared palette, which put La Grotta
+// and Cioffi's on the same red on one chart — two suppliers, one colour. Red and
+// green are left out on purpose: they already mean "price up" / "price down".
+const PM_VENDOR_COLORS = ['#0369a1', '#d97706', '#7c3aed', '#0d9488', '#db2777', '#475569', '#a16207', '#4f46e5'];
+function pmVendorKey(v) { return (v || '—').trim() || '—'; }
+function pmVendorColors(chrono) {
+  const map = new Map();
+  for (const p of chrono) {
+    const k = pmVendorKey(p.vendor);
+    if (!map.has(k)) map.set(k, PM_VENDOR_COLORS[map.size % PM_VENDOR_COLORS.length]);
+  }
+  return map;
+}
 
-  const colors = chrono.map(p => vendorColor(p.vendor));
+const PM_DAY = 86400000;
+const PM_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// A YYYY-MM-DD date as local midnight, in ms. Local on purpose: the chart's
+// "Today" and the From/To inputs are the user's own calendar days.
+function pmDay(s) {
+  const m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? new Date(+m[1], +m[2] - 1, +m[3]).getTime() : NaN;
+}
+function pmToday() {
+  const t = new Date();
+  return new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime();
+}
+// "2 Jul", or "2 Jul 2025" when it isn't this year.
+function pmShortDate(s) {
+  const ms = typeof s === 'number' ? s : pmDay(s);
+  if (isNaN(ms)) return '—';
+  const d = new Date(ms);
+  const yr = d.getFullYear() === new Date().getFullYear() ? '' : ` ${d.getFullYear()}`;
+  return `${d.getDate()} ${PM_MONTHS[d.getMonth()]}${yr}`;
+}
+// Whole days since a purchase date (null when the date is unreadable).
+function pmDaysAgo(s) {
+  const ms = pmDay(s);
+  return isNaN(ms) ? null : Math.round((pmToday() - ms) / PM_DAY);
+}
+
+// Headline: first → latest price over the range, then the latest invoice
+// against the one before it (the Top 10 list's figure, kept so the two agree).
+function trendHeadline(product, chrono, unit) {
+  const cmp = chrono.filter(p => p.cost_per_stock_unit != null);
+  const n = chrono.length;
+  const shown = product.purchase_count > n ? ` (latest ${n} of ${product.purchase_count})` : '';
+  const skipped = product.uncomparable_count
+    ? `<span class="pm-hl-ctx">${product.uncomparable_count} purchase${product.uncomparable_count === 1 ? '' : 's'} can't be converted to ${esc(unit)} and ${product.uncomparable_count === 1 ? "isn't" : "aren't"} drawn.</span>`
+    : '';
+  if (!cmp.length) {
+    return `<span class="pm-hl-ctx">Last ${n} purchase${n === 1 ? '' : 's'}${shown} · none can be compared in one unit</span>${skipped}`;
+  }
+
+  const first = cmp[0], last = cmp[cmp.length - 1];
+  const a = first.cost_per_stock_unit, b = last.cost_per_stock_unit;
+  let big = '';
+  if (cmp.length >= 2) {
+    const pct = a > 0 ? ((b - a) / a) * 100 : null;
+    const cls = changeClass(pct);
+    big = `<span class="pm-hl-from">${fmt(a)}</span><span class="pm-hl-arrow">→</span>`
+      + `<span class="pm-hl-now">${fmt(b)}<small>/${esc(unit)}</small></span>`
+      + (pct === null ? '' : `<span class="pm-hl-pill ${cls}">${formatPct(pct)}</span>`);
+  } else {
+    big = `<span class="pm-hl-now">${fmt(b)}<small>/${esc(unit)}</small></span>`;
+  }
+
+  let latest = '';
+  if (product.pct_change !== null && cmp.length >= 2) {
+    const prev = cmp[cmp.length - 2];
+    const same = changeClass(product.pct_change) === 'flat';
+    const what = same
+      ? `<b>same price</b> as the one before`
+      : `<b>${formatPct(product.pct_change)}</b> vs the one before`;
+    const sw = product.change_kind === 'supplier'
+      ? `, switched from ${esc(product.change_from)} to ${esc(product.change_to)}`
+      : product.change_kind === 'item'
+        ? `, different item: ${esc(product.change_from)} → ${esc(product.change_to)}`
+        : '';
+    latest = `<span class="pm-hl-ctx" title="The change since your previous purchase — the figure in the Top 10 list. Vendor Compare measures against your cheapest vendor instead.">`
+      + `Latest invoice ${pmShortDate(last.date)}: ${what} (${pmShortDate(prev.date)})${sw}</span>`;
+  }
+
+  return `<span class="pm-hl-big">${big}</span>`
+    + `<span class="pm-hl-ctx">Since ${pmShortDate(first.date)} · ${n} purchase${n === 1 ? '' : 's'}${shown}</span>`
+    + latest + skipped;
+}
+
+// Axis ticks for a time span: weeks, months or quarters, plus the end.
+function pmTimeTicks(min, max) {
+  const spanDays = (max - min) / PM_DAY;
+  const ticks = [];
+  if (spanDays <= 45) {
+    for (let t = min + 7 * PM_DAY; t < max; t += 7 * PM_DAY) ticks.push(t);
+  } else {
+    const step = spanDays <= 550 ? 1 : 3;
+    const d = new Date(min);
+    let m = d.getMonth() + 1;
+    if (step === 3) m = Math.ceil(m / 3) * 3;
+    for (let t = new Date(d.getFullYear(), m, 1).getTime(); t < max;) {
+      ticks.push(t);
+      const x = new Date(t);
+      t = new Date(x.getFullYear(), x.getMonth() + step, 1).getTime();
+    }
+  }
+  // Keep a clear gap before the end label so the two don't overlap.
+  const kept = ticks.filter(t => (max - t) > (max - min) * 0.08);
+  kept.push(max);
+  return { ticks: kept, spanDays };
+}
+function pmTickLabel(t, spanDays, end, today) {
+  if (t === end && end === today) return 'Today';
+  const d = new Date(t);
+  if (spanDays > 550) return `${PM_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+  return `${d.getDate()} ${PM_MONTHS[d.getMonth()]}`;
+}
+// A round step for the price axis (1, 2, 2.5 or 5 × a power of ten).
+function pmNiceStep(rough) {
+  if (!(rough > 0)) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(rough)));
+  const f = rough / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+}
+
+// A stepped line on real dates. A price doesn't drift between invoices, it
+// jumps when a new one lands — the old smooth line on evenly spaced labels drew
+// a slope that never happened and made a 3-day gap look like a 3-month one.
+// The steps are drawn explicitly (a flat run to the next invoice's date, then
+// the jump) rather than with Chart.js `stepped`, so the jump is unambiguously on
+// the date the new price arrived. Each run takes its supplier's colour.
+// Returns the date the dashed "still in effect" run-on ends at, or null.
+function renderChart(chrono, unit, colors) {
+  const ctx = document.getElementById('pmChart').getContext('2d');
+  const placeholderEl = document.getElementById('pmChartPlaceholder');
+  if (pmChart) { pmChart.destroy(); pmChart = null; }
+
+  // Only purchases expressible in the comparison unit can sit on a $/unit axis;
+  // the headline says how many were left out, and the table still lists them.
+  const pts = chrono
+    .filter(p => p.cost_per_stock_unit != null && !isNaN(pmDay(p.date)))
+    .map(p => ({ x: pmDay(p.date), y: p.cost_per_stock_unit, v: pmVendorKey(p.vendor), p }));
+  if (!pts.length) {
+    placeholderEl.querySelector('div').textContent = 'No comparable prices in this range';
+    placeholderEl.classList.remove('hidden');
+    return null;
+  }
+  placeholderEl.classList.add('hidden');
+
+  const line = [];
+  pts.forEach((q, i) => {
+    if (i) line.push({ x: q.x, y: pts[i - 1].y, v: q.v, corner: true });
+    line.push({ x: q.x, y: q.y, v: q.v, idx: i });
+  });
+
+  const today = pmToday();
+  const from  = pmDay(document.getElementById('pmFrom').value);
+  const to    = pmDay(document.getElementById('pmTo').value);
+  const last  = pts[pts.length - 1];
+  const xMin  = isNaN(from) ? pts[0].x : Math.min(from, pts[0].x);
+  let end     = isNaN(to) ? today : Math.min(to, today);
+  end = Math.max(end, last.x);
+  const xMax  = end > xMin ? end : xMin + PM_DAY;
+  const runOn = end > last.x ? end : null;
+  const { ticks, spanDays } = pmTimeTicks(xMin, xMax);
+
+  const ys = pts.map(q => q.y);
+  const lo = Math.min(...ys), hi = Math.max(...ys);
+  const step = pmNiceStep(((hi - lo) || hi * 0.2 || 1) / 4);
+  const yMin = Math.max(0, Math.floor((lo - step * 0.6) / step) * step);
+  const yMax = Math.ceil((hi + step * 0.6) / step) * step;
+
+  // Print the price wherever it changes, plus the first and latest.
+  const labelIdx = new Set([0, pts.length - 1]);
+  pts.forEach((q, i) => { if (i && q.y !== pts[i - 1].y) labelIdx.add(i); });
+  const priceLabels = {
+    id: 'pmPriceLabels',
+    afterDatasetsDraw(chart) {
+      const { ctx, chartArea } = chart;
+      chart.getDatasetMeta(0).data.forEach((el, j) => {
+        const i = line[j].idx;
+        if (i === undefined || !labelIdx.has(i)) return;
+        const prev = pts[i - 1];
+        const above = !prev || pts[i].y >= prev.y;
+        const text = fmt(pts[i].y);
+        ctx.save();
+        ctx.font = "600 11px 'IBM Plex Mono', ui-monospace, monospace";
+        ctx.fillStyle = '#171512';
+        const w = ctx.measureText(text).width;
+        const x = Math.max(chartArea.left + 2, Math.min(el.x - w / 2, chartArea.right - w - 2));
+        ctx.fillText(text, x, above ? el.y - 11 : el.y + 19);
+        ctx.restore();
+      });
+    }
+  };
+
+  const datasets = [{
+    label: `Price per ${unit}`,
+    data: line,
+    parsing: false,
+    tension: 0,
+    borderWidth: 2.5,
+    borderColor: colors.get(pts[0].v),
+    segment: {
+      // A flat run is the supplier who set that price; a jump is the one who changed it.
+      borderColor: c => colors.get(line[c.p1DataIndex].corner ? line[c.p0DataIndex].v : line[c.p1DataIndex].v)
+    },
+    pointRadius: line.map(q => q.corner ? 0 : 5),
+    pointHoverRadius: line.map(q => q.corner ? 0 : 7),
+    pointHitRadius: line.map(q => q.corner ? 0 : 6),
+    pointBackgroundColor: line.map(q => colors.get(q.v)),
+    pointBorderColor: '#fff',
+    pointBorderWidth: 2,
+    fill: { target: 'origin' },
+    backgroundColor: 'rgba(3,105,161,.06)'
+  }];
+  if (runOn) {
+    datasets.push({
+      data: [{ x: last.x, y: last.y }, { x: runOn, y: last.y }],
+      parsing: false,
+      borderColor: '#b8b2a5',
+      borderDash: [5, 4],
+      borderWidth: 2,
+      pointRadius: 0,
+      pointHitRadius: 0,
+      fill: false
+    });
+  }
 
   pmChart = new Chart(ctx, {
     type: 'line',
-    data: {
-      labels: chrono.map(p => formatDate(p.date)),
-      datasets: [{
-        label: `Price per ${unit}`,
-        // Plot the price normalized to the stocking unit, so a supplier who
-        // bills in a different unit doesn't draw a phantom step in the line.
-        // null (unconvertible) leaves a gap rather than a fabricated point.
-        data: chrono.map(p => p.cost_per_stock_unit ?? null),
-        spanGaps: false,
-        borderColor: '#94a3b8',
-        backgroundColor: 'rgba(148,163,184,.1)',
-        borderWidth: 2,
-        tension: 0.25,
-        pointRadius: 6,
-        pointHoverRadius: 8,
-        pointBackgroundColor: colors,
-        pointBorderColor: '#fff',
-        pointBorderWidth: 2,
-        fill: true
-      }]
-    },
+    data: { datasets },
+    plugins: [priceLabels],
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      layout: { padding: { top: 16, right: 8 } },
       plugins: {
         legend: { display: false },
         tooltip: {
+          filter: (item) => item.datasetIndex === 0 && line[item.dataIndex].idx !== undefined,
           callbacks: {
-            title: (items) => items[0] ? fmtDate(chrono[items[0].dataIndex].date) : '',
+            title: (items) => items[0] ? fmtDate(pts[line[items[0].dataIndex].idx].p.date) : '',
             label: (item) => {
-              const p = chrono[item.dataIndex];
+              const p = pts[line[item.dataIndex].idx].p;
               const lines = [`Vendor: ${p.vendor || '—'}`];
-              if (p.cost_per_stock_unit == null) {
-                lines.push(`Invoiced: ${fmtUnitCost(p.cost_per_unit, p.pack_unit || 'unit')}`);
-                lines.push(`Can't convert to ${unit} — not comparable`);
-              } else {
-                lines.push(`Price:  ${fmtUnitCost(p.cost_per_stock_unit, unit)}`);
-                // When the supplier billed in another unit, show what they
-                // actually invoiced too — otherwise the figure won't match
-                // the paperwork.
-                if (p.pack_unit && !invSameUnit(p.pack_unit, unit)) {
-                  lines.push(`Invoiced as ${fmtUnitCost(p.cost_per_unit, p.pack_unit)}`);
-                }
+              lines.push(`Price:  ${fmtUnitCost(p.cost_per_stock_unit, unit)}`);
+              // When the supplier billed in another unit, show what they
+              // actually invoiced too — otherwise the figure won't match
+              // the paperwork.
+              if (p.pack_unit && !invSameUnit(p.pack_unit, unit)) {
+                lines.push(`Invoiced as ${fmtUnitCost(p.cost_per_unit, p.pack_unit)}`);
               }
               return lines;
             }
@@ -366,21 +549,35 @@ function renderChart(chrono, unit) {
         }
       },
       scales: {
-        x: { grid: { display: false } },
+        x: {
+          type: 'linear',
+          min: xMin,
+          max: xMax,
+          grid: { color: 'rgba(0,0,0,.05)' },
+          afterBuildTicks: (axis) => { axis.ticks = ticks.map(v => ({ value: v })); },
+          ticks: { autoSkip: false, maxRotation: 0, callback: (v) => pmTickLabel(v, spanDays, xMax, today) }
+        },
         y: {
-          beginAtZero: false,
-          ticks: { callback: (v) => '$' + Number(v).toFixed(2) }
+          min: yMin,
+          max: yMax,
+          ticks: { stepSize: step, callback: (v) => '$' + Number(v).toFixed(2) },
+          grid: { color: 'rgba(0,0,0,.05)' }
         }
       }
     }
   });
+  return runOn;
 }
 
-function renderLegend(chrono) {
-  const vendors = Array.from(new Set(chrono.map(p => (p.vendor || '—').trim() || '—')));
-  const html = vendors.map(v =>
-    `<span class="pm-vendor-chip"><span class="pm-vendor-dot" style="background:${vendorColor(v)}"></span>${esc(v)}</span>`
+function renderLegend(chrono, colors, runOn) {
+  const vendors = Array.from(new Set(chrono.map(p => pmVendorKey(p.vendor))));
+  let html = vendors.map(v =>
+    `<span class="pm-vendor-chip"><span class="pm-vendor-seg" style="background:${colors.get(v)}"></span>${esc(v)}</span>`
   ).join('');
+  if (runOn) {
+    const label = runOn === pmToday() ? 'Price still in effect today' : `Price still in effect on ${pmShortDate(runOn)}`;
+    html += `<span class="pm-vendor-chip"><span class="pm-vendor-seg dash"></span>${label}</span>`;
+  }
   document.getElementById('pmVendorLegend').innerHTML = html;
 }
 
@@ -388,7 +585,7 @@ function renderLegend(chrono) {
 // Tooltip copy for the info icon beside the tab group — keeps the "?" honest
 // about whichever tab is currently active.
 const PM_TAB_TIPS = {
-  trend:     "Trend shows how this product's price per unit has moved over time — each point is one purchase, coloured by supplier. Use it to spot creeping price rises, one-off spikes, or seasonal swings on the items you buy most.",
+  trend:     "Trend shows how this product's price per unit has moved over time — each dot is one purchase, and the line takes the colour of the supplier who charged that price. Use it to spot creeping price rises, one-off spikes, or seasonal swings on the items you buy most.",
   vendor:    "Vendor Compare shows the latest price per unit from each supplier side by side, so you can see who's cheapest right now and roughly how much you'd save by switching.",
   portfolio: "Portfolio ranks every multi-vendor item by how much you could save by moving it to its cheapest supplier — your biggest switching wins, top first."
 };
@@ -419,103 +616,104 @@ function switchTab(tab) {
 }
 
 // ── Vendor Compare tab ───────────────────────────────────────
-// One horizontal bar per vendor at their latest price/unit. A time series is
-// the wrong form here — most vendors have a single purchase in the window, so a
-// line has nothing to connect. Bars answer the actual question ("who's cheapest,
-// and by how much?") and read cleanly even with one data point each.
-function renderVendorChart(product, unit) {
-  const ctx = document.getElementById('pmChart').getContext('2d');
-  if (pmChart) pmChart.destroy();
+// One row per vendor: its bar, latest price/unit and gap to the cheapest on the
+// same line. This replaced a bar chart with a table under it that repeated the
+// same prices and percentages, in a second colour system. Bars answer the
+// actual question ("who's cheapest, and by how much?") and read cleanly even
+// with one purchase each — a time series has nothing to connect here.
+const PM_STALE_DAYS = 30;
 
-  // Vendors whose supplier unit can't be reconciled have no comparable price;
-  // they're listed in the strip below but can't be plotted on a $/unit axis.
-  const priced = (product.vendors || []).filter(v => v.latest_price != null);
-  const placeholderEl = document.getElementById('pmChartPlaceholder');
-  if (!priced.length) {
-    placeholderEl.querySelector('div').textContent = 'No comparable vendor prices in this range';
-    placeholderEl.classList.remove('hidden');
-    return;
-  }
-  placeholderEl.classList.add('hidden');
+function renderVendorCompare(product, unit) {
+  const el = document.getElementById('pmVendorStrip');
+  const vendors = product.vendors || [];
+  if (!vendors.length) { el.innerHTML = ''; return; }
 
-  // Backend sorts vendors ascending by latest_price, so index 0 is the cheapest.
-  // Colour it "good"; the rest recede to neutral. Magnitude is carried by bar
-  // length and the direct labels — never by hue-by-rank.
-  const labels   = priced.map(v => v.name);
-  const data     = priced.map(v => v.latest_price);
-  const cheapest = priced[0].latest_price;
-  const colors   = priced.map((_, i) => i === 0 ? '#16a34a' : '#94a3b8');
+  // Backend sorts vendors ascending by latest_price, so the first priced one is
+  // the cheapest. Vendors whose unit can't be reconciled have no comparable
+  // price; they are listed without a bar.
+  const priced   = vendors.filter(v => v.latest_price != null);
+  const cheapest = product.cheapest_price;
+  const maxPrice = priced.length ? Math.max(...priced.map(v => v.latest_price)) : 0;
+  const step     = pmNiceStep(maxPrice / 3);
+  const scaleMax = maxPrice > 0 ? Math.ceil(maxPrice / step) * step : 1;
+  const tickVals = [];
+  for (let t = 0; t <= scaleMax + step / 2; t += step) tickVals.push(t);
 
-  // Direct label at each bar end: price, plus how much over the cheapest.
-  const barLabels = {
-    id: 'pmBarLabels',
-    afterDatasetsDraw(chart) {
-      const { ctx } = chart;
-      chart.getDatasetMeta(0).data.forEach((bar, i) => {
-        const v = priced[i].latest_price;
-        const delta = (cheapest > 0 && i !== 0)
-          ? ` +${Math.round(((v - cheapest) / cheapest) * 100)}%`
-          : '';
-        ctx.save();
-        ctx.fillStyle = '#334155';
-        ctx.font = '600 11px ui-sans-serif, system-ui, sans-serif';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(`${fmt(v)}${delta}`, bar.x + 6, bar.y);
-        ctx.restore();
-      });
+  // Faint grid lines behind the bars at each tick, so they line up with the scale.
+  const inner = tickVals.slice(1, -1).map(t => (t / scaleMax) * 100);
+  const gridBg = inner.length
+    ? 'background:linear-gradient(90deg,' + inner.map(x =>
+        `transparent calc(${x.toFixed(2)}% - 1px),#efece6 calc(${x.toFixed(2)}% - 1px) ${x.toFixed(2)}%,transparent ${x.toFixed(2)}%`
+      ).join(',') + ')'
+    : '';
+
+  // "Most bought" ties the rows to the savings headline ("move your volume").
+  const totalQty = vendors.reduce((s, v) => s + (v.qty_stock > 0 ? v.qty_stock : 0), 0);
+  const most = vendors.length >= 2 && totalQty > 0
+    ? vendors.reduce((a, b) => ((b.qty_stock || 0) > (a.qty_stock || 0) ? b : a))
+    : null;
+
+  let anyStale = false;
+  const rows = vendors.map(v => {
+    const isCheapest = product.cheapest_vendor && v.name === product.cheapest_vendor && v.latest_price != null;
+    // Stale: last bought from this vendor more than 30 days ago, so the "latest
+    // price" comparison isn't over-trusted.
+    const days  = v.latest_date ? pmDaysAgo(v.latest_date) : null;
+    const stale = days != null && days > PM_STALE_DAYS;
+    if (stale && v.latest_price != null) anyStale = true;
+
+    let badge;
+    if (v.latest_price == null) {
+      badge = `<span class="pm-vbadge" title="This vendor's unit can't be converted to ${esc(unit)}">n/a</span>`;
+    } else if (isCheapest) {
+      badge = `<span class="pm-vbadge base">cheapest</span>`;
+    } else if (cheapest != null && cheapest > 0) {
+      const pct = Math.round(((v.latest_price - cheapest) / cheapest) * 100);
+      badge = `<span class="pm-vbadge up" title="How much more than your cheapest vendor">+${pct}%</span>`;
+    } else {
+      badge = `<span class="pm-vbadge">—</span>`;
     }
-  };
 
-  pmChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [{
-        label: `Latest price / ${unit}`,
-        data,
-        backgroundColor: colors,
-        borderRadius: 4,
-        borderSkipped: false,
-        barPercentage: 0.7,
-        categoryPercentage: 0.85,
-      }]
-    },
-    plugins: [barLabels],
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      maintainAspectRatio: false,
-      layout: { padding: { right: 70 } },   // room for the end-of-bar labels
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: (item) => {
-              const v = priced[item.dataIndex];
-              const lines = item.dataIndex === 0
-                ? [`${fmt(v.latest_price)} / ${unit}`, 'cheapest']
-                : [`${fmt(v.latest_price)} / ${unit}`,
-                   `+${fmt(v.latest_price - cheapest)}/${unit} vs ${priced[0].name}`];
-              lines.push(`${Math.round(v.qty_stock)} ${unit} bought · ${fmt(v.spend)}`);
-              return lines;
-            }
-          }
-        }
-      },
-      scales: {
-        x: {
-          beginAtZero: true,
-          ticks: { callback: (v) => '$' + Number(v).toFixed(2) },
-          grid: { color: 'rgba(0,0,0,.05)' }
-        },
-        y: { grid: { display: false } }
-      }
-    }
-  });
+    const share = vendors.length >= 2 && totalQty > 0 && v.qty_stock > 0
+      ? ` · ${Math.round((v.qty_stock / totalQty) * 100)}% of your volume` : '';
+    const meta = `${Math.round(v.qty_stock)} ${esc(unit)} bought for ${fmt(v.spend)}${share}`
+      + (stale ? `<span class="old">Last bought ${days} days ago</span>` : '');
+    const bar = v.latest_price != null
+      ? `<div class="pm-vc-bar${stale ? ' stale' : ''}" style="width:${Math.min(100, (v.latest_price / scaleMax) * 100).toFixed(2)}%"></div>`
+      : '';
+    const price = v.latest_price != null
+      ? `${fmt(v.latest_price)}<small>/${esc(unit)}</small>`
+      : '—';
+
+    return `
+      <div class="pm-vc-row${isCheapest ? ' cheapest' : ''}">
+        <div class="pm-vc-who">
+          <div class="pm-vc-name"><span class="pm-vc-name-txt">${esc(v.name)}</span>${most === v ? '<span class="pm-chip">Most bought</span>' : ''}</div>
+          <div class="pm-vc-meta">${meta}</div>
+        </div>
+        <div class="pm-vc-track" style="${gridBg}">${bar}</div>
+        <div class="pm-vc-price"><span class="v">${price}</span>${badge}</div>
+      </div>`;
+  }).join('');
+
+  const scale = `
+    <div class="pm-vc-scale" aria-hidden="true"><span></span>
+      <div class="pm-vc-ticks">${tickVals.map(t =>
+        `<span style="left:${((t / scaleMax) * 100).toFixed(2)}%">${t === 0 ? '$0' : fmt(t).replace(/\.00$/, '')}</span>`
+      ).join('')}</div><span></span>
+    </div>`;
+  const key = `
+    <div class="pm-key">
+      <span><i class="k-cheap"></i>Cheapest</span>
+      <span><i class="k-other"></i>Other vendors</span>
+      ${anyStale ? '<span><i class="k-stale"></i>Price over 30 days old</span>' : ''}
+    </div>`;
+
+  el.innerHTML = `<div class="pm-vc-list">${priced.length ? scale : ''}${rows}</div>${priced.length ? key : ''}`;
 }
 
-// Headline: the dollar figure a manager acts on.
+// Headline: the dollar figure a manager acts on — with a warning when the
+// saving rests on prices nobody has paid for a month or more.
 function renderSavings(product, unit) {
   const el = document.getElementById('pmSavings');
   const save = Number(product.overpay_est || 0);
@@ -529,69 +727,27 @@ function renderSavings(product, unit) {
     el.className = 'pm-savings flat';
     el.innerHTML = `<i class="fas fa-circle-check"></i> <span>You're already buying at the cheapest available price.</span>`;
   } else {
+    const priced = (product.vendors || []).filter(v => v.latest_price != null);
+    const ages = priced.map(v => (v.latest_date ? pmDaysAgo(v.latest_date) : null));
+    const allStale = priced.length > 0 && ages.every(d => d != null && d > PM_STALE_DAYS);
+    const cheap = priced.find(v => v.name === product.cheapest_vendor);
+    const cheapAge = cheap && cheap.latest_date ? pmDaysAgo(cheap.latest_date) : null;
+    let caveat = '';
+    if (allStale) {
+      caveat = `${priced.length === 2 ? 'Both' : 'All'} prices are over 30 days old. Check with the supplier before switching.`;
+    } else if (cheapAge != null && cheapAge > PM_STALE_DAYS) {
+      caveat = `The price from ${esc(product.cheapest_vendor)} is ${cheapAge} days old. Check with the supplier before switching.`;
+    }
     el.className = 'pm-savings';
-    el.innerHTML = `<i class="fas fa-piggy-bank"></i> <span>Est. save <span class="amt">${fmt(save)}</span> by moving your volume to <strong>${esc(product.cheapest_vendor)}</strong> at current prices.</span>`;
+    el.innerHTML = `<i class="fas fa-piggy-bank"></i> <span>Est. save <span class="amt">${fmt(save)}</span> by moving your volume to <strong>${esc(product.cheapest_vendor)}</strong> at current prices.`
+      + (caveat ? `<span class="pm-savings-caveat">${caveat}</span>` : '') + `</span>`;
   }
-}
-
-// Per-vendor strip: latest price, volume/spend, and Δ vs the cheapest vendor.
-function renderVendorStrip(product, unit) {
-  const el = document.getElementById('pmVendorStrip');
-  const vendors  = product.vendors || [];
-  const cheapest = product.cheapest_price;
-  const now = Date.now();
-
-  if (!vendors.length) { el.innerHTML = ''; return; }
-
-  const header = `
-    <div class="pm-vhead">
-      <span>Vendor</span>
-      <span class="r">Latest</span>
-      <span class="r pm-vcol-vol">Bought (range)</span>
-      <span class="r">vs cheapest</span>
-    </div>`;
-
-  const rows = vendors.map(v => {
-    const isCheapest = product.cheapest_vendor && v.name === product.cheapest_vendor && v.latest_price != null;
-
-    // Badge stays compact — just the gap to the cheapest as a %. The absolute
-    // prices sit in the Latest column, so a $/unit delta here would be redundant.
-    let badge;
-    if (v.latest_price == null) {
-      badge = `<span class="pm-vbadge">n/a</span>`;
-    } else if (isCheapest) {
-      badge = `<span class="pm-vbadge base">cheapest</span>`;
-    } else if (cheapest != null && cheapest > 0) {
-      const pct = Math.round(((v.latest_price - cheapest) / cheapest) * 100);
-      badge = `<span class="pm-vbadge up">+${pct}%</span>`;
-    } else {
-      badge = `<span class="pm-vbadge">—</span>`;
-    }
-
-    // Stale flag: last bought from this vendor more than 30 days ago, so the
-    // "latest price" comparison isn't over-trusted.
-    let stale = '';
-    if (v.latest_date) {
-      const days = Math.floor((now - new Date(v.latest_date).getTime()) / 86400000);
-      if (days > 30) stale = `<span class="pm-stale" title="Last bought ${days} days ago">stale</span>`;
-    }
-
-    const price  = v.latest_price != null ? `${fmt(v.latest_price)}/${esc(unit)}` : '—';
-    const bought = `${Math.round(v.qty_stock)} ${esc(unit)} · ${fmt(v.spend)}`;
-    return `
-      <div class="pm-vrow ${isCheapest ? 'cheapest' : ''}">
-        <span class="vname"><span class="pm-vendor-dot" style="background:${vendorColor(v.name)}"></span><span class="vname-txt">${esc(v.name)}</span>${stale}</span>
-        <span class="vprice">${price}</span>
-        <span class="vmeta pm-vcol-vol">${bought}</span>
-        ${badge}
-      </div>`;
-  }).join('');
-
-  el.innerHTML = header + rows;
 }
 
 // ── Portfolio tab ────────────────────────────────────────────
 // Catalog-wide scan: where am I not on the cheapest vendor, ranked by $ impact.
+// Each row's bar is its saving against the biggest one; the strip on top splits
+// the total so it's obvious where to start.
 function renderPortfolio() {
   const el = document.getElementById('pmPortfolioBody');
   const rows = pmData
@@ -604,47 +760,93 @@ function renderPortfolio() {
   }
 
   const total = rows.reduce((s, p) => s + Number(p.overpay_est), 0);
+  const maxSave = Number(rows[0].overpay_est);
+  const n = rows.length;
+  const from = document.getElementById('pmFrom').value;
+  const to   = document.getElementById('pmTo').value;
+  const period = from && to ? `Based on your purchases from ${pmShortDate(from)} to ${pmShortDate(to)}.` : '';
+  const top2 = n >= 3 ? Number(rows[0].overpay_est) + Number(rows[1].overpay_est) : 0;
+  const top2Line = n >= 3 ? ` Your top 2 items are ${Math.round((top2 / total) * 100)}% of it.` : '';
+
+  const staleOf = p => {
+    const c = (p.vendors || []).find(v => v.name === p.cheapest_vendor && v.latest_price != null);
+    const d = c && c.latest_date ? pmDaysAgo(c.latest_date) : null;
+    return d != null && d > PM_STALE_DAYS ? d : null;
+  };
+  const staleCount = rows.filter(p => staleOf(p) != null).length;
+  const caveat = staleCount
+    ? `<span class="pm-savings-caveat">${staleCount === 1 ? '1 of these savings rests on a price' : `${staleCount} of these savings rest on prices`} over 30 days old.</span>`
+    : '';
+
+  const strip = n >= 3 ? `
+    <div class="pm-share" aria-label="Share of total savings by item">
+      <div class="pm-share-bar">${rows.map(p =>
+        `<span style="flex:${Number(p.overpay_est).toFixed(2)} 1 0" title="${esc(p.product_name)} · ${fmt(p.overpay_est)}"></span>`
+      ).join('')}</div>
+      <div class="pm-share-cap">
+        <span><b>${esc(rows[0].product_name)} + ${esc(rows[1].product_name)}</b> · ${fmt(top2)}</span>
+        <span>${n - 2 === 1 ? '1 other item' : `Other ${n - 2} items`} · ${fmt(total - top2)}</span>
+      </div>
+    </div>` : '';
+
+  const list = rows.map((p, i) => {
+    const unit = p.unit || 'unit';
+    const cheap = p.cheapest_price;
+    // The pricier vendor that accounts for most of this item's saving.
+    const dearer = (p.vendors || [])
+      .filter(v => v.latest_price != null && v.name !== p.cheapest_vendor && v.latest_price > (cheap || 0))
+      .map(v => ({ v, part: (v.qty_stock || 0) * (v.latest_price - (cheap || 0)) }))
+      .sort((a, b) => b.part - a.part);
+    const main = dearer.length ? dearer[0].v : null;
+    const more = dearer.length > 1 ? ` · +${dearer.length - 1} more supplier${dearer.length > 2 ? 's' : ''}` : '';
+    const pct = main && cheap > 0 ? Math.round(((main.latest_price - cheap) / cheap) * 100) : null;
+    const swap = main
+      ? `<span class="from">${esc(main.name)} ${fmt(main.latest_price)}</span> → <span class="to">${esc(p.cheapest_vendor)} ${fmt(cheap)}/${esc(unit)}</span>`
+        + (pct !== null ? ` · +${pct}%` : '')
+        + ` · ${Math.round(main.qty_stock)} ${esc(unit)} from ${esc(main.name)}${more}`
+      : `<span class="to">${esc(p.cheapest_vendor)} ${fmt(cheap)}/${esc(unit)}</span>`;
+    const age = staleOf(p);
+    const save = Number(p.overpay_est);
+    return `
+      <div class="pm-pf-row" role="listitem" tabindex="0" data-id="${esc(p.product_id)}" title="Open in Vendor Compare">
+        <span class="pm-pf-rank">${i + 1}</span>
+        <div class="pm-pf-what">
+          <div class="pm-pf-name">${esc(p.product_name)}</div>
+          <div class="pm-pf-swap">${swap}</div>
+          ${age != null ? `<span class="pm-pf-old">Price from ${esc(p.cheapest_vendor)} is ${age} days old</span>` : ''}
+        </div>
+        <div class="pm-pf-barcell">
+          <div class="pm-pf-track"><div class="pm-pf-bar${age != null ? ' stale' : ''}" style="width:${((save / maxSave) * 100).toFixed(2)}%"></div></div>
+          <span class="pm-pf-pct">${Math.round((save / total) * 100)}% of total</span>
+        </div>
+        <div class="pm-pf-amt">${fmt(save)}</div>
+        <i class="fas fa-chevron-right pm-pf-chev" aria-hidden="true"></i>
+      </div>`;
+  }).join('');
+
   el.innerHTML = `
-    <div class="pm-savings"><i class="fas fa-piggy-bank"></i> <span>Total estimated savings across ${rows.length} item${rows.length === 1 ? '' : 's'}: <span class="amt">${fmt(total)}</span></span></div>
-    <div class="table-scroll" style="margin-top:1rem">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>Product</th>
-            <th>Paying more from</th>
-            <th>Cheapest vendor</th>
-            <th style="text-align:right">Est. savings</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.map(p => {
-            const above = (p.vendors || [])
-              .filter(v => v.latest_price != null && v.name !== p.cheapest_vendor && v.latest_price > (p.cheapest_price || 0))
-              .map(v => esc(v.name));
-            const cheapestCell = p.cheapest_price != null
-              ? `${esc(p.cheapest_vendor || '—')} · ${fmt(p.cheapest_price)}/${esc(p.unit || 'unit')}`
-              : '—';
-            return `
-              <tr style="cursor:pointer" data-id="${esc(p.product_id)}" title="Open Vendor Compare">
-                <td><strong>${esc(p.product_name)}</strong></td>
-                <td style="color:var(--text-muted)">${above.length ? above.join(', ') : '—'}</td>
-                <td>${cheapestCell}</td>
-                <td style="text-align:right"><span class="pm-portfolio-save">${fmt(p.overpay_est)}</span></td>
-              </tr>`;
-          }).join('')}
-        </tbody>
-      </table>
+    <div class="pm-savings"><i class="fas fa-piggy-bank"></i> <span>Est. save <span class="amt">${fmt(total)}</span> by switching ${n} item${n === 1 ? '' : 's'} to their cheapest supplier.`
+      + (period || top2Line ? `<span class="pm-savings-sub">${period}${top2Line}</span>` : '')
+      + caveat + `</span></div>
+    ${strip}
+    <div class="pm-pf-list" role="list">${list}</div>
+    <div class="pm-key">
+      <span><i class="k-cheap"></i>Saving on a recent price</span>
+      ${staleCount ? '<span><i class="k-stale-cheap"></i>Cheapest price over 30 days old</span>' : ''}
     </div>`;
 
-  el.querySelectorAll('tr[data-id]').forEach(tr => {
-    tr.addEventListener('click', () => {
-      const id = tr.getAttribute('data-id');
-      const prod = pmData.find(p => p.product_id === id);
-      if (prod) {
-        pmSelectedId = id;
-        renderList();
-        switchTab('vendor');
-      }
+  const open = (id) => {
+    const prod = pmData.find(p => p.product_id === id);
+    if (prod) {
+      pmSelectedId = id;
+      renderList();
+      switchTab('vendor');
+    }
+  };
+  el.querySelectorAll('.pm-pf-row[data-id]').forEach(row => {
+    row.addEventListener('click', () => open(row.getAttribute('data-id')));
+    row.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(row.getAttribute('data-id')); }
     });
   });
 }
