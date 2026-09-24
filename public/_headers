@@ -1,0 +1,9 @@
+# Cloudflare Pages response headers (static assets only; /api/* is the worker).
+#
+# The production pages.dev host serves the same pages as foodnance.com and
+# cannot be redirected, so tell search engines never to index it. Rules with a
+# full URL match that host only; foodnance.com is untouched. Preview/staging
+# hosts (<branch>.webapp-g5y.pages.dev) already get noindex from Cloudflare.
+https://webapp-g5y.pages.dev/*
+  X-Robots-Tag: noindex
+
