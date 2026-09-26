@@ -39,10 +39,12 @@
       '.ra-form{display:grid;gap:.9rem}' +
       '.ra-form[hidden],.ra-thanks[hidden]{display:none}' +
       '.ra-form label{display:block;font-size:.85rem;font-weight:600;color:#171512}' +
-      '.ra-form input,.ra-form select{display:block;width:100%;margin-top:.3rem;font:inherit;' +
+      '.ra-form input,.ra-form select,.ra-form textarea{display:block;width:100%;margin-top:.3rem;font:inherit;' +
       'font-size:.95rem;padding:.6rem .7rem;border:1px solid #e4e0d8;border-radius:8px;' +
       'background:#faf9f6;color:#171512}' +
-      '.ra-form input:focus,.ra-form select:focus{outline:2px solid #0369a1;outline-offset:1px;background:#fff}' +
+      '.ra-form input:focus,.ra-form select:focus,.ra-form textarea:focus{outline:2px solid #0369a1;outline-offset:1px;background:#fff}' +
+      '.ra-form textarea{resize:vertical;min-height:4.5rem}' +
+      '.ra-opt{font-weight:400;color:#6b6659}' +
       '.ra-honeypot{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}' +
       '.ra-error{color:#b91c1c;font-size:.85rem;margin:0}' +
       '.ra-submit{width:100%}' +
@@ -67,17 +69,18 @@
           '<label>Your name<input type="text" name="name" required maxlength="200" autocomplete="name"></label>' +
           '<label>Email<input type="email" name="email" required maxlength="320" autocomplete="email"></label>' +
           '<label>Business name<input type="text" name="business_name" required maxlength="200" autocomplete="organization"></label>' +
-          '<label>Type<select name="business_type">' +
-            '<option value="">— optional —</option>' +
+          '<label>Type <span class="ra-opt">(optional)</span><select name="business_type">' +
+            '<option value="">— choose —</option>' +
             '<option>Restaurant</option><option>Bakery</option><option>Commissary</option><option>Other</option>' +
           '</select></label>' +
-          '<label>Invoices per week (roughly)<input type="text" name="invoices_per_week" maxlength="60" placeholder="e.g. 10"></label>' +
+          '<label>Invoices per week, roughly <span class="ra-opt">(optional)</span><input type="text" name="invoices_per_week" maxlength="60" placeholder="e.g. 10"></label>' +
+          '<label>Anything else? <span class="ra-opt">(optional)</span><textarea name="message" rows="3" maxlength="2000" placeholder="What would you like Foodnance to help with?"></textarea></label>' +
           '<div class="ra-honeypot" aria-hidden="true">' +
             '<label>Leave blank<input type="text" name="website" tabindex="-1" autocomplete="off"></label>' +
           '</div>' +
           '<p class="ra-error" hidden></p>' +
           '<button type="submit" class="btn btn-primary btn-lg ra-submit">Send request</button>' +
-          '<p class="ra-alt">Prefer email? Write to <a href="mailto:hello@foodnance.com">hello@foodnance.com</a> directly.</p>' +
+          '<p class="ra-alt">Any questions or concerns? Get in touch at <a href="mailto:hello@foodnance.com">hello@foodnance.com</a>.</p>' +
         '</form>' +
         '<div class="ra-thanks" hidden>' +
           '<h2>Thanks!</h2>' +
@@ -139,6 +142,7 @@
       business_name: get('business_name'),
       business_type: get('business_type'),
       invoices_per_week: get('invoices_per_week'),
+      message: get('message'),
       website: get('website'),
       source_page: location.pathname,
     };
