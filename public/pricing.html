@@ -6,7 +6,7 @@
   <!-- Launched 2026-09-23, alongside index.html — see robots.txt. -->
 
   <title>Foodnance Pricing — From $79 a Month in Canadian Dollars</title>
-  <meta name="description" content="Foodnance food cost software costs $79 a month (Essentials) or $150 a month (Pro), in Canadian dollars per location, with no setup fee." />
+  <meta name="description" content="Foodnance food cost software costs $79 a month (Essentials) or $150 a month (Pro), in Canadian dollars per location, with a 14-day free trial and no setup fee." />
   <link rel="canonical" href="https://foodnance.com/pricing" />
   <meta name="theme-color" content="#0369a1" />
 
@@ -30,8 +30,9 @@
 
   <!-- Structured data. The Offers must match the prices visible on this page and
        in the FAQ on the homepage: change all three together. Deliberately no
-       aggregateRating (there are no reviews) and no trial/overage terms (not
-       offered yet). -->
+       aggregateRating (there are no reviews) and no overage terms (not offered
+       yet). The 14-day free trial is stated in the page text, the homepage FAQ
+       and refund-policy.html only: schema.org has no standard trial property. -->
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -231,6 +232,8 @@
     .facts .ic { color: var(--primary); margin-top: .3em; }
     .facts strong { display: block; }
     .facts span { color: var(--text-muted); font-size: .93rem; }
+    .facts a { color: var(--primary); font-weight: 600; text-decoration: none; }
+    .facts a:hover { text-decoration: underline; }
 
     /* ===== FINAL CTA ===== */
     .final {
@@ -348,7 +351,7 @@
   <div class="hero wrap">
     <div class="eyebrow"><span class="rule"></span><span class="kicker">Simple pricing</span></div>
     <h1>Two plans. <span class="accent">Priced in Canadian dollars.</span></h1>
-    <p class="sub">Priced per location, per month, with no setup fee. You can see what Foodnance costs without booking a call.</p>
+    <p class="sub">Priced per location, per month, with a 14-day free trial and no setup fee. You can see what Foodnance costs without booking a call.</p>
   </div>
 
   <!-- ══ PLANS ══ -->
@@ -384,7 +387,7 @@
           <a class="btn btn-primary btn-lg js-request-access" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">Request access</a>
         </div>
       </div>
-      <p class="plans-note">All prices are in Canadian dollars. No setup fee on either plan.</p>
+      <p class="plans-note">Both plans start with a 14-day free trial. All prices are in Canadian dollars. No setup fee on either plan.</p>
     </div>
   </section>
 
@@ -396,6 +399,7 @@
         <p>What you pay, and nothing hidden behind it.</p>
       </div>
       <ul class="facts">
+        <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> <div><strong>14-day free trial</strong><span>Try either plan free for 14 days. We ask for a card up front, but nothing is charged if you cancel before the trial ends. <a href="/refund-policy">Refund policy</a></span></div></li>
         <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> <div><strong>Per location, per month</strong><span>Each kitchen you run is priced on its own.</span></div></li>
         <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> <div><strong>In Canadian dollars</strong><span>The price is in CAD, so there is no exchange rate to work out.</span></div></li>
         <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> <div><strong>No setup fee</strong><span>We don't charge to get you started.</span></div></li>
