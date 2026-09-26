@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en-CA">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Added 2026-09-26. Indexable, listed in sitemap.xml. -->
+
+  <title>Foodnance Terms of Service</title>
+  <meta name="description" content="The terms for using Foodnance: billing and the 14-day free trial, how your data and invoices are handled, AI reading, and what Foodnance is and is not responsible for." />
+  <link rel="canonical" href="https://foodnance.com/terms" />
+  <meta name="theme-color" content="#0369a1" />
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="mask-icon" href="/favicon.svg" color="#0369a1" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560;9..144,620&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
+
+  <style>
+    /* Standalone like index.html / pricing.html: no shared stylesheet, tokens copied from it. */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary:    #0369a1;
+      --primary-d:  #075985;
+      --nav-bg:     #0f172a;
+      --nav-bg-d:   #1e293b;
+      --bg:         #faf9f6;
+      --bg-alt:     #f3f1ec;
+      --border:     #e4e0d8;
+      --text:       #171512;
+      --text-muted: #6b6659;
+      --radius:     12px;
+      --radius-sm:  6px;
+      --shadow:     0 2px 16px rgba(0,0,0,.06);
+      --maxw:       1080px;
+      --maxw-prose: 700px;
+    }
+
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+      color: var(--text); background: var(--bg);
+      font-size: 16px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 1.25rem; }
+    .prose { max-width: var(--maxw-prose); margin: 0 auto; padding: 0 1.25rem; }
+    .ic { height: 1em; fill: currentColor; vertical-align: -.125em; flex: none; }
+    .kicker { font-family: 'IBM Plex Mono', monospace; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+
+    /* ===== NAV (same as pricing.html) ===== */
+    header.nav {
+      position: sticky; top: 0; z-index: 50;
+      background: rgba(250,249,246,.88); backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: var(--maxw); margin: 0 auto; padding: .85rem 1.25rem;
+      display: flex; align-items: center; gap: 1rem;
+    }
+    .brand {
+      display: flex; align-items: center; gap: .55rem;
+      font-weight: 700; font-size: 1.15rem; letter-spacing: -.01em;
+      color: var(--text); text-decoration: none;
+    }
+    .brand .ic { color: var(--primary); }
+    .nav-spacer { flex: 1; }
+    .nav-link {
+      color: var(--text-muted); text-decoration: none; font-size: .92rem;
+      font-weight: 500; padding: .4rem .6rem; border-radius: 6px;
+      white-space: nowrap;
+    }
+    .nav-link:hover { color: var(--text); background: var(--bg-alt); }
+    .nav-link[aria-current="page"] { color: var(--text); font-weight: 600; }
+    .nav-toggle { display: none; }
+    .nav-menu { display: none; }
+
+    /* ===== BUTTONS ===== */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+      font-family: inherit; font-size: .93rem; font-weight: 600;
+      padding: .7rem 1.2rem; border-radius: var(--radius-sm);
+      text-decoration: none; border: 1px solid transparent; cursor: pointer;
+      transition: background .15s ease; white-space: nowrap;
+    }
+    .btn-primary { background: var(--nav-bg); color: #fff; }
+    .btn-primary:hover { background: var(--nav-bg-d); }
+    .btn-ghost { background: #fff; color: var(--text); border-color: var(--border); }
+    .btn-ghost:hover { background: var(--bg-alt); }
+    .btn:focus-visible, .nav-link:focus-visible, .brand:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+    /* ===== HERO ===== */
+    .hero { padding: 4rem 0 1.6rem; text-align: center; }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: .5rem;
+      color: var(--primary); margin-bottom: 1.2rem;
+    }
+    .eyebrow .rule { width: 22px; height: 1px; background: var(--primary); display: inline-block; }
+    .eyebrow .kicker { font-size: .72rem; }
+    h1 {
+      font-family: 'Fraunces', Georgia, serif; font-weight: 600;
+      font-size: clamp(1.9rem, 4.6vw, 2.8rem); line-height: 1.14; letter-spacing: -.01em;
+      max-width: 22ch; margin: 0 auto 1rem;
+    }
+    .sub { font-size: clamp(.98rem, 2.2vw, 1.06rem); color: var(--text-muted); max-width: 54ch; margin: 0 auto; }
+    .updated { font-size: .82rem; color: var(--text-muted); margin-top: 1.2rem; }
+
+    /* ===== SUMMARY CARD ===== */
+    .summary {
+      background: #fff; border: 1px solid var(--border); border-radius: var(--radius);
+      box-shadow: var(--shadow); padding: 1.6rem 1.8rem; margin: 2rem auto 0;
+    }
+    .summary h2 { font-size: .8rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--primary); margin-bottom: .9rem; }
+    .summary ul { list-style: none; display: grid; gap: .7rem; font-size: .95rem; text-align: left; }
+    .summary li { display: flex; gap: .65rem; align-items: flex-start; }
+    .summary .ic { color: var(--primary); margin-top: .3em; }
+
+    /* ===== POLICY BODY ===== */
+    .policy { padding: 3rem 0; }
+    .policy h2 {
+      font-family: 'Fraunces', Georgia, serif; font-weight: 600;
+      font-size: clamp(1.2rem, 2.6vw, 1.5rem); letter-spacing: -.01em;
+      line-height: 1.25; margin: 2.2rem 0 .7rem;
+    }
+    .policy h2:first-child { margin-top: 0; }
+    .policy p { margin-bottom: .9rem; color: var(--text); }
+    .policy p.muted { color: var(--text-muted); font-size: .92rem; }
+    .policy strong { font-weight: 600; }
+    .policy a { color: var(--primary); }
+
+    .policy ul { margin: 0 0 .9rem 1.3rem; }
+    .policy li { margin-bottom: .45rem; }
+    .summary-note { font-size: .82rem; color: var(--text-muted); margin-top: 1rem; text-align: left; }
+    .toc { background: var(--bg-alt); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1.1rem 1.4rem; margin-bottom: 2.4rem; }
+    .toc h2 { font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: .8rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--primary); margin: 0 0 .6rem; }
+    .toc ol { margin: 0 0 0 1.3rem; font-size: .92rem; columns: 2; column-gap: 2rem; }
+    .toc li { margin-bottom: .25rem; break-inside: avoid; }
+    .toc a { text-decoration: none; }
+    .toc a:hover { text-decoration: underline; }
+    .policy h2[id] { scroll-margin-top: 5rem; }
+
+    /* ===== FOOTER ===== */
+    footer { border-top: 1px solid var(--border); padding: 2rem 0; font-size: .86rem; color: var(--text-muted); }
+    .foot-inner { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    footer a { color: var(--text-muted); text-decoration: none; }
+    footer a:hover { color: var(--text); text-decoration: underline; }
+
+    @media (max-width: 640px) {
+      .hero { padding: 2.8rem 0 1.2rem; }
+      .policy { padding: 2rem 0; }
+      .summary { padding: 1.3rem 1.4rem; }
+      .toc ol { columns: 1; }
+      .nav-inner { padding: .7rem 1rem; gap: .4rem; }
+      .brand { font-size: 1.05rem; }
+      .nav-anchor { display: none; }
+      .nav-inner .btn { padding: .5rem .85rem; font-size: .88rem; }
+
+      .nav-toggle {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 2.2rem; height: 2.2rem; margin-right: -.3rem;
+        background: none; border: none; border-radius: 6px;
+        color: var(--text); cursor: pointer; flex: none;
+      }
+      .nav-toggle:hover { background: var(--bg-alt); }
+      .nav-toggle .ic { width: 1.1rem; height: 1.1rem; }
+      .nav-toggle .ic-close { display: none; }
+      .nav-toggle[aria-expanded="true"] .ic-open { display: none; }
+      .nav-toggle[aria-expanded="true"] .ic-close { display: block; }
+
+      .nav-menu.open {
+        display: flex; flex-direction: column; gap: .1rem;
+        position: absolute; top: 100%; left: 0; right: 0;
+        background: #faf9f6; border-bottom: 1px solid var(--border);
+        padding: .5rem 1rem 1rem;
+        box-shadow: 0 16px 28px rgba(15,23,42,.1);
+      }
+      .nav-menu .nav-link { padding: .75rem .5rem; font-size: .98rem; }
+    }
+    @media (max-width: 359px) {
+      .nav-login { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Icons: Font Awesome Free 6.4.0 by @fontawesome, https://fontawesome.com/license/free
+       (icons CC BY 4.0). Inlined so the page loads no icon font. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="i-receipt" viewBox="0 0 384 512"><path d="M14 2.2C22.5-1.7 32.5-.3 39.6 5.8L80 40.4 120.4 5.8c9-7.7 22.3-7.7 31.2 0L192 40.4 232.4 5.8c9-7.7 22.3-7.7 31.2 0L304 40.4 344.4 5.8c7.1-6.1 17.1-7.5 25.6-3.6s14 12.4 14 21.8V488c0 9.4-5.5 17.9-14 21.8s-18.5 2.5-25.6-3.6L304 471.6l-40.4 34.6c-9 7.7-22.3 7.7-31.2 0L192 471.6l-40.4 34.6c-9 7.7-22.3 7.7-31.2 0L80 471.6 39.6 506.2c-7.1 6.1-17.1 7.5-25.6 3.6S0 497.4 0 488V24C0 14.6 5.5 6.1 14 2.2zM96 144c-8.8 0-16 7.2-16 16s7.2 16 16 16H288c8.8 0 16-7.2 16-16s-7.2-16-16-16H96zM80 352c0 8.8 7.2 16 16 16H288c8.8 0 16-7.2 16-16s-7.2-16-16-16H96c-8.8 0-16 7.2-16 16zM96 240c-8.8 0-16 7.2-16 16s7.2 16 16 16H288c8.8 0 16-7.2 16-16s-7.2-16-16-16H96z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 448 512"><path d="M438.6 105.4c12.5 12.5 12.5 32.8 0 45.3l-256 256c-12.5 12.5-32.8 12.5-45.3 0l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L160 338.7 393.4 105.4c12.5-12.5 32.8-12.5 45.3 0z"/></symbol>
+    <symbol id="i-bars" viewBox="0 0 448 512"><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></symbol>
+    <symbol id="i-xmark" viewBox="0 0 384 512"><path d="M342.6 150.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L192 210.7 86.6 105.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3L146.7 256 41.4 361.4c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L192 301.3 297.4 406.6c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L237.3 256 342.6 150.6z"/></symbol>
+  </svg>
+
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="/"><svg class="ic" style="width:.75em" aria-hidden="true" focusable="false"><use href="#i-receipt"/></svg> Foodnance</a>
+      <div class="nav-spacer"></div>
+      <a class="nav-link nav-anchor" href="/#features">Features</a>
+      <a class="nav-link nav-anchor" href="/food-cost-calculator">Food cost calculator</a>
+      <a class="nav-link nav-anchor" href="/pricing">Pricing</a>
+      <a class="nav-link nav-anchor" href="/#faq">FAQ</a>
+      <a class="nav-link nav-login" href="/login">Log in</a>
+      <button class="nav-toggle" id="navToggle" type="button" aria-expanded="false" aria-controls="navMenu" aria-label="Open menu">
+        <svg class="ic ic-open" aria-hidden="true" focusable="false"><use href="#i-bars"/></svg>
+        <svg class="ic ic-close" aria-hidden="true" focusable="false"><use href="#i-xmark"/></svg>
+      </button>
+      <a class="btn btn-primary" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">Request access</a>
+    </div>
+    <nav class="nav-menu" id="navMenu" aria-label="Mobile">
+      <a class="nav-link" href="/#features">Features</a>
+      <a class="nav-link" href="/food-cost-calculator">Food cost calculator</a>
+      <a class="nav-link" href="/pricing">Pricing</a>
+      <a class="nav-link" href="/#faq">FAQ</a>
+      <a class="nav-link" href="/login">Log in</a>
+    </nav>
+  </header>
+
+  <script>
+    (function () {
+      var toggle = document.getElementById('navToggle');
+      var menu = document.getElementById('navMenu');
+      if (!toggle || !menu) return;
+      function close() { menu.classList.remove('open'); toggle.setAttribute('aria-expanded', 'false'); }
+      function open() { menu.classList.add('open'); toggle.setAttribute('aria-expanded', 'true'); }
+      toggle.addEventListener('click', function () {
+        if (menu.classList.contains('open')) close(); else open();
+      });
+      menu.addEventListener('click', function (e) { if (e.target.tagName === 'A') close(); });
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+      document.addEventListener('click', function (e) {
+        if (!menu.classList.contains('open')) return;
+        if (!menu.contains(e.target) && !toggle.contains(e.target)) close();
+      });
+      window.addEventListener('resize', function () { if (window.innerWidth > 640) close(); });
+    })();
+  </script>
+
+  <main>
+  <!-- ══ HERO ══
+       Source of truth: docs/TERMS-OF-SERVICE-DRAFT.md (Part 1). Change the draft
+       first, then this page, and bump "Last updated". §18 governing law is
+       deliberately left out until a lawyer settles it (see the draft). -->
+  <div class="hero wrap">
+    <div class="eyebrow"><span class="rule"></span><span class="kicker">Legal</span></div>
+    <h1>Terms of Service</h1>
+    <p class="sub">The agreement between Foodnance and the businesses that use it. Written to be read, not skimmed past.</p>
+
+    <div class="summary prose">
+      <h2>The short version</h2>
+      <ul>
+        <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> Foodnance is software for businesses. Your data is yours.</li>
+        <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> Invoices and recipes you upload are read by AI (Anthropic, in the United States). Anything written on them is sent too.</li>
+        <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> AI makes mistakes. Check what it reads before you rely on it.</li>
+        <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> Costs and reports are estimates for running your kitchen, not accounting or tax advice.</li>
+        <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> 14-day free trial, then monthly. Cancel any time.</li>
+      </ul>
+      <p class="summary-note">This summary helps you find your way. The full terms below are what apply.</p>
+    </div>
+    <p class="updated">Last updated: 26 September 2026</p>
+  </div>
+
+  <!-- ══ TERMS ══ -->
+  <div class="policy prose">
+    <nav class="toc" aria-label="Contents">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#s1">Who these terms are between</a></li>
+        <li><a href="#s2">What the Service is</a></li>
+        <li><a href="#s3">Accounts, organizations and roles</a></li>
+        <li><a href="#s4">Plans, fees and billing</a></li>
+        <li><a href="#s5">Your data, and who is responsible for it</a></li>
+        <li><a href="#s6">Automated processing, and third parties</a></li>
+        <li><a href="#s7">Review features</a></li>
+        <li><a href="#s8">Estimates, reports, and no professional advice</a></li>
+        <li><a href="#s9">Acceptable use</a></li>
+        <li><a href="#s10">Availability</a></li>
+        <li><a href="#s11">Security, privacy and retention</a></li>
+        <li><a href="#s12">Suspension and termination</a></li>
+        <li><a href="#s13">Intellectual property</a></li>
+        <li><a href="#s14">Warranty disclaimer</a></li>
+        <li><a href="#s15">Limitation of liability</a></li>
+        <li><a href="#s16">Indemnity</a></li>
+        <li><a href="#s17">Changes to these Terms</a></li>
+        <li><a href="#s18">General</a></li>
+        <li><a href="#s19">Contact</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="s1">1. Who these terms are between</h2>
+    <p>These Terms of Service (&ldquo;Terms&rdquo;) are between <strong>Simone Isonni</strong>, a sole proprietor resident in Japan, doing business as <strong>Foodnance</strong> (&ldquo;we&rdquo;, &ldquo;us&rdquo;), and the business that subscribes to Foodnance (&ldquo;Customer&rdquo;, &ldquo;you&rdquo;).</p>
+    <p>Foodnance is business software sold to businesses. It is <strong>not</strong> a consumer product, and you confirm you are subscribing for business purposes. Individuals who use the Service on your behalf (&ldquo;Users&rdquo;) do so under your account and under these Terms; you are responsible for their acts and omissions.</p>
+    <p>By creating an organization, accepting an invitation, or using the Service, you agree to these Terms. If you do not agree, do not use the Service.</p>
+
+    <h2 id="s2">2. What the Service is</h2>
+    <p>Foodnance is a hosted back-office application for food businesses. Depending on your plan it may include: supplier and product records, automated extraction of data from invoice documents, recipe and finished-product costing, inventory tracking, stock takes, import of point-of-sale sales data, profit-and-loss reporting, staff records and certification tracking, and file storage.</p>
+    <p>The Service is a <strong>record-keeping and estimation tool</strong>. It is not an accounting system, a system of record for tax purposes, a payment system, a food-safety compliance system, or a substitute for professional advice. See section 8.</p>
+
+    <h2 id="s3">3. Accounts, organizations and roles</h2>
+    <p>Your data lives in an organization. Access is by role, and roles carry different powers — including, where enabled, the power to approve invoices and thereby commit purchase data to your records. <strong>You are responsible for deciding which of your Users hold which role</strong>, and for the consequences of that decision.</p>
+    <p>You must keep credentials confidential and tell us promptly of any suspected unauthorized access. You are responsible for all activity under your account.</p>
+    <p>We may maintain administrative accounts with access to your organization for support, billing, and operating the Service. See section 6.</p>
+
+    <h2 id="s4">4. Plans, fees and billing</h2>
+    <p>Plans, included features and usage limits are as described at the time you subscribe. Feature availability differs by plan; we may change what a plan includes on <strong>30 days&rsquo;</strong> notice, but will not remove a materially significant feature from your current paid term without notice.</p>
+    <p><strong>Usage limits.</strong> Some features are metered — for example, automated invoice extraction is limited per organization per calendar month on lower plans. Reaching a limit blocks further use of that feature until the next period; it does not affect data you have already saved.</p>
+    <p>Fees are billed <strong>monthly, in advance</strong>, in Canadian dollars (CAD). Applicable taxes (e.g. GST/HST for Canadian customers) are calculated and added at checkout, not included in the listed price. Late payment may result in suspension under section 12.</p>
+    <p><strong>Reseller.</strong> Our order process is conducted by our online reseller Paddle.com. Paddle.com is the Merchant of Record for all our orders, and it handles payment, invoicing and sales tax.</p>
+    <p><strong>Free trial.</strong> A new subscription starts with a <strong>14-day free trial</strong>. A payment card is required to start it, but nothing is charged during the trial. If you cancel before the trial ends you are not charged. If you do not, the first monthly fee is charged when the trial ends.</p>
+    <p><strong>First payment.</strong> If you ask at <a href="mailto:billing@foodnance.com">billing@foodnance.com</a> within <strong>7 days</strong> of the first charge after your trial, and no invoices have been uploaded to your organization since the trial ended, we will refund that payment in full and close the account.</p>
+    <p><strong>Refunds.</strong> Apart from the first payment as above, fees already paid are non-refundable. Cancelling stops future billing; it does not unwind the period you are currently in — you keep full access through the end of it (section 12). We do not offer refunds for dissatisfaction, non-use, or a decision to switch products.</p>
+    <p><strong>Billing errors are not refund requests.</strong> If we charge you the wrong amount, charge you twice for the same period, or charge you after a cancellation should already have taken effect, that is our mistake to fix, not a claim you have to argue for. Tell us at <a href="mailto:billing@foodnance.com">billing@foodnance.com</a> and we will correct the charge — refund the erroneous amount to the original payment method — within <strong>7 business days</strong>. This is a correction, not an exception to the no-refund rule above, and it does not require you to show the Service was unsatisfactory.</p>
+    <p><strong>Downgrades.</strong> A plan downgrade takes effect at your next billing date; we do not refund the difference for the period already billed at the higher rate.</p>
+    <p class="muted">Our <a href="/refund-policy">Refund Policy</a> explains the same rules in plain terms.</p>
+
+    <h2 id="s5">5. Your data, and who is responsible for it</h2>
+    <p><strong>&ldquo;Customer Data&rdquo;</strong> means everything you or your Users put into the Service or that the Service derives from it: uploaded documents and images, supplier and product records, prices, quantities, recipes, counts, sales imports, staff records, and all figures computed from them.</p>
+    <p>Customer Data is yours. You grant us a licence to host, process, transmit, display and back it up solely to provide, secure and support the Service, and to produce aggregated, de-identified statistics that do not identify you or any individual.</p>
+    <p><strong>The content and accuracy of Customer Data are your sole responsibility.</strong> This applies however the data entered the Service — typed by hand, extracted automatically from a document, imported from a point-of-sale export, or produced by any automated feature. <strong>It is solely your responsibility to ensure that data in the Service is accurate and complete before you rely on it</strong>, including before you approve an invoice, submit a stock take, price a menu, place an order, pay a supplier, or file anything with any authority.</p>
+    <p>You confirm you have the right to upload everything you upload, including supplier documents and any personal information about your staff, and that you have any consents required for us to process it.</p>
+
+    <h2 id="s6">6. Automated processing, and third parties</h2>
+    <p><strong>Automated extraction is inherently imperfect.</strong> The Service uses artificial intelligence, optical character recognition and heuristic matching to read documents and classify data. These technologies <strong>inherently make errors</strong> — misreading figures, quantities, units, pack sizes, dates and vendor names; assigning a product to the wrong category; matching a line to the wrong product; or omitting data entirely. Some errors are arithmetically self-consistent and will not be flagged by any check the Service performs. <strong>Output of automated processing is a suggestion for you to verify, never a verified result.</strong></p>
+    <p><strong>Third-party processors.</strong> To provide the Service we send Customer Data to third-party providers, including Cloudflare (hosting and storage) and <strong>Anthropic</strong>, an artificial-intelligence provider in the United States to which the images and text of the invoices and recipes you upload are transmitted so they can be read. Anything written on those documents, including any personal information such as a supplier contact&rsquo;s name, is sent with them. We select these providers with reasonable care and remain responsible for our own obligations, but we do not control them and give no warranty on their behalf. The current list of providers is in our Privacy Policy.</p>
+    <p><strong>Point-of-sale and other imports.</strong> Where you import data from a third-party system, the accuracy and completeness of that export is that provider&rsquo;s and your responsibility, not ours.</p>
+
+    <h2 id="s7">7. Review features — a convenience, not a verification</h2>
+    <p>The Service may present data for review before it is committed to your records, and may offer a step in which we, or a User you designate, examine extracted data before approval.</p>
+    <p>Any such review is a <strong>convenience feature</strong>. It is not an audit, a verification, an assurance engagement, or a professional opinion. It does not check that prices charged are correct, that goods were delivered, that a document is genuine, that an amount is owed, or that you should pay it. <strong>No review we perform transfers responsibility for the accuracy of Customer Data to us</strong>, and nothing in these Terms obliges us to review any particular document or to do so within any period of time. Any turnaround time we describe is a target, not a commitment.</p>
+    <p><strong>Automatic approval.</strong> If you enable automatic approval, documents meeting the conditions you configure are committed to your records <strong>without review by you or by us</strong>. You choose those conditions and you accept the consequences of data committed under them. We may exclude categories of document from automatic approval at our discretion; we are under no obligation to detect any particular class of error.</p>
+
+    <h2 id="s8">8. Estimates, reports, and no professional advice</h2>
+    <p>Costs, margins, valuations and profit-and-loss figures produced by the Service are <strong>management estimates derived from Customer Data</strong>, calculated by documented methods with known simplifying assumptions.</p>
+    <p>You acknowledge in particular that:</p>
+    <ul>
+      <li>Costs are <strong>computed when displayed, from data current at that moment.</strong> They are not frozen at a point in time. Correcting an old invoice, voiding a document, or adding new purchase history <strong>can change figures for a period you have already reviewed, reported, or acted on.</strong></li>
+      <li>Where units of measure cannot be reconciled, or required data is missing, a figure may be shown as unavailable or may exclude the affected item.</li>
+      <li>Figures depend on your operational discipline — counts performed, production recorded, sales imported. Incomplete operational data produces figures that are wrong in ways the Service cannot detect and will not warn you about.</li>
+    </ul>
+    <p><strong>The Service does not provide accounting, bookkeeping, tax, legal, financial, employment, or food-safety advice.</strong> Its output is not a financial statement and is not prepared to any accounting or assurance standard. Do not use it as the basis of a tax filing, a statutory return, a regulatory submission, or a financing decision without independent professional verification. Certification and staff-record features are a reminder aid; <strong>you remain solely responsible for your regulatory and employment compliance.</strong></p>
+
+    <h2 id="s9">9. Acceptable use</h2>
+    <p>You will not: use the Service unlawfully; upload malicious code, or content you have no right to upload; attempt to access another customer&rsquo;s data; probe, scan or test the security of the Service other than under a written authorization from us; reverse engineer or attempt to derive source code, except to the extent that restriction is unenforceable by law; resell or provide the Service to a third party except your own affiliated locations; use the Service to build a competing product; or use automated means to extract data at a volume that degrades the Service for others.</p>
+
+    <h2 id="s10">10. Availability</h2>
+    <p>We aim to keep the Service available and will make commercially reasonable efforts to do so, but the Service is provided without any uptime commitment unless we have agreed one in writing. It may be unavailable for maintenance, for reasons attributable to a third-party provider, or for reasons beyond our reasonable control.</p>
+    <p>We may modify, add or remove features. We will not knowingly make a change that destroys Customer Data without notice and a means to obtain a copy of it.</p>
+
+    <h2 id="s11">11. Security, privacy and retention</h2>
+    <p>We apply commercially reasonable technical and organizational measures to protect Customer Data, including tenant separation, access controls and encryption in transit. <strong>No system is perfectly secure and we do not warrant that Customer Data cannot be accessed by unauthorized means.</strong></p>
+    <p>Our handling of personal information is described in our Privacy Policy (foodnance.com/privacy), which forms part of these Terms. Personal information about your staff is processed on your instructions and for your purposes.</p>
+    <p><strong>Export and retention.</strong> While your account is active you may ask us for a copy of your Customer Data by emailing <a href="mailto:hello@foodnance.com">hello@foodnance.com</a>. On termination we retain Customer Data for <strong>30 days</strong> so you can obtain a copy, after which we may permanently delete it. Backups may persist for a further period before rotation removes them. We may retain data longer where the law requires it.</p>
+
+    <h2 id="s12">12. Suspension, termination and account states</h2>
+    <p>You may cancel at any time, effective at the end of your current billing period. See section 4 for the refund position.</p>
+    <p>We may <strong>suspend</strong> your account, restricting it to read-only access, for non-payment or for breach of section 9. Suspension is reversible; your data is retained and remains visible to you.</p>
+    <p>We may <strong>terminate</strong> the relationship for material breach that is not remedied within <strong>30 days</strong> of notice, for repeated or serious breach of section 9, or if you become insolvent. On termination access to the Service ends and section 11 retention applies.</p>
+    <p>We may terminate for convenience on <strong>14 days&rsquo;</strong> notice with a <strong>full refund of your most recent monthly payment</strong> — not prorated to the days remaining. Your data is retained for 30 days after termination so you can obtain a copy (section 11).</p>
+
+    <h2 id="s13">13. Intellectual property</h2>
+    <p>We own the Service, its software, design and documentation, and all improvements to it. You own Customer Data. Feedback you give us may be used freely and without obligation.</p>
+
+    <h2 id="s14">14. Warranty disclaimer</h2>
+    <p><strong>THE SERVICE IS PROVIDED &ldquo;AS IS&rdquo; AND &ldquo;AS AVAILABLE&rdquo;. TO THE MAXIMUM EXTENT PERMITTED BY LAW WE DISCLAIM ALL WARRANTIES, EXPRESS, IMPLIED, STATUTORY OR OTHERWISE, INCLUDING ANY IMPLIED WARRANTY OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, AND ANY WARRANTY OF ACCURACY, RELIABILITY, COMPLETENESS OR UNINTERRUPTED OPERATION. WE DO NOT WARRANT THAT THE SERVICE, ITS REPORTS OR ITS EXTRACTED DATA ARE COMPLETE OR ERROR-FREE.</strong></p>
+    <p>Some jurisdictions do not allow the exclusion of certain warranties; to that extent this section applies only as far as the law permits.</p>
+
+    <h2 id="s15">15. Limitation of liability</h2>
+    <p>To the maximum extent permitted by law:</p>
+    <p>Neither party is liable for indirect, incidental, special, consequential or punitive damages, or for lost profits, lost revenue, lost savings, loss of goodwill, spoiled or wasted inventory, overpayment to a supplier, mispriced menu items, or business interruption — <strong>even if advised of the possibility.</strong></p>
+    <p><strong>Our total aggregate liability for all claims arising out of or related to these Terms or the Service will not exceed one hundred Canadian dollars (CAD $100).</strong></p>
+    <p>These limits do not apply to: your obligation to pay fees; either party&rsquo;s liability for fraud, fraudulent misrepresentation, death or personal injury caused by negligence; or anything else that cannot be limited by law.</p>
+    <p><strong>These limits are a fundamental basis of the bargain</strong> and reflect the price of the Service. Without them the Service would not be offered at this price.</p>
+
+    <h2 id="s16">16. Indemnity</h2>
+    <p>You will defend and indemnify us against third-party claims arising from Customer Data, from your use of the Service in breach of these Terms, or from your reliance on Service output in dealings with a supplier, employee, customer or authority.</p>
+
+    <h2 id="s17">17. Changes to these Terms</h2>
+    <p>We may change these Terms. For material changes we will give at least <strong>30 days&rsquo;</strong> notice by email or in-app notice. Continuing to use the Service after the change takes effect means you accept it; if you do not, you may cancel and receive a full refund of your most recent monthly payment.</p>
+
+    <h2 id="s18">18. General</h2>
+    <p>These Terms, together with our Privacy Policy and <a href="/refund-policy">Refund Policy</a>, are the entire agreement between us about the Service. You may not assign these Terms without our written consent; we may assign them as part of a sale of the business. If any part of these Terms is found unenforceable, the rest remains in effect. Not enforcing a right straight away does not waive it. We send notices by email to the address on your account.</p>
+
+    <h2 id="s19">19. Contact</h2>
+    <p>Foodnance is operated by Simone Isonni, a sole proprietor in Japan. Questions about these Terms: <a href="mailto:hello@foodnance.com">hello@foodnance.com</a>. Questions about a charge: <a href="mailto:billing@foodnance.com">billing@foodnance.com</a>.</p>
+  </div>
+  </main>
+
+  <footer>
+    <div class="wrap foot-inner">
+      <a class="brand" href="/" style="font-size:1rem"><svg class="ic" style="width:.75em" aria-hidden="true" focusable="false"><use href="#i-receipt"/></svg> Foodnance</a>
+      <div class="nav-spacer"></div>
+      <span>&copy; 2026 Foodnance</span>
+      <a href="/">Home</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/food-cost-calculator">Food cost calculator</a>
+      <a href="/login">Log in</a>
+      <a href="/refund-policy">Refund policy</a>
+      <a href="/terms">Terms</a>
+      <a href="mailto:hello@foodnance.com">Contact</a>
+    </div>
+  </footer>
+
+  <script src="/static/env-banner.js?v=20260807-2"></script>
+</body>
+</html>

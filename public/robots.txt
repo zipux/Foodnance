@@ -1,8 +1,9 @@
 # Foodnance — crawler policy
 #
 # LAUNCHED 2026-09-23. index.html, pricing.html, food-cost-calculator.html and
-# refund-policy.html had their `noindex` meta tag removed together — those
-# four are the only pages meant to be findable; see sitemap.xml. Still to do,
+# refund-policy.html had their `noindex` meta tag removed together; terms.html
+# joined them 2026-09-26 — those five are the only pages meant to be findable;
+# see sitemap.xml. Still to do,
 # outside this repo: verify the domain and submit the sitemap in Google
 # Search Console and Bing Webmaster Tools.
 #

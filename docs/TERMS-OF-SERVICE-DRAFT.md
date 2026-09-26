@@ -18,11 +18,9 @@
 
 ### 1. Who these terms are between
 
-These Terms of Service ("Terms") are between `[LEGAL/TRADE NAME]` ("we", "us"),
-a sole proprietorship operated by an individual resident in Japan, and the
-business that subscribes to Foodnance ("Customer", "you"). `[Japan sole-proprietor
-detail: does the operator hold a registered kojin jigyo trade name to put here,
-or does this contract in the operator's own personal name?]`
+These Terms of Service ("Terms") are between **Simone Isonni**, a sole
+proprietor resident in Japan, doing business as **Foodnance** ("we", "us"), and
+the business that subscribes to Foodnance ("Customer", "you").
 
 Foodnance is business software sold to businesses. It is **not** a consumer
 product, and you confirm you are subscribing for business purposes. Individuals
@@ -59,11 +57,9 @@ support, billing, and operating the Service. See section 6.
 
 ### 4. Plans, fees and billing
 
-`[PLACEHOLDER — no billing system is built as of 2026-08-09.]`
-
 Plans, included features and usage limits are as described at the time you
 subscribe. Feature availability differs by plan; we may change what a plan
-includes on `[NOTICE PERIOD]` notice, but will not remove a materially
+includes on **30 days'** notice, but will not remove a materially
 significant feature from your current paid term without notice.
 
 **Usage limits.** Some features are metered — for example, automated invoice
@@ -71,15 +67,29 @@ extraction is limited per organization per calendar month on lower plans.
 Reaching a limit blocks further use of that feature until the next period; it
 does not affect data you have already saved.
 
-Fees are billed **monthly, in advance**, in `[CAD, since Canada is the launch
-market — revisit once selling outside Canada]`. Applicable taxes (e.g. GST/HST
+Fees are billed **monthly, in advance**, in Canadian dollars (CAD). Applicable taxes (e.g. GST/HST
 for Canadian customers) are calculated and added at checkout, not included in
 the listed price. Late payment may result in suspension under section 12.
 
-**Refunds.** Fees already paid are non-refundable. Cancelling stops future
-billing; it does not unwind the period you are currently in — you keep full
-access through the end of it (section 12). We do not offer refunds for
-dissatisfaction, non-use, or a decision to switch products.
+**Reseller.** Our order process is conducted by our online reseller
+Paddle.com. Paddle.com is the Merchant of Record for all our orders, and it
+handles payment, invoicing and sales tax.
+
+**Free trial.** A new subscription starts with a **14-day free trial**. A payment
+card is required to start it, but nothing is charged during the trial. If you
+cancel before the trial ends you are not charged. If you do not, the first
+monthly fee is charged when the trial ends.
+
+**First payment.** If you ask at `billing@foodnance.com` within **7 days** of the
+first charge after your trial, and no invoices have been uploaded to your
+organization since the trial ended, we will refund that payment in full and close
+the account.
+
+**Refunds.** Apart from the first payment as above, fees already paid are
+non-refundable. Cancelling stops future billing; it does not unwind the period
+you are currently in — you keep full access through the end of it (section 12).
+We do not offer refunds for dissatisfaction, non-use, or a decision to switch
+products.
 
 **Billing errors are not refund requests.** If we charge you the wrong amount,
 charge you twice for the same period, or charge you after a cancellation should
@@ -92,6 +102,11 @@ above, and it does not require you to show the Service was unsatisfactory.
 **Downgrades.** A plan downgrade takes effect at your next billing date; we do
 not refund the difference for the period already billed at the higher rate.
 
+> **Updated 2026-09-26:** 14-day trial (card up front) and the first-payment
+> refund added, matching the live `public/refund-policy.html`. The Paddle
+> wording is Paddle's own suggested text: confirm it against Paddle's current
+> guidance when the account is set up.
+>
 > **Resolved 2026-09-23.** This follows MarginEdge, MarketMan and Meez, who all
 > land on the same position: no refund for the period paid, access continues to
 > its end, cancellation is forward-only. (WISK is the outlier — a 60-day
@@ -139,12 +154,14 @@ will not be flagged by any check the Service performs. **Output of automated
 processing is a suggestion for you to verify, never a verified result.**
 
 **Third-party processors.** To provide the Service we send Customer Data to
-third-party providers, including a cloud hosting and storage provider and a
-third-party artificial-intelligence provider to which document images and text
-are transmitted for extraction. We select these providers with reasonable care
-and remain responsible for our own obligations, but we do not control them and
-give no warranty on their behalf. `[A processor list must be maintained and
-published in the Privacy Policy.]`
+third-party providers, including Cloudflare (hosting and storage) and
+**Anthropic**, an artificial-intelligence provider in the United States to which
+the images and text of the invoices and recipes you upload are transmitted so
+they can be read. Anything written on those documents, including any personal
+information such as a supplier contact's name, is sent with them. We select these
+providers with reasonable care and remain responsible for our own obligations,
+but we do not control them and give no warranty on their behalf. The current
+list of providers is in our Privacy Policy.
 
 **Point-of-sale and other imports.** Where you import data from a third-party
 system, the accuracy and completeness of that export is that provider's and your
@@ -152,6 +169,10 @@ responsibility, not ours.
 
 ### 7. Review features — a convenience, not a verification
 
+> **Kept, 2026-09-26 (Simone): to be discussed further.** Note that no review
+> service or auto-approval exists in the app today (checked 2026-09-26), and the
+> marketing site says the customer checks the lines themselves.
+>
 > **⚠️ This is the clause to argue about with the lawyer.** MarginEdge and
 > MarketMan say *nothing* on this subject in their terms; they sell human review
 > in marketing and help documentation, where it creates no contractual duty. The
@@ -223,9 +244,7 @@ We aim to keep the Service available and will make commercially reasonable
 efforts to do so, but the Service is provided without any uptime commitment
 unless we have agreed one in writing. It may be unavailable for maintenance,
 for reasons attributable to a third-party provider, or for reasons beyond our
-reasonable control. `[If a Service Level Agreement is ever offered, it goes in a
-separate schedule with a service-credit remedy — never in the body of these
-Terms.]`
+reasonable control.
 
 We may modify, add or remove features. We will not knowingly make a change that
 destroys Customer Data without notice and a means to export it.
@@ -237,15 +256,14 @@ Customer Data, including tenant separation, access controls and encryption in
 transit. **No system is perfectly secure and we do not warrant that Customer Data
 cannot be accessed by unauthorized means.**
 
-Our handling of personal information is described in the Privacy Policy at
-`[URL — DOES NOT EXIST YET]`, which forms part of these Terms. Personal
+Our handling of personal information is described in our Privacy Policy
+(foodnance.com/privacy), which forms part of these Terms. Personal
 information about your staff is processed on your instructions and for your
 purposes.
 
-**Export and retention.** While your account is active you may export your
-Customer Data through the features provided `[export functionality must exist —
-see Part 2]`. On termination we retain Customer Data for `[RETENTION PERIOD —
-recommend 30 days]` so it can be exported, after which we may permanently delete
+**Export and retention.** While your account is active you may ask us for a copy
+of your Customer Data by emailing hello@foodnance.com. On termination we retain
+Customer Data for **30 days** so you can obtain a copy, after which we may permanently delete
 it. Backups may persist for a further period before rotation removes them. We
 may retain data longer where the law requires it.
 
@@ -259,12 +277,14 @@ non-payment or for breach of section 9. Suspension is reversible; your data is
 retained and remains visible to you.
 
 We may **terminate** the relationship for material breach that is not remedied
-within `[30]` days of notice, for repeated or serious breach of section 9, or if
+within **30 days** of notice, for repeated or serious breach of section 9, or if
 you become insolvent. On termination access to the Service ends and section 11
 retention applies.
 
-We may terminate for convenience on `[60]` days' notice with a **full refund of
-your most recent monthly payment** — not prorated to the days remaining.
+We may terminate for convenience on **14 days'** notice with a **full refund of
+your most recent monthly payment** — not prorated to the days remaining. Your
+data is retained for 30 days after termination so you can obtain a copy
+(section 11).
 
 ### 13. Intellectual property
 
@@ -294,10 +314,14 @@ goodwill, spoiled or wasted inventory, overpayment to a supplier, mispriced menu
 items, or business interruption — **even if advised of the possibility.**
 
 **Our total aggregate liability for all claims arising out of or related to these
-Terms or the Service will not exceed `[the total fees you actually paid us in the
-twelve (12) months immediately preceding the event giving rise to the claim]`.**
+Terms or the Service will not exceed one hundred Canadian dollars (CAD $100).**
 
-> **Decision required.** MarginEdge caps at a flat **$100**; MarketMan at
+> **Decided 2026-09-26 (Simone): flat $100.** Flag for the lawyer: the note
+> below is why a flat cap is the riskiest choice for enforceability. A
+> middle ground, if the lawyer agrees, is "the greater of $100 or the fees paid
+> in the preceding 12 months".
+>
+> **Original note.** MarginEdge caps at a flat **$100**; MarketMan at
 > **12 months of fees**. The 12-month formula is the industry standard and far
 > more defensible in Canada than a flat $100 against a small vendor. A flat cap
 > that is trivially small relative to the fee is the kind of term a court is most
@@ -319,14 +343,14 @@ authority.
 
 ### 17. Changes to these Terms
 
-We may change these Terms. For material changes we will give at least `[30]`
+We may change these Terms. For material changes we will give at least **30**
 days' notice by email or in-app notice. Continuing to use the Service after the
 change takes effect means you accept it; if you do not, you may cancel and
 receive a full refund of your most recent monthly payment.
 
 ### 18. General
 
-**Governing law / courts:** `[OPEN — bigger than a bracket now. The operator is
+**Governing law / courts:** `[OPEN — deferred 2026-09-26 by Simone; pages may go live with this bracketed, lawyer to settle before relying on the Terms. — bigger than a bracket now. The operator is
 a Japan resident selling worldwide, starting with Canada. Picking Japanese law
 is natural for the seller but unfamiliar and harder to enforce for a Canadian
 restaurant customer; picking a Canadian province's law is the opposite trade —
@@ -358,7 +382,7 @@ software must do, and roughly half of it does not exist today.
 | §3 roles | Roles must genuinely gate approval and destructive actions server-side | ⚠️ roles exist; approval doesn't |
 | §4 metering | Usage limits must block cleanly and say so, never fail silently | ✅ invoice cap works this way |
 | §5 accuracy is yours | The approval screen must state plainly what is and is not being checked | ❌ |
-| §6 AI errors | Disclose that documents are sent to a third-party AI provider — **before** the first upload, not buried | ❌ nothing says this anywhere |
+| §6 AI errors | Disclose that documents are sent to a third-party AI provider — **before** the first upload, not buried | ❌ nothing says this anywhere. **Decided 2026-09-26 (Simone): no upload-screen notice; disclosure goes in the Terms + Privacy Policy, accepted before signup** (the acceptance record, §1, becomes the thing that carries it) |
 | §6 processors | Maintain a public sub-processor list | ❌ |
 | §7 review | Auto-approval must genuinely bypass both parties, and the rules must be the customer's own configuration, recorded | ❌ designed, unbuilt |
 | §7 no duty | Never state a turnaround time in the product that we cannot keep | — |
@@ -391,16 +415,16 @@ customers is to freeze a valuation when a period is reported.
 
 ## Part 3 — Decisions only you can make
 
-1. **Legal entity and province — answered 2026-09-23, changes the shape of the
-   doc.** Sole proprietorship, operator resident in Japan, selling worldwide
+1. **Legal entity — name answered 2026-09-26: Simone Isonni, doing business as
+   Foodnance (no registered trade name).** Earlier, 2026-09-23: Sole proprietorship, operator resident in Japan, selling worldwide
    starting with Canada. Not a Canadian entity at all — §1 updated to say so,
    but §18 (governing law/courts) is now an open cross-border question, not a
    fill-in-the-bracket one. Still need: the trade/registered name to put in
    §1, and whether GST/HST needs collecting (Canada requires non-resident
    vendors of digital services to register once sales to Canadian customers
    cross ~$30,000 CAD over 12 months — below that, nothing to collect yet).
-2. **The liability cap.** Recommend 12 months of fees, not a flat $100.
-3. **Whether §7 exists at all.** Include the review disclaimer, or follow the
+2. **The liability cap — decided 2026-09-26: flat CAD $100** (the draft had recommended 12 months of fees; lawyer to confirm).
+3. **Whether §7 exists at all — kept for now (2026-09-26), to discuss.** Include the review disclaimer, or follow the
    industry and say nothing? Lawyer's call, and it depends on how strongly the
    marketing site promises a human check.
 4. **Retention period after termination.** Recommend 30 days, then purge.
@@ -409,8 +433,10 @@ customers is to freeze a valuation when a period is reported.
    within 7 business days to `billing@foodnance.com`, full refund of the most
    recent payment (not prorated) if Foodnance ends the relationship for
    convenience or changes these Terms in a way you don't accept.
-6. **Billing model.** Monthly billing decided (see #5); the payment processor
-   itself still isn't chosen/built.
+6. **Billing model.** Monthly billing with a 14-day trial, card up front. Processor:
+   Paddle, as Merchant of Record (chosen 2026-09-26, not built). As Merchant of
+   Record, Paddle collects GST/HST, which likely settles most of #1's tax question;
+   confirm the Japanese side with an accountant.
 
 ## Part 4 — What a lawyer must fix, not you
 
