@@ -672,21 +672,34 @@ function renderEntriesTable(genericId) {
   colTh('entriesExpiryCol'); colTh('entriesInvoiceCol');
 
   // latestCpu = most recent entry (first in newest-first order)
-  const latestCpu = allSorted[0]
-    ? ((allSorted[0].cost_per_unit != null && allSorted[0].cost_per_unit > 0)
-        ? allSorted[0].cost_per_unit
-        : (entryPackQty(allSorted[0]) > 0 ? allSorted[0].cost / entryPackQty(allSorted[0]) : allSorted[0].cost))
-    : null;
+  const entryCpu = e => (e.cost_per_unit != null && e.cost_per_unit > 0)
+    ? e.cost_per_unit
+    : (entryPackQty(e) > 0 ? e.cost / entryPackQty(e) : e.cost);
+  const latestEntry = allSorted[0] || null;
+  const latestCpu   = latestEntry ? entryCpu(latestEntry) : null;
+  const latestUnit  = latestEntry ? entryPackUnit(latestEntry) : '';
+  const gProd       = allGeneric.find(x => x.id === genericId);
+  const avgWeight   = gProd ? parseFloat(gProd.avg_weight_per_unit) || null : null;
 
   const visible = allSorted.slice(0, _entriesShownCount);
 
   tbody.innerHTML = visible.map(e => {
-    const cpu      = (e.cost_per_unit != null && e.cost_per_unit > 0)
-      ? e.cost_per_unit
-      : (entryPackQty(e) > 0 ? e.cost / entryPackQty(e) : e.cost);
-    const variance  = latestCpu && latestCpu > 0 ? ((cpu - latestCpu) / latestCpu * 100) : 0;
+    const cpu      = entryCpu(e);
+    // Each entry's price is in its own pack unit ($/lb, $/g…), so bring it into
+    // the latest entry's unit before comparing. Comparing the raw figures read a
+    // $4.85/lb purchase against $0.0109/g as +44,000%. A unit that can't be
+    // bridged shows "—" rather than a made-up number.
+    let variance = null;
+    let varTitle = '';
+    if (latestCpu && latestCpu > 0) {
+      const conv = _convertUnitCost(cpu, entryPackUnit(e), latestUnit, avgWeight);
+      if (conv.error) varTitle = `Can't compare: bought by the ${entryPackUnit(e) || 'unit'}, latest by the ${latestUnit || 'unit'}`;
+      else variance = (conv.cost - latestCpu) / latestCpu * 100;
+    } else {
+      variance = 0;
+    }
     const varClass  = variance > 0 ? 'color:#dc2626' : variance < 0 ? 'color:#16a34a' : 'color:var(--text-muted)';
-    const varText   = variance === 0 ? '0.0%' : (variance > 0 ? '+' : '') + variance.toFixed(1) + '%';
+    const varText   = variance === null ? '—' : variance === 0 ? '0.0%' : (variance > 0 ? '+' : '') + variance.toFixed(1) + '%';
     const daysLeft  = e.expiry_date ? Math.floor((new Date(e.expiry_date) - new Date().setHours(0,0,0,0)) / 86400000) : null;
 
     return `
@@ -709,7 +722,7 @@ function renderEntriesTable(genericId) {
                 title="View attached invoice"><i class="fas fa-eye"></i></button>`
             : ''}
         </td>`}
-        <td style="font-weight:600;font-size:.82rem;${varClass}">${varText}</td>
+        <td style="font-weight:600;font-size:.82rem;${varClass}"${varTitle ? ` title="${esc(varTitle)}"` : ''}>${varText}</td>
         <td style="white-space:nowrap">
           <button class="btn btn-primary btn-icon" onclick="openEditEntryForm('${esc(e.id)}')" title="Edit"><i class="fas fa-pen"></i></button>
           <button class="btn btn-danger btn-icon" onclick="deleteEntry('${esc(e.id)}')" title="Delete"><i class="fas fa-trash"></i></button>
