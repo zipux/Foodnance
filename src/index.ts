@@ -2079,12 +2079,12 @@ Foodnance`
 // fallback text working.
 const ACCESS_REQUESTS_PER_HOUR = 20
 const ACCESS_REQUESTS_PER_EMAIL_PER_DAY = 3
-const ACCESS_REQUEST_PLAN_LABELS: Record<string, string> = { essential: 'Essentials', pro: 'Pro' }
+const ACCESS_REQUEST_PLAN_LABELS: Record<string, string> = { essential: 'Essentials', pro: 'Pro', unsure: 'Not sure yet' }
 
 function sendAccessRequestNotification(env: Bindings, r: {
   name: string; email: string; businessName: string; businessType: string; invoicesPerWeek: string; sourcePage: string; message: string; plan: string
 }) {
-  const planLabel = ACCESS_REQUEST_PLAN_LABELS[r.plan] || 'Not sure yet'
+  const planLabel = ACCESS_REQUEST_PLAN_LABELS[r.plan] || 'Not given'
   const lines = [
     `Plan: ${planLabel}`,
     `Name: ${r.name}`,
@@ -2108,7 +2108,9 @@ function sendAccessRequestNotification(env: Bindings, r: {
 
 // POST /api/interest
 //   { name, email, business_name, business_type?, invoices_per_week?, message?, plan?, source_page?, website? } — PUBLIC.
-// `plan` is 'essential' | 'pro'; anything else (incl. "Not sure yet") is stored as ''.
+// `plan` is 'essential' | 'pro' | 'unsure'. The form requires one, but the route
+// doesn't: a missing or unknown value is stored as '' ("Not given") rather than
+// refused, so a visitor on a cached older form still gets through.
 // `website` is a honeypot: real visitors never see that field (it's visually
 // hidden in the form), so a filled one gets the same {ok:true} a real
 // submission gets — never saved, never emailed, never tipped off.

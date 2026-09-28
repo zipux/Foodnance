@@ -12,8 +12,9 @@
 // Talks to POST /api/interest (src/index.ts, migrations/0053_access_requests.sql).
 //
 // A trigger may carry data-plan="essential" | "pro" (the pricing page's plan
-// cards); the Plan dropdown opens pre-set to it, and to "Not sure yet" from any
-// other trigger. The visitor can still change it before sending.
+// cards); the Plan dropdown opens pre-set to it. From any other trigger it opens
+// on "— choose —", and the form won't send until Essentials, Pro or Not sure
+// yet is picked. The visitor can still change a pre-set plan before sending.
 (function () {
   'use strict';
 
@@ -73,9 +74,10 @@
           '<label>Your name<input type="text" name="name" required maxlength="200" autocomplete="name"></label>' +
           '<label>Email<input type="email" name="email" required maxlength="320" autocomplete="email"></label>' +
           '<label>Business name<input type="text" name="business_name" required maxlength="200" autocomplete="organization"></label>' +
-          '<label>Plan <span class="ra-opt">(optional)</span><select name="plan">' +
-            '<option value="">Not sure yet</option>' +
+          '<label>Plan<select name="plan" required>' +
+            '<option value="">— choose —</option>' +
             '<option value="essential">Essentials</option><option value="pro">Pro</option>' +
+            '<option value="unsure">Not sure yet</option>' +
           '</select></label>' +
           '<label>Type <span class="ra-opt">(optional)</span><select name="business_type">' +
             '<option value="">— choose —</option>' +
@@ -158,8 +160,8 @@
       website: get('website'),
       source_page: location.pathname,
     };
-    if (!payload.name || !payload.email || !payload.business_name) {
-      errorEl.textContent = 'Please fill in your name, email and business name.';
+    if (!payload.name || !payload.email || !payload.business_name || !payload.plan) {
+      errorEl.textContent = 'Please fill in your name, email and business name, and choose a plan (or “Not sure yet”).';
       errorEl.hidden = false;
       return;
     }

@@ -2,8 +2,9 @@
 // (2026-09-29, migration 0057).
 //
 // The pricing page's two plan cards tag their buttons with data-plan, the modal
-// opens with its Plan dropdown pre-set from that tag, and POST /api/interest
-// stores only 'essential' | 'pro' | '' — never whatever text was posted.
+// opens with its Plan dropdown pre-set from that tag, the form won't send
+// without a plan, and POST /api/interest stores only 'essential' | 'pro' |
+// 'unsure' | '' — never whatever text was posted.
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,20 +27,25 @@ t.check('the no-JS mailto fallback names the plan too',
   && /data-plan="pro" href="mailto:[^"]*request%20access%20\(Pro\)/.test(pricing));
 
 t.section('the modal');
-t.check('Plan dropdown offers Not sure yet / Essentials / Pro',
-  /<select name="plan">/.test(js)
-  && /<option value="">Not sure yet<\/option>/.test(js)
+t.check('Plan dropdown is required: — choose — / Essentials / Pro / Not sure yet',
+  /<label>Plan<select name="plan" required>/.test(js)
+  && /<option value="">— choose —<\/option>/.test(js)
   && /<option value="essential">Essentials<\/option>/.test(js)
-  && /<option value="pro">Pro<\/option>/.test(js));
+  && /<option value="pro">Pro<\/option>/.test(js)
+  && /<option value="unsure">Not sure yet<\/option>/.test(js));
+t.check('the form refuses to send without a plan',
+  /!payload\.business_name \|\| !payload\.plan\)/.test(js));
 t.check('the clicked button\'s data-plan pre-sets the dropdown',
   /openModal\(el\.getAttribute\('data-plan'\)\)/.test(js)
   && /planSelect\.value = \(plan === 'essential' \|\| plan === 'pro'\) \? plan : ''/.test(js));
 t.check('the plan is sent with the request', /plan: get\('plan'\)/.test(js));
 
 t.section('the server');
-t.check('only essential / pro are accepted, anything else becomes empty',
-  /ACCESS_REQUEST_PLAN_LABELS: Record<string, string> = \{ essential: 'Essentials', pro: 'Pro' \}/.test(src)
+t.check('only essential / pro / unsure are accepted, anything else becomes empty',
+  /ACCESS_REQUEST_PLAN_LABELS: Record<string, string> = \{ essential: 'Essentials', pro: 'Pro', unsure: 'Not sure yet' \}/.test(src)
   && /const plan = planRaw in ACCESS_REQUEST_PLAN_LABELS \? planRaw : ''/.test(src));
+t.check('a missing plan is emailed as "Not given", not refused',
+  /ACCESS_REQUEST_PLAN_LABELS\[r\.plan\] \|\| 'Not given'/.test(src));
 t.check('the notification email carries the plan (body and subject)',
   /`Plan: \$\{planLabel\}`/.test(src) && /subject: `Access request \(\$\{planLabel\}\)/.test(src));
 t.check('a missing plan column still saves the lead',
