@@ -1,0 +1,11 @@
+-- ============================================================
+-- Plan choice on "Request access" leads
+-- ============================================================
+-- The request-access modal (public/static/request-access.js) gained an
+-- optional "Plan" dropdown — Essentials / Pro / Not sure yet — pre-selected
+-- when the visitor clicked a plan card on the pricing page. POST /api/interest
+-- stores 'essential', 'pro' or '' (not sure / not given) here and puts it in
+-- the notification email. The route falls back to inserting without it if this
+-- column is missing, so a deploy that runs ahead of the migration still saves
+-- the lead (the plan then survives only in the email).
+ALTER TABLE access_requests ADD COLUMN plan TEXT;

@@ -2079,11 +2079,14 @@ Foodnance`
 // fallback text working.
 const ACCESS_REQUESTS_PER_HOUR = 20
 const ACCESS_REQUESTS_PER_EMAIL_PER_DAY = 3
+const ACCESS_REQUEST_PLAN_LABELS: Record<string, string> = { essential: 'Essentials', pro: 'Pro' }
 
 function sendAccessRequestNotification(env: Bindings, r: {
-  name: string; email: string; businessName: string; businessType: string; invoicesPerWeek: string; sourcePage: string; message: string
+  name: string; email: string; businessName: string; businessType: string; invoicesPerWeek: string; sourcePage: string; message: string; plan: string
 }) {
+  const planLabel = ACCESS_REQUEST_PLAN_LABELS[r.plan] || 'Not sure yet'
   const lines = [
+    `Plan: ${planLabel}`,
     `Name: ${r.name}`,
     `Email: ${r.email}`,
     `Business: ${r.businessName}`,
@@ -2100,11 +2103,12 @@ function sendAccessRequestNotification(env: Bindings, r: {
   <p><strong>Message:</strong></p>
   <p style="white-space:pre-wrap">${escHtml(r.message)}</p>` : ''}
 </div>`
-  return sendEmail(env, { to: 'hello@foodnance.com', subject: `Access request — ${r.businessName}`, html, text })
+  return sendEmail(env, { to: 'hello@foodnance.com', subject: `Access request (${planLabel}) — ${r.businessName}`, html, text })
 }
 
 // POST /api/interest
-//   { name, email, business_name, business_type?, invoices_per_week?, message?, source_page?, website? } — PUBLIC.
+//   { name, email, business_name, business_type?, invoices_per_week?, message?, plan?, source_page?, website? } — PUBLIC.
+// `plan` is 'essential' | 'pro'; anything else (incl. "Not sure yet") is stored as ''.
 // `website` is a honeypot: real visitors never see that field (it's visually
 // hidden in the form), so a filled one gets the same {ok:true} a real
 // submission gets — never saved, never emailed, never tipped off.
@@ -2119,33 +2123,41 @@ app.post('/api/interest', async (c) => {
   const invoicesPerWeek = String(body.invoices_per_week || '').trim().slice(0, 60)
   const sourcePage = String(body.source_page || '').trim().slice(0, 120)
   const message = String(body.message || '').trim().slice(0, 2000)
+  const planRaw = String(body.plan || '').trim().toLowerCase()
+  const plan = planRaw in ACCESS_REQUEST_PLAN_LABELS ? planRaw : ''
 
   if (!name) return c.json({ error: 'Your name is required.' }, 400)
   if (!email.includes('@')) return c.json({ error: 'A valid email is required.' }, 400)
   if (!businessName) return c.json({ error: 'Business name is required.' }, 400)
 
   const id = uid()
-  // Both limits are checked inside the INSERT itself. `message` needs 0056;
-  // if that column is missing the lead is saved without it rather than lost
-  // (the message still reaches us in the notification email).
-  const reserve = (withMessage: boolean) => c.env.DB.prepare(
-    `INSERT INTO access_requests (id, name, email, business_name, business_type, invoices_per_week, source_page${withMessage ? ', message' : ''})
-     SELECT ?, ?, ?, ?, ?, ?, ?${withMessage ? ', ?' : ''}
+  // Both limits are checked inside the INSERT itself. `message` needs 0056 and
+  // `plan` needs 0057; if either column is missing the lead is saved without it
+  // rather than lost (it still reaches us in the notification email).
+  const optional: Record<string, string> = { message, plan }
+  const reserve = (cols: string[]) => c.env.DB.prepare(
+    `INSERT INTO access_requests (id, name, email, business_name, business_type, invoices_per_week, source_page${cols.map(k => ', ' + k).join('')})
+     SELECT ?, ?, ?, ?, ?, ?, ?${cols.map(() => ', ?').join('')}
       WHERE (SELECT COUNT(*) FROM access_requests
               WHERE created_at > datetime('now', '-1 hour')) < ?
         AND (SELECT COUNT(*) FROM access_requests
               WHERE email = ? AND created_at > datetime('now', '-1 day')) < ?`,
   ).bind(id, name, email, businessName, businessType, invoicesPerWeek, sourcePage,
-    ...(withMessage ? [message] : []),
+    ...cols.map(k => optional[k]),
     ACCESS_REQUESTS_PER_HOUR, email, ACCESS_REQUESTS_PER_EMAIL_PER_DAY).run()
   let slot
+  let cols = Object.keys(optional)
   try {
-    try {
-      slot = await reserve(true)
-    } catch (e) {
-      if (!/no column named message|has no column/i.test(String(e))) throw e
-      console.error('POST /api/interest: access_requests.message missing — apply 0056', e)
-      slot = await reserve(false)
+    for (;;) {
+      try {
+        slot = await reserve(cols)
+        break
+      } catch (e) {
+        const missing = cols.find(k => new RegExp(`no column named ${k}\\b`, 'i').test(String(e)))
+        if (!missing) throw e
+        console.error(`POST /api/interest: access_requests.${missing} missing — apply ${missing === 'plan' ? '0057' : '0056'}`, e)
+        cols = cols.filter(k => k !== missing)
+      }
     }
   } catch (e) {
     console.error('POST /api/interest: insert failed', e)
@@ -2155,7 +2167,7 @@ app.post('/api/interest', async (c) => {
     return c.json({ error: 'Too many requests right now. Email hello@foodnance.com directly.' }, 429)
   }
 
-  const delivery = sendAccessRequestNotification(c.env, { name, email, businessName, businessType, invoicesPerWeek, sourcePage, message })
+  const delivery = sendAccessRequestNotification(c.env, { name, email, businessName, businessType, invoicesPerWeek, sourcePage, message, plan })
     .then(res => {
       if (!res.ok) {
         return c.env.DB.prepare('UPDATE access_requests SET notify_error = ? WHERE id = ?').bind(res.error || 'unknown', id).run()

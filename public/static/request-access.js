@@ -10,6 +10,10 @@
 // covers the no-JS/JS-failure/no-mail-client case this can't reach.
 //
 // Talks to POST /api/interest (src/index.ts, migrations/0053_access_requests.sql).
+//
+// A trigger may carry data-plan="essential" | "pro" (the pricing page's plan
+// cards); the Plan dropdown opens pre-set to it, and to "Not sure yet" from any
+// other trigger. The visitor can still change it before sending.
 (function () {
   'use strict';
 
@@ -69,6 +73,10 @@
           '<label>Your name<input type="text" name="name" required maxlength="200" autocomplete="name"></label>' +
           '<label>Email<input type="email" name="email" required maxlength="320" autocomplete="email"></label>' +
           '<label>Business name<input type="text" name="business_name" required maxlength="200" autocomplete="organization"></label>' +
+          '<label>Plan <span class="ra-opt">(optional)</span><select name="plan">' +
+            '<option value="">Not sure yet</option>' +
+            '<option value="essential">Essentials</option><option value="pro">Pro</option>' +
+          '</select></label>' +
           '<label>Type <span class="ra-opt">(optional)</span><select name="business_type">' +
             '<option value="">— choose —</option>' +
             '<option>Restaurant</option><option>Bakery</option><option>Commissary</option><option>Other</option>' +
@@ -97,8 +105,11 @@
   var submitBtn = overlay.querySelector('.ra-submit');
   var lastFocused = null;
 
-  function openModal() {
+  var planSelect = form.querySelector('select[name="plan"]');
+
+  function openModal(plan) {
     lastFocused = document.activeElement;
+    planSelect.value = (plan === 'essential' || plan === 'pro') ? plan : '';
     overlay.classList.add('open');
     overlay.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
@@ -119,7 +130,7 @@
   Array.prototype.forEach.call(triggers, function (el) {
     el.addEventListener('click', function (e) {
       e.preventDefault();
-      openModal();
+      openModal(el.getAttribute('data-plan'));
     });
   });
 
@@ -143,6 +154,7 @@
       business_type: get('business_type'),
       invoices_per_week: get('invoices_per_week'),
       message: get('message'),
+      plan: get('plan'),
       website: get('website'),
       source_page: location.pathname,
     };
