@@ -18,10 +18,10 @@
   <!-- Favicon. SVG covers every current browser; the .ico and apple-touch-icon
        are the fallbacks for older clients and phone home screens. Source files
        live in /logo. -->
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <link rel="mask-icon" href="/favicon.svg" color="#0369a1" />
-  <link rel="icon" type="image/x-icon" sizes="48x48" href="/favicon.ico" />
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
+  <link rel="mask-icon" href="/favicon.svg?v=2" color="#0369a1" />
+  <link rel="icon" type="image/x-icon" sizes="48x48" href="/favicon.ico?v=2" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" />
 
   <!-- Open Graph: controls the preview when the link is shared -->
   <meta property="og:type" content="website" />
@@ -336,7 +336,6 @@
       display: inline-flex; align-items: center; gap: .55rem;
       color: var(--primary); margin-bottom: 1.3rem;
     }
-    .eyebrow .rule { width: 22px; height: 1px; background: var(--primary); display: inline-block; }
     .eyebrow .kicker { font-size: .72rem; }
     h1 {
       font-family: 'Fraunces', Georgia, serif; font-weight: 600;
@@ -404,7 +403,6 @@
     /* ===== FEATURES — hairline mark + kicker, no icon tiles ===== */
     .grid { display: grid; gap: 2.2rem 1.75rem; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
     .card .mark { display: flex; align-items: center; gap: .5rem; color: var(--primary); margin-bottom: .7rem; }
-    .card .mark .rule { width: 20px; height: 2px; background: var(--primary); display: inline-block; }
     .card .mark .kicker { font-size: .68rem; }
     .card h3 { font-size: 1.05rem; font-weight: 600; margin-bottom: .4rem; letter-spacing: -.005em; }
     .card p { font-size: .9rem; color: var(--text-muted); }
@@ -600,7 +598,7 @@
   <div class="hero wrap">
     <div class="hero-row">
       <div class="hero-main">
-        <div class="eyebrow"><span class="rule"></span><span class="kicker"><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-bolt"/></svg> Now onboarding first Canadian customers</span></div>
+        <div class="eyebrow"><span class="kicker"><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-bolt"/></svg> Now onboarding first Canadian customers</span></div>
 
         <h1>Know your <span class="accent">real food cost</span></h1>
 
@@ -621,7 +619,7 @@
         <p class="cta-note">Early access: we set your account up with you, one business at a time.</p>
         <p class="cta-note">No signup for the calculator. See your dish cost in under a minute.</p>
         <p class="cta-note">Already a customer? <a href="/login">Log in</a></p>
-        <p class="cta-note">Nothing happened? Email <a href="mailto:hello@foodnance.com">hello@foodnance.com</a> directly.</p>
+        <p class="cta-note">Questions? We are here to help. Email us <a href="mailto:hello@foodnance.com">hello@foodnance.com</a></p>
       </div>
 
       <!-- Illustrative UI, not a customer's data. Swap for a real screenshot when ready. -->
@@ -696,37 +694,37 @@
 
       <div class="grid">
         <div class="card">
-          <div class="mark"><span class="rule"></span><svg class="ic" style="width:.85em" aria-hidden="true" focusable="false"><use href="#i-camera"/></svg><span class="kicker">Invoices</span></div>
+          <div class="mark"><svg class="ic" style="width:.85em" aria-hidden="true" focusable="false"><use href="#i-camera"/></svg><span class="kicker">Invoices</span></div>
           <h3>Read for you</h3>
           <p>Photo or PDF in, itemised lines out: product, pack size, unit price. It flags a
              total that doesn't add up, so a typo never becomes a wrong food cost.</p>
         </div>
         <div class="card">
-          <div class="mark"><span class="rule"></span><svg class="ic" style="width:.85em" aria-hidden="true" focusable="false"><use href="#i-arrow-trend-up"/></svg><span class="kicker">Price movers</span></div>
+          <div class="mark"><svg class="ic" style="width:.85em" aria-hidden="true" focusable="false"><use href="#i-arrow-trend-up"/></svg><span class="kicker">Price movers</span></div>
           <h3>Vendor compare</h3>
           <p>See exactly which items went up, by how much, and which supplier is cheapest for
              the same item, with the dollar figure you'd save by switching.</p>
         </div>
         <div class="card">
-          <div class="mark"><span class="rule"></span><svg class="ic" style="width:.85em" aria-hidden="true" focusable="false"><use href="#i-book-open"/></svg><span class="kicker">Recipes</span></div>
+          <div class="mark"><svg class="ic" style="width:.85em" aria-hidden="true" focusable="false"><use href="#i-book-open"/></svg><span class="kicker">Recipes</span></div>
           <h3>Product costing</h3>
           <p>Cost every recipe from live ingredient prices, then build finished products from
              recipes. When flour goes up, every affected margin updates itself.</p>
         </div>
         <div class="card">
-          <div class="mark"><span class="rule"></span><svg class="ic" style="width:.85em" aria-hidden="true" focusable="false"><use href="#i-boxes-stacked"/></svg><span class="kicker">Stock takes</span></div>
+          <div class="mark"><svg class="ic" style="width:.85em" aria-hidden="true" focusable="false"><use href="#i-boxes-stacked"/></svg><span class="kicker">Stock takes</span></div>
           <h3>That reconcile</h3>
           <p>Count by storage area in walk order, on a phone, offline if the walk-in has no
              signal. See counted versus expected, and what the variance cost you.</p>
         </div>
         <div class="card">
-          <div class="mark"><span class="rule"></span><svg class="ic" style="width:.85em" aria-hidden="true" focusable="false"><use href="#i-chart-pie"/></svg><span class="kicker">P&amp;L</span></div>
+          <div class="mark"><svg class="ic" style="width:.85em" aria-hidden="true" focusable="false"><use href="#i-chart-pie"/></svg><span class="kicker">P&amp;L</span></div>
           <h3>True COGS</h3>
           <p>Monthly profit and loss from real purchases, with the option to swap in
              stock-take-based true cost of goods instead of purchases alone.</p>
         </div>
         <div class="card">
-          <div class="mark"><span class="rule"></span><svg class="ic" style="width:.85em" aria-hidden="true" focusable="false"><use href="#i-id-card"/></svg><span class="kicker">Staff</span></div>
+          <div class="mark"><svg class="ic" style="width:.85em" aria-hidden="true" focusable="false"><use href="#i-id-card"/></svg><span class="kicker">Staff</span></div>
           <h3>Certifications that don't lapse</h3>
           <p>Track food-safety certificates per staff member and get told what's expiring
              before an inspector is the one who notices.</p>
@@ -920,7 +918,7 @@
         <a class="btn btn-primary btn-lg js-request-access" href="mailto:hello@foodnance.com?subject=Request%20access%20to%20Foodnance&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
           <svg class="ic" style="width:1em" aria-hidden="true" focusable="false"><use href="#i-envelope"/></svg> Request access
         </a>
-        <p class="cta-note" style="margin-top:1rem">Nothing happened? Email <a href="mailto:hello@foodnance.com">hello@foodnance.com</a> directly.</p>
+        <p class="cta-note" style="margin-top:1rem">Questions? We are here to help. Email us <a href="mailto:hello@foodnance.com">hello@foodnance.com</a></p>
       </div>
     </div>
   </section>
