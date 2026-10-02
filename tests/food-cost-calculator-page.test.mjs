@@ -47,7 +47,9 @@ t.check('it tells the visitor, prominently, that nothing is saved',
   /Nothing you type is saved or sent anywhere/.test(page));
 
 t.section('Typed numbers only — no pictures');
-t.check('no <img> anywhere on the page', !/<img\b/i.test(page));
+// The brand logo in the nav and footer is the one allowed image; the point is that the
+// calculator never shows or takes a picture of an invoice, a dish or anything typed.
+t.check('no <img> anywhere on the page except the brand logo', !/<img\b(?![^>]*class="brand-logo")/i.test(page));
 t.check('no file input', !/type=["']file["']/i.test(page) && !/accept=["'][^"']*image/i.test(page));
 t.check('no background-image or url() image loading in the CSS', !/url\(\s*['"]?(?!#)/.test(page.replace(/https?:\/\/fonts[^"')]+/g, '')));
 t.check('the script has no file or camera handling', !/FileReader|getUserMedia|\.files\b|createObjectURL/.test(code));

@@ -12,6 +12,8 @@
 
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="mask-icon" href="/favicon.svg" color="#0369a1" />
+  <link rel="icon" type="image/x-icon" sizes="48x48" href="/favicon.ico" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Foodnance" />
@@ -19,8 +21,12 @@
   <meta property="og:url" content="https://foodnance.com/food-cost-calculator" />
   <meta property="og:title" content="Food Cost Calculator — Cost a Dish From What You Paid" />
   <meta property="og:description" content="Enter what you paid and what goes in the dish. Get cost per portion and food cost percentage. Free, and nothing is saved." />
-  <!-- og:image goes here once the shared 1200x630 image exists (see index.html). -->
+  <meta property="og:image" content="https://foodnance.com/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Foodnance logo: a gold chef's hat with a bar chart. Food meets profit." />
   <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:image" content="https://foodnance.com/og-image.png" />
   <meta name="twitter:title" content="Food Cost Calculator — Cost a Dish From What You Paid" />
   <meta name="twitter:description" content="Enter what you paid and what goes in the dish. Get cost per portion and food cost percentage. Free, and nothing is saved." />
 
@@ -168,6 +174,8 @@
       color: var(--text); text-decoration: none;
     }
     .brand .ic { color: var(--primary); }
+    .brand-logo { display: block; height: 42px; width: auto; }
+    @media (max-width: 430px) { .brand-logo { height: 38px; } }
     .nav-spacer { flex: 1; }
     .nav-link {
       color: var(--text-muted); text-decoration: none; font-size: .92rem;
@@ -396,7 +404,7 @@
 
   <header class="nav">
     <div class="nav-inner">
-      <a class="brand" href="/"><svg class="ic" style="width:.75em" aria-hidden="true" focusable="false"><use href="#i-receipt"/></svg> Foodnance</a>
+      <a class="brand" href="/"><picture><source media="(max-width: 430px)" srcset="/logo/foodnance-icon.svg"><img class="brand-logo" src="/logo/foodnance-logo-horizontal.svg" width="176" height="42" alt="Foodnance"></picture></a>
       <div class="nav-spacer"></div>
       <a class="nav-link nav-anchor" href="/#features">Features</a>
       <a class="nav-link nav-anchor" href="/#how">How it works</a>
@@ -584,7 +592,7 @@
 
   <footer>
     <div class="wrap foot-inner">
-      <a class="brand" href="/" style="font-size:1rem"><svg class="ic" style="width:.75em" aria-hidden="true" focusable="false"><use href="#i-receipt"/></svg> Foodnance</a>
+      <a class="brand" href="/" style="font-size:1rem"><img class="brand-logo" src="/logo/foodnance-logo-horizontal.svg" width="143" height="34" alt="Foodnance" style="height:34px"></a>
       <div class="nav-spacer"></div>
       <span>&copy; 2026 Foodnance</span>
       <a href="/">Home</a>
