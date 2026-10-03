@@ -187,6 +187,8 @@
         }
         form.hidden = true;
         thanks.hidden = false;
+        // Counts that a request was sent and for which plan; nothing typed is passed on (analytics.js).
+        try { if (window.plausible) window.plausible('Access request sent', { props: { plan: payload.plan } }); } catch (e) {}
       })
       .catch(function () {
         submitBtn.disabled = false;

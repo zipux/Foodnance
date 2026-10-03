@@ -39,9 +39,11 @@ for (const api of ['fetch(', 'XMLHttpRequest', 'sendBeacon', 'WebSocket', 'local
 }
 t.check('the script never builds HTML from typed text (innerHTML / insertAdjacentHTML / eval)',
   !/innerHTML|outerHTML|insertAdjacentHTML|document\.write|\beval\(|new Function/.test(code));
-t.check('the page loads only its own scripts (no analytics, no third-party JS)',
+// analytics.js is one of our own files; what it may and may not do is pinned in analytics.test.mjs.
+t.check('the page loads only its own script files',
   [...page.matchAll(/<script[^>]+src="([^"]+)"/g)].every(m => m[1].startsWith('/static/')),
   [...page.matchAll(/<script[^>]+src="([^"]+)"/g)].map(m => m[1]).join(', '));
+t.check('the calculator script never talks to analytics', !/plausible|__fnEvents/.test(code));
 t.check('no form posts anywhere', !/<form\b/i.test(page));
 t.check('it tells the visitor, prominently, that nothing is saved',
   /Nothing you type is saved or sent anywhere/.test(page));
