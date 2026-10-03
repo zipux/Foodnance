@@ -298,7 +298,7 @@
       color: var(--text); text-decoration: none;
     }
     .brand .ic { color: var(--primary); }
-    .brand-logo { display: block; height: 42px; width: auto; }
+    .brand-logo { display: block; height: 52px; width: auto; }
     @media (max-width: 430px) { .brand-logo { height: 38px; } }
     .nav-spacer { flex: 1; }
     .nav-link {
@@ -367,23 +367,8 @@
       letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted);
       border: 1px solid var(--border); border-radius: 4px; padding: .1rem .4rem;
     }
-    .kpi-row { display: flex; margin-bottom: 1.3rem; }
-    .kpi { flex: 1; padding-right: 1rem; }
-    .kpi + .kpi { padding-left: 1rem; border-left: 1px solid var(--border); }
-    .kpi .label {
-      font-size: .66rem; font-weight: 600; letter-spacing: .04em;
-      text-transform: uppercase; color: var(--text-muted); margin-bottom: .3rem;
-    }
-    .kpi .value { font-family: 'Fraunces', Georgia, serif; font-size: 1.5rem; font-weight: 560; letter-spacing: -.01em; }
-    .kpi .delta { font-size: .72rem; font-weight: 600; margin-top: .15rem; }
-    .up   { color: var(--danger); }
-    .down { color: var(--success); }
+    .hp-shot { display: block; width: 100%; height: auto; border-radius: 7px; box-shadow: var(--shadow); }
 
-    .mover-list { display: flex; flex-direction: column; }
-    .mover { display: flex; align-items: center; gap: .6rem; padding: .6rem 0; border-top: 1px solid var(--border); font-size: .85rem; }
-    .mover .name { font-weight: 600; }
-    .mover .vendor { color: var(--text-muted); font-size: .75rem; }
-    .mover .num { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
     .pill {
       font-family: 'IBM Plex Mono', monospace; font-size: .62rem; font-weight: 600; padding: .1rem .4rem;
       border-radius: 4px; background: #f0f9ff; color: var(--primary-d);
@@ -546,7 +531,7 @@
 
   <header class="nav">
     <div class="nav-inner">
-      <a class="brand" href="#top"><picture><source media="(max-width: 430px)" srcset="/logo/foodnance-icon.svg"><img class="brand-logo" src="/logo/foodnance-logo-horizontal.svg" width="176" height="42" alt="Foodnance"></picture></a>
+      <a class="brand" href="#top"><picture><source media="(max-width: 430px)" srcset="/logo/foodnance-icon.svg"><img class="brand-logo" src="/logo/foodnance-logo-horizontal-tagline.svg" width="219" height="52" alt="Foodnance, food meets profit"></picture></a>
       <div class="nav-spacer"></div>
       <a class="nav-link nav-anchor" href="#features">Features</a>
       <a class="nav-link nav-anchor" href="#how">How it works</a>
@@ -622,63 +607,18 @@
         <p class="cta-note">Questions? We are here to help. Email us <a href="mailto:hello@foodnance.com">hello@foodnance.com</a></p>
       </div>
 
-      <!-- Illustrative UI, not a customer's data. Swap for a real screenshot when ready. -->
+      <!-- A real Foodnance screen (Price Movers, Purchase History), captured from the
+           demo account: made-up data, not a customer's. Retake both sizes together. -->
       <div class="hero-preview">
         <div class="hp-head">
           <svg class="ic" style="width:.9em;color:var(--primary)" aria-hidden="true" focusable="false"><use href="#i-chart-line"/></svg>
           <span class="kicker">Price Movers</span>
           <span class="example-tag">Example</span>
         </div>
-
-        <div class="kpi-row">
-          <div class="kpi">
-            <div class="label">Food cost %</div>
-            <div class="value">31.4%</div>
-            <div class="delta down"><svg class="ic" style="width:.7em" aria-hidden="true" focusable="false"><use href="#i-arrow-down"/></svg> 2.1 pts</div>
-          </div>
-          <div class="kpi">
-            <div class="label">Purchases (Jul)</div>
-            <div class="value">$18,240</div>
-            <div class="delta" style="color:var(--text-muted)">42 invoices</div>
-          </div>
-          <div class="kpi">
-            <div class="label">Overpaying by</div>
-            <div class="value up">$412</div>
-            <div class="delta" style="color:var(--text-muted)">vs cheapest</div>
-          </div>
-        </div>
-
-        <div class="mover-list">
-          <div class="mover">
-            <div>
-              <div class="name">Tomatoes, Roma</div>
-              <div class="vendor">Neptune Foods · 20 lb case</div>
-            </div>
-            <span class="pill">switched vendor</span>
-            <span class="num down">−9.3%</span>
-          </div>
-          <div class="mover">
-            <div>
-              <div class="name">White Flour</div>
-              <div class="vendor">Almi Wholesale · 25 kg bag</div>
-            </div>
-            <span class="num up">+14.2%</span>
-          </div>
-          <div class="mover">
-            <div>
-              <div class="name">Mozzarella, shredded</div>
-              <div class="vendor">Yen Distribution · 5 kg</div>
-            </div>
-            <span class="num up">+6.8%</span>
-          </div>
-          <div class="mover">
-            <div>
-              <div class="name">Olive Oil, extra virgin</div>
-              <div class="vendor">Terra Imports · 5 L tin</div>
-            </div>
-            <span class="num down">−3.1%</span>
-          </div>
-        </div>
+        <img class="hp-shot" src="/screens/price-history-840.webp"
+             srcset="/screens/price-history-840.webp 840w, /screens/price-history-1125.webp 1125w"
+             sizes="(max-width: 760px) 92vw, 400px" width="840" height="794" decoding="async"
+             alt="Foodnance purchase history for Mozzarella Fior di Latte: the price rose from $3.25 to $3.75 a pound, up 15.4%, between the 12 August and 16 September invoices." />
       </div>
     </div>
   </div>
