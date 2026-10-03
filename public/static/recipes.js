@@ -68,7 +68,7 @@ function rebuildRecipeCostIndex() {
 // every recipe on the page to $0.
 async function refreshRecipeItems() {
   try {
-    const rid = await apiGet(`tables/${RECIPE_ITEMS_TABLE}?page=1&limit=1000`);
+    const rid = await apiGetAll(`tables/${RECIPE_ITEMS_TABLE}`);
     _rCatalogue = { ..._rCatalogue, recipeItems: rid.data || [] };
   } catch (_) { /* keep the last good items */ }
 }
@@ -330,10 +330,10 @@ async function loadProductCatalogue() {
     // recipe_items comes along so the list can cost every recipe live, the same
     // way the detail modal already does.
     const [gd, ed, invd, rid] = await Promise.all([
-      apiGet(`tables/generic_products?page=1&limit=500`),
-      apiGet(`tables/product_entries?page=1&limit=1000`),
-      apiGet(`tables/inventory?page=1&limit=500`),
-      apiGet(`tables/${RECIPE_ITEMS_TABLE}?page=1&limit=1000`),
+      apiGetAll(`tables/generic_products`),
+      apiGetAll(`tables/product_entries`),
+      apiGetAll(`tables/inventory`),
+      apiGetAll(`tables/${RECIPE_ITEMS_TABLE}`),
     ]);
     const allEntries_r  = ed.data  || [];
     const allInventory_r = invd.data || [];
@@ -1106,7 +1106,7 @@ function clearRecipeForm() {
 // ── Load Recipes ───────────────────────────────────────────────
 async function loadRecipes() {
   try {
-    const data = await apiGet(`tables/${RECIPES_TABLE}?page=1&limit=200`);
+    const data = await apiGetAll(`tables/${RECIPES_TABLE}`);
     allRecipes = data.data || [];
     rebuildRecipeCostIndex();
     renderRecipeList('');

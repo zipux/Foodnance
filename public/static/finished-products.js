@@ -148,8 +148,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 async function refreshFpItems() {
   try {
     const [rid, fid] = await Promise.all([
-      apiGet(`tables/recipe_items?page=1&limit=1000`),
-      apiGet(`tables/${FP_ITEMS_TABLE}?page=1&limit=1000`),
+      apiGetAll(`tables/recipe_items`),
+      apiGetAll(`tables/${FP_ITEMS_TABLE}`),
     ]);
     allRecipeItems_fp = rid.data || [];
     allFpItems_fp     = fid.data || [];
@@ -162,12 +162,12 @@ async function loadFpCatalogues() {
     // recipe_items and finished_product_items are loaded so cost can be derived
     // from the bills of materials rather than read from a stored snapshot.
     const [gd, ed, rd, invd, rid, fid] = await Promise.all([
-      apiGet(`tables/${PROD_TABLE}?page=1&limit=500`),
-      apiGet(`tables/${ENTRIES_TABLE_FP}?page=1&limit=1000`),
-      apiGet(`tables/${REC_TABLE}?page=1&limit=500`),
-      apiGet(`tables/inventory?page=1&limit=500`),
-      apiGet(`tables/recipe_items?page=1&limit=1000`),
-      apiGet(`tables/${FP_ITEMS_TABLE}?page=1&limit=1000`),
+      apiGetAll(`tables/${PROD_TABLE}`),
+      apiGetAll(`tables/${ENTRIES_TABLE_FP}`),
+      apiGetAll(`tables/${REC_TABLE}`),
+      apiGetAll(`tables/inventory`),
+      apiGetAll(`tables/recipe_items`),
+      apiGetAll(`tables/${FP_ITEMS_TABLE}`),
     ]);
     const generics     = gd.data   || [];
     const entries      = ed.data   || [];
@@ -936,7 +936,7 @@ async function saveFp() {
       await apiPut(`tables/${FP_TABLE}/${editId}`, payload);
       fpId = editId;
       // Delete old items
-      const old = await apiGet(`tables/${FP_ITEMS_TABLE}?page=1&limit=500`);
+      const old = await apiGetAll(`tables/${FP_ITEMS_TABLE}`);
       const mine = (old.data || []).filter(i => i.finished_product_id === fpId);
       for (const it of mine) await apiDelete(`tables/${FP_ITEMS_TABLE}/${it.id}`);
       showToast('Finished product updated!', 'success');
@@ -1002,7 +1002,7 @@ function clearFpForm() {
 // ── Load Finished Products ─────────────────────────────────────
 async function loadFinishedProducts() {
   try {
-    const data = await apiGet(`tables/${FP_TABLE}?page=1&limit=200`);
+    const data = await apiGetAll(`tables/${FP_TABLE}`);
     allFp = data.data || [];
     rebuildFpCostIndex();
     renderFpList('');
@@ -1078,7 +1078,7 @@ async function openFpDetail(id) {
 
   let items = [];
   try {
-    const data = await apiGet(`tables/${FP_ITEMS_TABLE}?page=1&limit=500`);
+    const data = await apiGetAll(`tables/${FP_ITEMS_TABLE}`);
     items = (data.data || []).filter(i => i.finished_product_id === id);
   } catch (_) {}
 
@@ -1196,7 +1196,7 @@ async function loadFpIntoForm(id) {
 
   let items = [];
   try {
-    const data = await apiGet(`tables/${FP_ITEMS_TABLE}?page=1&limit=500`);
+    const data = await apiGetAll(`tables/${FP_ITEMS_TABLE}`);
     items = (data.data || []).filter(i => i.finished_product_id === id);
   } catch (_) {}
 
@@ -1248,7 +1248,7 @@ async function loadFpIntoForm(id) {
 async function deleteFp(id) {
   if (!confirm('Delete this finished product? This cannot be undone.')) return;
   try {
-    const data = await apiGet(`tables/${FP_ITEMS_TABLE}?page=1&limit=500`);
+    const data = await apiGetAll(`tables/${FP_ITEMS_TABLE}`);
     const mine = (data.data || []).filter(i => i.finished_product_id === id);
     for (const it of mine) await apiDelete(`tables/${FP_ITEMS_TABLE}/${it.id}`);
     await apiDelete(`tables/${FP_TABLE}/${id}`);
@@ -1277,8 +1277,8 @@ async function openPackRunModal(fpId) {
   // Fetch this finished product's items + refresh inventory snapshot
   try {
     const [itemsData, invData] = await Promise.all([
-      apiGet(`tables/${FP_ITEMS_TABLE}?page=1&limit=500`),
-      apiGet(`tables/inventory?page=1&limit=500`),
+      apiGetAll(`tables/${FP_ITEMS_TABLE}`),
+      apiGetAll(`tables/inventory`),
     ]);
     prFpItems       = (itemsData.data || []).filter(i => i.finished_product_id === fpId);
     allInventory_fp = invData.data || [];

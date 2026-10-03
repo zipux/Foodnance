@@ -80,8 +80,8 @@ document.getElementById('saveProductBtn').addEventListener('click', saveGenericP
 async function loadAll() {
   try {
     const [gd, ed, sd, ivd, ud, cd] = await Promise.all([
-      apiGet(`tables/${GENERIC_TABLE}?page=1&limit=500`),
-      apiGet(`tables/${ENTRIES_TABLE}?page=1&limit=1000`),
+      apiGetAll(`tables/${GENERIC_TABLE}`),
+      apiGetAll(`tables/${ENTRIES_TABLE}`),
       apiGet(`tables/suppliers?page=1&limit=500`),
       apiGet(`tables/invoices?page=1&limit=1000`),
       apiGet(`tables/units?page=1&limit=100`),
@@ -1474,7 +1474,7 @@ async function _saveEntryForGeneric(genericId, overrideName, overrideCategory) {
     document.getElementById('entriesPlaceholder').style.display = 'none';
 
     // Reload entries cache and re-render table
-    const ed = await apiGet(`tables/${ENTRIES_TABLE}?page=1&limit=1000`);
+    const ed = await apiGetAll(`tables/${ENTRIES_TABLE}`);
     allEntries = ed.data || [];
     renderEntriesTable(genericId);
     renderProductTable();
@@ -1491,7 +1491,7 @@ async function deleteEntry(entryId) {
   try {
     await apiDelete(`tables/${ENTRIES_TABLE}/${entryId}`);
     showToast('Entry deleted.', 'warning');
-    const ed = await apiGet(`tables/${ENTRIES_TABLE}?page=1&limit=1000`);
+    const ed = await apiGetAll(`tables/${ENTRIES_TABLE}`);
     allEntries = ed.data || [];
     renderEntriesTable(currentGenericId);
     renderProductTable();

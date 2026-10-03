@@ -39,6 +39,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderLogTable();
   });
   document.getElementById('clearLogBtn').addEventListener('click', clearStockLog);
+  document.getElementById('logLoadMoreBtn').addEventListener('click', loadOlderLogEntries);
 
   // Adjust modal
   document.getElementById('closeAdjustModal').addEventListener('click', () => closeModal('adjustModal'));
@@ -80,14 +81,14 @@ async function loadInventory() {
     // The two *_items tables are loaded so batch and finished-product stock can
     // be valued from today's ingredient prices rather than a stored total_cost.
     const [invData, gdData, edData, recData, fpData, catData, riData, fiData] = await Promise.all([
-      apiGet(`tables/${INV_TABLE}?page=1&limit=500`),
-      apiGet(`tables/generic_products?page=1&limit=500`),
-      apiGet(`tables/product_entries?page=1&limit=1000`),
-      apiGet(`tables/recipes?page=1&limit=500`),
-      apiGet(`tables/finished_products?page=1&limit=500`),
+      apiGetAll(`tables/${INV_TABLE}`),
+      apiGetAll(`tables/generic_products`),
+      apiGetAll(`tables/product_entries`),
+      apiGetAll(`tables/recipes`),
+      apiGetAll(`tables/finished_products`),
       apiGet(`tables/categories?page=1&limit=200`),
-      apiGet(`tables/recipe_items?page=1&limit=1000`),
-      apiGet(`tables/finished_product_items?page=1&limit=1000`),
+      apiGetAll(`tables/recipe_items`),
+      apiGetAll(`tables/finished_product_items`),
     ]);
     allInventory = invData.data || [];
     allGenericInv = gdData.data || [];
@@ -762,7 +763,35 @@ async function applyAdjustment() {
 }
 
 // ── Stock Log Modal ────────────────────────────────────────────
-let allLogEntries = []; // cached after first fetch
+// Newest movement first. The log opens on the latest 500 (the server's limit per
+// request); "Load older movements" fetches the next 500 each time it is pressed.
+const LOG_BATCH = 500;
+let allLogEntries   = []; // cached after first fetch
+let logBatchesLoaded = 0;
+let logHasOlder      = false;
+
+async function fetchLogBatch(n) {
+  const data = await apiGet(`tables/${LOG_TABLE}?page=${n}&limit=${LOG_BATCH}`);
+  const rows = data.data || [];
+  logHasOlder = rows.length === LOG_BATCH;
+  return rows;
+}
+
+async function loadOlderLogEntries() {
+  const btn = document.getElementById('logLoadMoreBtn');
+  btn.disabled = true;
+  try {
+    const rows = await fetchLogBatch(logBatchesLoaded + 1);
+    logBatchesLoaded++;
+    // By id, so a movement recorded between two requests can't appear twice.
+    const seen = new Set(allLogEntries.map(l => l.id));
+    allLogEntries = allLogEntries.concat(rows.filter(l => !seen.has(l.id)));
+    renderLogTable();
+  } catch (e) {
+    showToast('Could not load older movements. Please try again.', 'error');
+  }
+  btn.disabled = false;
+}
 
 async function openLogModal() {
   openModal('logModal');
@@ -777,10 +806,11 @@ async function fetchLogEntries() {
   const tbody = document.getElementById('logBody');
   tbody.innerHTML = '<tr><td colspan="6" class="empty-row"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>';
   try {
-    const data   = await apiGet(`tables/${LOG_TABLE}?page=1&limit=1000`);
-    allLogEntries = (data.data || []).slice().reverse(); // newest first
+    allLogEntries    = await fetchLogBatch(1); // the server lists newest first
+    logBatchesLoaded = 1;
   } catch (e) {
     allLogEntries = [];
+    logHasOlder   = false;
     tbody.innerHTML = '<tr><td colspan="6" class="empty-row">Failed to load log.</td></tr>';
   }
 }
@@ -793,6 +823,10 @@ function renderLogTable() {
   // Build date boundaries (inclusive)
   const fromDate = fromVal ? new Date(fromVal + 'T00:00:00') : null;
   const toDate   = toVal   ? new Date(toVal   + 'T23:59:59') : null;
+
+  document.getElementById('logLoadMore').classList.toggle('hidden', !logHasOlder);
+  document.getElementById('logLoadMoreNote').textContent =
+    `Showing your latest ${allLogEntries.length} movements.`;
 
   let logs = allLogEntries;
   if (fromDate) logs = logs.filter(l => new Date(l.moved_at || l.created_at) >= fromDate);
@@ -882,7 +916,7 @@ async function deleteInventoryItem(invId, itemName) {
  */
 async function findInvRow(itemId, itemType) {
   try {
-    const data = await apiGet(`tables/${INV_TABLE}?page=1&limit=500`);
+    const data = await apiGetAll(`tables/${INV_TABLE}`);
     return (data.data || []).find(r => r.item_id === itemId && r.item_type === itemType) || null;
   } catch (_) { return null; }
 }

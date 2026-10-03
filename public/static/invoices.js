@@ -185,6 +185,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('addPageFileInput')?.addEventListener('change', handleAddPageFile);
   document.getElementById('markCompleteBtn')?.addEventListener('click', markInvoiceComplete);
   document.getElementById('addLineBtn').addEventListener('click',          addLineRow);
+  document.getElementById('invLoadMoreBtn').addEventListener('click', loadOlderInvoices);
 
   // Live cost summary as user edits additional costs
   // detailTotalInput included so editing the stated total re-checks reconciliation live.
@@ -194,12 +195,62 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // ── Load ────────────────────────────────────────────────────────
+// The list opens on the latest 500 invoices (the server's limit per request);
+// "Load older invoices" fetches the next 500 each time it is pressed. A reload
+// after a save or delete re-fetches as many batches as were already on screen,
+// so older invoices the user loaded don't vanish from under them.
+const INV_BATCH = 500;
+let invBatchesLoaded = 1;
+let invHasOlder      = false;
+
+async function fetchInvoiceBatch(n) {
+  const data = await apiGet(`tables/${INV_LIST_TABLE}?page=${n}&limit=${INV_BATCH}`);
+  const rows = data.data || [];
+  invHasOlder = rows.length === INV_BATCH;
+  return rows;
+}
+
+function setInvoices(rows, keepVendor) {
+  // By id, so an invoice uploaded between two requests (which shifts every later
+  // row down by one) can't appear twice.
+  const byId = new Map(rows.map(r => [r.id, r]));
+  allInvoices = [...byId.values()].sort((a, b) => (b.upload_date || '') > (a.upload_date || '') ? 1 : -1);
+  // Loading older invoices must not throw away the vendor the user is filtering by.
+  const sel  = document.getElementById('vendorFilter');
+  const kept = sel.value;
+  populateVendorFilter();
+  if (keepVendor) sel.value = kept;
+  applyFilters();
+  renderInvLoadMore();
+}
+
+function renderInvLoadMore() {
+  document.getElementById('invLoadMore').classList.toggle('hidden', !invHasOlder);
+  document.getElementById('invLoadMoreNote').textContent =
+    `Showing your latest ${allInvoices.length} invoices.`;
+}
+
+async function loadOlderInvoices() {
+  const btn = document.getElementById('invLoadMoreBtn');
+  btn.disabled = true;
+  try {
+    const rows = await fetchInvoiceBatch(invBatchesLoaded + 1);
+    invBatchesLoaded++;
+    setInvoices(allInvoices.concat(rows), true);
+  } catch (e) {
+    showToast('Could not load older invoices. Please try again.', 'error');
+  }
+  btn.disabled = false;
+}
+
 async function loadInvoices() {
   try {
-    const data   = await apiGet(`tables/${INV_LIST_TABLE}?page=1&limit=500`);
-    allInvoices  = (data.data || []).sort((a, b) => (b.upload_date || '') > (a.upload_date || '') ? 1 : -1);
-    populateVendorFilter();
-    applyFilters();
+    let rows = [];
+    for (let n = 1; n <= invBatchesLoaded; n++) {
+      rows = rows.concat(await fetchInvoiceBatch(n));
+      if (!invHasOlder) { invBatchesLoaded = n; break; }
+    }
+    setInvoices(rows);
   } catch (e) {
     document.getElementById('invBody').innerHTML =
       `<tr><td colspan="9" class="empty-row"><i class="fas fa-exclamation-triangle"></i> Failed to load invoices.</td></tr>`;

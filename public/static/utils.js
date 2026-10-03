@@ -660,6 +660,30 @@ async function apiGet(url) {
   if (!r.ok) throw await _apiFail('GET', url, r);
   return r.json();
 }
+// Every row of a list, however long it is.
+//
+// The server hands out at most 500 rows per request, newest first, and does not
+// say when it stopped — so a page that asked once and assumed it had everything
+// silently lost its oldest rows past 500 (old purchases stopped pricing their
+// products; the oldest recipes showed $0.00). This keeps asking for the next 500
+// until a short page comes back. Same { data } shape as apiGet, so a caller only
+// swaps the function name. `path` carries no page/limit, e.g.
+// 'tables/product_entries' or 'tables/x?recipe_id=1'.
+const API_PAGE_ROWS = 500;
+async function apiGetAll(path) {
+  const sep = path.includes('?') ? '&' : '?';
+  const rows = [];
+  // 400 requests = 200,000 rows: far beyond any real list, and a stop for a
+  // server that ever ignored `page` and returned the same rows forever.
+  for (let page = 1; page <= 400; page++) {
+    const res  = await apiGet(`${path}${sep}page=${page}&limit=${API_PAGE_ROWS}`);
+    const part = res.data || [];
+    rows.push(...part);
+    if (part.length < API_PAGE_ROWS) break;
+  }
+  return { data: rows, total: rows.length };
+}
+
 async function apiPost(url, data) {
   if (isAccountPaused()) throw _pausedError();
   const r = await fetch(`${API_BASE}/${url}`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
