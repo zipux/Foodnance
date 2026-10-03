@@ -5,10 +5,17 @@ let allStaff = [];
 let filtered = [];
 let currentPage = 1;
 let certsByStaff = {}; // staffId → [certs]
+let certTypes = [];    // the organization's certification types (for the add form)
+let viewingCertsFor = null;   // { id, name } of the staff member whose certificates window is open
+const NEW_TYPE = '__new_type__';
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadStaff();
   await loadCertsByStaff();
+  // loadStaff() drew the table before the certificates arrived, so every row
+  // read "None" and the expiry counts read 0 until something redrew it.
+  applyFilters();
+  renderStats();
 
   document.getElementById('staffSearch').addEventListener('input', () => { currentPage = 1; applyFilters(); });
   document.getElementById('deptFilter').addEventListener('change', () => { currentPage = 1; applyFilters(); });
@@ -21,6 +28,28 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('deleteStaffBtn').addEventListener('click', deleteStaff);
   document.getElementById('closeStaffCertModal').addEventListener('click', () => closeModal('staffCertModal'));
   document.getElementById('closeStaffCertBtn').addEventListener('click', () => closeModal('staffCertModal'));
+
+  // Add certification — opened from a staff row or from that person's certificates window.
+  document.getElementById('staffCertAddBtn').addEventListener('click', () => {
+    if (!viewingCertsFor) return;
+    closeModal('staffCertModal');
+    openAddCert(viewingCertsFor.id, viewingCertsFor.name);
+  });
+  document.getElementById('saveAddCertBtn').addEventListener('click', saveAddCert);
+  document.getElementById('cancelAddCertModal').addEventListener('click', () => closeModal('addCertModal'));
+  document.getElementById('closeAddCertModal').addEventListener('click', () => closeModal('addCertModal'));
+  document.getElementById('acType').addEventListener('change', onAddCertTypeChange);
+  document.getElementById('acIssueDate').addEventListener('change', autoSetAddCertExpiry);
+  const acArea = document.getElementById('acUploadArea'), acInput = document.getElementById('acFileInput');
+  acArea.addEventListener('click', () => acInput.click());
+  acInput.addEventListener('change', e => { if (e.target.files[0]) uploadAddCertFile(e.target.files[0]); });
+  acArea.addEventListener('dragover', e => { e.preventDefault(); acArea.classList.add('dragover'); });
+  acArea.addEventListener('dragleave', () => acArea.classList.remove('dragover'));
+  acArea.addEventListener('drop', e => {
+    e.preventDefault();
+    acArea.classList.remove('dragover');
+    if (e.dataTransfer.files[0]) uploadAddCertFile(e.dataTransfer.files[0]);
+  });
 });
 
 async function loadStaff() {
@@ -141,7 +170,10 @@ function renderTable() {
             ${certBadge}
           </button>
         </td>
-        <td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-secondary btn-sm" onclick="openAddCert('${esc(s.id)}', this.dataset.name)" data-name="${esc(s.full_name)}" title="Add a certification and upload its document">
+            <i class="fas fa-plus"></i> Add certification
+          </button>
           <button class="btn btn-icon btn-secondary btn-sm" onclick="openEditStaff('${esc(s.id)}')" title="Edit">
             <i class="fas fa-edit"></i>
           </button>
@@ -254,6 +286,7 @@ async function deleteStaff() {
 
 // ── Staff Certs Viewer ─────────────────────────────────────────
 function viewStaffCerts(staffId, staffName) {
+  viewingCertsFor = { id: staffId, name: staffName };
   const certs = certsByStaff[staffId] || [];
   document.getElementById('staffCertModalTitle').innerHTML =
     `<i class="fas fa-certificate"></i> ${esc(staffName)} — Certifications`;
@@ -291,4 +324,132 @@ function viewStaffCerts(staffId, staffName) {
 
   document.getElementById('goToCertBtn').href = `/certifications.html`;
   openModal('staffCertModal');
+}
+
+// ── Add certification (for one staff member) ───────────────────
+// The same record the Certifications page creates, added from where the person
+// already is: the staff member is fixed, and a type that doesn't exist yet can
+// be typed in ("+ New type…") — a new account starts with no types at all, and
+// the form can't be saved without one.
+async function loadCertTypes() {
+  const data = await apiGet('tables/certification_types?limit=500');
+  certTypes = (data.data || []).slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+}
+
+function fillAddCertTypes(selected) {
+  document.getElementById('acType').innerHTML =
+    '<option value="">— Select type —</option>' +
+    certTypes.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('') +
+    `<option value="${NEW_TYPE}">+ New type…</option>`;
+  document.getElementById('acType').value = selected || '';
+  onAddCertTypeChange();
+}
+
+function onAddCertTypeChange() {
+  const isNew = document.getElementById('acType').value === NEW_TYPE;
+  document.getElementById('acNewTypeGroup').classList.toggle('hidden', !isNew);
+  if (isNew) document.getElementById('acNewType').focus();
+  autoSetAddCertExpiry();
+}
+
+// Same convenience as the Certifications page: an existing type's validity
+// fills in the expiry date from the issue date. It stays editable.
+function autoSetAddCertExpiry() {
+  const type = certTypes.find(t => t.id === document.getElementById('acType').value);
+  const issueDate = document.getElementById('acIssueDate').value;
+  if (!type || !type.validity_months || !issueDate) return;
+  const d = new Date(issueDate);
+  d.setMonth(d.getMonth() + parseInt(type.validity_months));
+  document.getElementById('acExpiryDate').value = d.toISOString().slice(0, 10);
+}
+
+async function openAddCert(staffId, staffName) {
+  document.getElementById('acStaffId').value = staffId;
+  document.getElementById('addCertModalTitle').innerHTML =
+    `<i class="fas fa-certificate"></i> Add certification — ${esc(staffName)}`;
+  ['acNewType', 'acNumber', 'acIssuer', 'acIssueDate', 'acExpiryDate', 'acNotes', 'acFileKey', 'acFileName', 'acFileInput']
+    .forEach(id => { document.getElementById(id).value = ''; });
+  document.getElementById('acFilePreview').innerHTML = '';
+  try {
+    await loadCertTypes();
+  } catch (e) {
+    showToast('Could not load certification types: ' + e.message, 'error');
+    return;
+  }
+  // No types yet: open straight on "new type" rather than an empty list.
+  fillAddCertTypes(certTypes.length ? '' : NEW_TYPE);
+  openModal('addCertModal');
+  if (!certTypes.length) document.getElementById('acNewType').focus();
+}
+
+async function uploadAddCertFile(file) {
+  const preview = document.getElementById('acFilePreview');
+  preview.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Uploading ${esc(file.name)}…`;
+  try {
+    const result = await apiUploadFile(file);
+    document.getElementById('acFileKey').value  = result.key;
+    document.getElementById('acFileName').value = result.name;
+    preview.innerHTML = `<i class="fas fa-check-circle" style="color:#059669"></i> <a href="${esc(result.url)}" target="_blank" class="file-link">${esc(result.name)}</a> uploaded`;
+  } catch (e) {
+    preview.innerHTML = `<span style="color:#dc2626"><i class="fas fa-times"></i> Upload failed: ${esc(e.message)}</span>`;
+    showToast('Upload failed: ' + e.message, 'error');
+  }
+}
+
+async function saveAddCert() {
+  const staffId    = document.getElementById('acStaffId').value;
+  const staff      = allStaff.find(s => s.id === staffId);
+  const typeChoice = document.getElementById('acType').value;
+  const newName    = document.getElementById('acNewType').value.trim();
+  const issueDate  = document.getElementById('acIssueDate').value;
+  const expiryDate = document.getElementById('acExpiryDate').value;
+
+  if (!staff) { showToast('This staff member could not be found. Reload the page and try again.', 'error'); return; }
+  if (!typeChoice) { showToast('Please select a certification type.', 'error'); return; }
+  if (typeChoice === NEW_TYPE && !newName) { showToast('Enter a name for the new certification type.', 'error'); return; }
+  if (!issueDate) { showToast('Issue date is required.', 'error'); return; }
+  if (!expiryDate) { showToast('Expiry date is required.', 'error'); return; }
+
+  const btn = document.getElementById('saveAddCertBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
+  try {
+    let type = certTypes.find(t => t.id === typeChoice);
+    if (typeChoice === NEW_TYPE) {
+      // A name that already exists is that type, not a second one beside it.
+      type = certTypes.find(t => (t.name || '').trim().toLowerCase() === newName.toLowerCase());
+      if (!type) {
+        // Same defaults the Certifications page's "Add Type" form starts with.
+        type = await apiPost('tables/certification_types', {
+          name: newName, description: '', validity_months: 12, is_mandatory: 0,
+        });
+        certTypes.push(type);
+      }
+    }
+    const created = await apiPost('tables/staff_certifications', {
+      staff_id:       staffId,
+      cert_type_id:   type.id,
+      cert_type_name: type.name || '',
+      staff_name:     staff.full_name || '',
+      issue_date:     issueDate,
+      expiry_date:    expiryDate,
+      issuer:         document.getElementById('acIssuer').value.trim(),
+      cert_number:    document.getElementById('acNumber').value.trim(),
+      file_key:       document.getElementById('acFileKey').value,
+      file_name:      document.getElementById('acFileName').value,
+      notes:          document.getElementById('acNotes').value.trim(),
+      status:         expiryDate < new Date().toISOString().slice(0, 10) ? 'Expired' : 'Valid',
+    });
+    if (!certsByStaff[staffId]) certsByStaff[staffId] = [];
+    certsByStaff[staffId].unshift(created);
+    showToast('Certification added!', 'success');
+    closeModal('addCertModal');
+    applyFilters();
+    renderStats();
+  } catch (e) {
+    showToast('Save failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-save"></i> Save';
+  }
 }

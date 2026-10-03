@@ -11,6 +11,28 @@
   <link rel="stylesheet" href="/static/style.css?v=20260923-1" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560;9..144,620&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
+  <style>
+    /* Same rules as certifications.html: the certificate list and the upload
+       box on this page use the same classes. */
+    .cert-badge-valid   { background:#d1fae5; color:#065f46; }
+    .cert-badge-expiring{ background:#fef3c7; color:#b45309; }
+    .cert-badge-expired { background:#fee2e2; color:#991b1b; }
+    .cert-status-badge {
+      padding:.2rem .65rem; border-radius:12px; font-size:.75rem; font-weight:600; display:inline-block;
+    }
+    .file-link { color:var(--primary); text-decoration:none; font-size:.82rem; }
+    .file-link:hover { text-decoration:underline; }
+    .upload-area {
+      border: 2px dashed var(--border); border-radius:8px; padding:1.5rem; text-align:center;
+      cursor:pointer; transition:border-color .2s; background:#f8fafc;
+    }
+    .upload-area:hover { border-color:var(--primary); }
+    .upload-area.dragover { border-color:var(--primary); background:#f0f9ff; }
+    .cert-type-chip {
+      display:inline-block; padding:.2rem .6rem; background:#e0f2fe; color:#075985;
+      border-radius:20px; font-size:.75rem; font-weight:600; margin:.1rem;
+    }
+  </style>
   <script src="/static/nav-gate.js?v=20260921-3"></script>
 </head>
 <body>
@@ -149,9 +171,12 @@
       </div>
       <div class="modal-body">
         <div id="staffCertList"></div>
-        <div style="margin-top:1rem;text-align:center">
-          <a id="goToCertBtn" href="/certifications.html" class="btn btn-primary btn-sm">
-            <i class="fas fa-plus"></i> Manage Certifications
+        <div style="margin-top:1rem;display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap">
+          <button type="button" id="staffCertAddBtn" class="btn btn-primary btn-sm">
+            <i class="fas fa-plus"></i> Add certification
+          </button>
+          <a id="goToCertBtn" href="/certifications.html" class="btn btn-secondary btn-sm">
+            <i class="fas fa-pen"></i> Manage Certifications
           </a>
         </div>
       </div>
@@ -161,9 +186,70 @@
     </div>
   </div>
 
+  <!-- ADD CERTIFICATION (for one staff member) -->
+  <div class="modal-overlay hidden" id="addCertModal">
+    <div class="modal" style="max-width:620px">
+      <div class="modal-header">
+        <h3 id="addCertModalTitle"><i class="fas fa-certificate"></i> Add certification</h3>
+        <button class="modal-close" id="closeAddCertModal"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="acStaffId" />
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Certification Type *</label>
+            <select id="acType"></select>
+          </div>
+          <div class="form-group hidden" id="acNewTypeGroup">
+            <label>New type name *</label>
+            <input type="text" id="acNewType" maxlength="120" placeholder="e.g. FoodSafe Level 1" />
+          </div>
+          <div class="form-group">
+            <label>Certificate Number</label>
+            <input type="text" id="acNumber" placeholder="e.g. CERT-2024-001" />
+          </div>
+          <div class="form-group">
+            <label>Issuer / Training Provider</label>
+            <input type="text" id="acIssuer" placeholder="e.g. SafeFood Training Co." />
+          </div>
+          <div class="form-group">
+            <label>Issue Date *</label>
+            <input type="date" id="acIssueDate" />
+          </div>
+          <div class="form-group">
+            <label>Expiry Date *</label>
+            <input type="date" id="acExpiryDate" />
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-top:1rem">
+          <label><i class="fas fa-paperclip"></i> Upload Certificate Document</label>
+          <div class="upload-area" id="acUploadArea">
+            <i class="fas fa-cloud-upload-alt" style="font-size:1.8rem;color:var(--primary);margin-bottom:.5rem;display:block"></i>
+            <div style="font-weight:600;color:var(--text);margin-bottom:.25rem">Click or drag to upload</div>
+            <div style="font-size:.82rem;color:var(--text-muted)">PDF, PNG, JPG up to 10MB</div>
+          </div>
+          <input type="file" id="acFileInput" accept=".pdf,.png,.jpg,.jpeg" style="display:none" />
+          <div id="acFilePreview" style="margin-top:.5rem;font-size:.85rem;color:var(--text-muted)"></div>
+          <input type="hidden" id="acFileKey" />
+          <input type="hidden" id="acFileName" />
+        </div>
+
+        <div class="form-group">
+          <label>Notes</label>
+          <textarea id="acNotes" rows="2" placeholder="Any additional notes…"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelAddCertModal">Cancel</button>
+        <button class="btn btn-success" id="saveAddCertBtn"><i class="fas fa-save"></i> Save</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast hidden"></div>
   <script src="/static/env-banner.js?v=20260807-2"></script>
   <script src="/static/utils.js?v=20261004-6"></script>
-  <script src="/static/staff.js?v=20260727-2"></script>
+  <script src="/static/staff.js?v=20261004-1"></script>
 </body>
 </html>
