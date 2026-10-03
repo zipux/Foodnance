@@ -47,8 +47,15 @@ t.check('20 kg on hand -> moved on to Neptune',
   vendorOf(fifoActiveEntryIn(entries, 20, 'kg', null)) === 'Neptune');
 
 t.section('Boundaries');
-t.check('nothing consumed -> oldest layer',
-  vendorOf(fifoActiveEntryIn(entries, 95.359237, 'kg', null)) === 'Yen');
+// With nothing used there is no evidence to pick a layer with, so the newest
+// purchase prices the product (costing-basis.test.mjs). This check used to
+// expect the OLDEST layer and passed only by accident: 50 + 45.359237 is
+// 95.35923700000001 in floating point, and that 0.00000000000001 was being
+// read as consumption. A rounding crumb is not usage.
+t.check('nothing consumed -> newest layer (no usage to go on)',
+  vendorOf(fifoActiveEntryIn(entries, 95.359237, 'kg', null)) === 'Neptune');
+t.check('a real 1 kg used -> the oldest layer is the one being drawn',
+  vendorOf(fifoActiveEntryIn(entries, 94.359237, 'kg', null)) === 'Yen');
 t.check('all consumed -> newest layer',
   vendorOf(fifoActiveEntryIn(entries, 0, 'kg', null)) === 'Neptune');
 t.check('negative stock -> newest layer',

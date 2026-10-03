@@ -1450,6 +1450,10 @@ function fifoActiveEntryIn(sortedEntries, invQty, toUnit, avgWeightKg, opts) {
   return fifoActiveEntryWithBasis(sortedEntries, invQty, toUnit, avgWeightKg, opts).entry;
 }
 
+// The most a single stock-in can drift from its purchase through unit conversion
+// (bins are rounded to six decimals). See the comparison below.
+const FIFO_ROUNDING_SLACK = 1e-6;
+
 function fifoActiveEntryWithBasis(sortedEntries, invQty, toUnit, avgWeightKg, opts) {
   const none = { entry: null, basis: COST_BASIS_LATEST };
   if (!sortedEntries || !sortedEntries.length) return none;
@@ -1481,7 +1485,16 @@ function fifoActiveEntryWithBasis(sortedEntries, invQty, toUnit, avgWeightKg, op
   // exceeds everything ever bought, which means someone typed a delivery
   // straight into inventory. Either way there is no evidence to pick a layer
   // with, so don't pretend: use the newest price.
-  if (consumed <= 0) return { entry: newest, basis: COST_BASIS_LATEST };
+  //
+  // "Nothing" has to allow for rounding. A delivery in one unit going into a bin
+  // kept in another (10 kg into a bin counted in lb) is rounded to six decimals,
+  // so stock and purchases can differ by a few ten-millionths with nothing used.
+  // Comparing against exactly 0 let that crumb count as consumption whenever it
+  // happened to fall the wrong way, and the product was priced from its OLDEST
+  // purchase — 5 of 16 two-supplier products, by chance. Each stock-in can be
+  // off by at most half of 0.000001, so one millionth per purchase covers it and
+  // is far below any real usage.
+  if (consumed <= usable.length * FIFO_ROUNDING_SLACK) return { entry: newest, basis: COST_BASIS_LATEST };
 
   let cumulative = 0;
   for (const u of usable) {

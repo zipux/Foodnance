@@ -114,4 +114,24 @@ t.check('without it, consumption wins',
 t.check('no entries is survivable',
   fifoActiveEntryWithBasis([], 0, 'kg', null).entry === null);
 
+t.section('a rounding crumb is not consumption');
+// Roma tomatoes stocked in lb: 25 lb from one supplier, then 10 kg from another.
+// 10 kg is 22.0462262 lb; the bin is rounded to six decimals, so it holds
+// 47.046226 while the purchases add up to 47.0462262. Nothing was used, yet that
+// 0.0000002 used to read as consumption and price the product from the OLDER
+// purchase. Whether a product fell this way or the other was chance.
+const roma = [
+  { generic_product_id: 'roma', purchase_date: '2026-09-22', pack_qty: 25, pack_unit: 'lb', qty_ordered: 1, cost: 34.75, cost_per_unit: 1.39 },
+  { generic_product_id: 'roma', purchase_date: '2026-09-29', pack_qty: 10, pack_unit: 'kg', qty_ordered: 1, cost: 31.00, cost_per_unit: 3.10 },
+];
+const romaAt = (onHand) => fifoActiveEntryWithBasis(roma, onHand, 'lb', null, {});
+t.check('stock a hair BELOW purchases -> newest price, latest basis',
+  romaAt(47.046226).entry.cost_per_unit === 3.10 && romaAt(47.046226).basis === 'latest', JSON.stringify(romaAt(47.046226).basis));
+t.check('stock a hair ABOVE purchases -> the same answer',
+  romaAt(47.046227).entry.cost_per_unit === 3.10 && romaAt(47.046227).basis === 'latest');
+t.check('real usage, even a little (10 g), still switches FIFO on',
+  romaAt(47.046226 - 0.022).basis === 'fifo' && romaAt(47.046226 - 0.022).entry.cost_per_unit === 1.39);
+t.check('and the three-delivery product above is unaffected (used 15 of 60 -> $3.00, fifo)',
+  t.near(price(45, 'pro'), 3) && basis(45, 'pro') === 'fifo');
+
 t.done();
