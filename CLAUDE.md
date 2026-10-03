@@ -743,11 +743,33 @@ account holding stock takes was a test account. If real customers ever need
 reported months frozen, store the valuation at submit time — do not add a cutoff
 date to `valueTake`.
 
-Still open (**Job B**): a restaurant that never presses Produce Batch has no batch
-bin, so the count sheet — built from existing `inventory` rows — never offers the
-prep to be counted at all. Its raw materials then read as a phantom shortfall
-equal to whatever is in the tub. Fixing that needs the count sheet to list prep
-with no stock balance.
+**Job B, closed 2026-10-04: prep nobody recorded can be counted.** The count sheet
+was built from `inventory` rows alone, so a restaurant that cooked a tub without
+pressing Produce Batch was never offered it, and its raw materials read as a
+phantom shortfall. `POST /api/stock-take/start` now also adds a line for every
+recipe that has no batch bin: `item_type='batch'`, expected 0, the recipe's yield
+unit, and **an empty `inventory_id`** (that is how the page and submit tell them
+apart). Counted above zero, submit creates the bin (or adjusts one produced since
+the sheet was made), logs it with `reason_code='production'`, and sets the recipe
+to `batched` so sales draw the tub first, exactly as after Produce Batch. Left
+blank or counted zero, nothing is created. On the page these lines are optional:
+they stay out of the progress count and the "not counted" warning unless counted
+(`isUnrecordedPrep` / `countableItems` in `stock-take.js`). `npm run test:prep`
+(needs the sandbox).
+
+**A Pro restaurant's recipes are taken to be made ahead** (`prepStockAssumed()` in
+`utils.js`). The recipe form saves `batched` for them, and offers one box, "Made to
+order — never kept in stock", which saves **`to_order`**: a third `production_mode`
+value that sells exactly like `on_demand` (anything not `batched`/`ignore` explodes
+to raw materials) and is the only thing left OFF the count sheet. Legacy
+`on_demand` recipes are still listed. Safe because of the fall-through: `batched`
+with no tub takes raw materials. Side effect handled in `sales.js`: with every
+recipe `batched`, the "prep was used that had never been recorded" note would list
+the whole menu on each import, so for these accounts it shows real splits only (a
+tub that ran short). Essential restaurants and commissaries are unchanged.
+Known limit: a super-admin *viewing as* an account gets their own plan and type in
+the browser, so the box does not show for them and a recipe they save keeps the
+dropdown's value.
 
 ### Data model (two-level product design)
 `generic_products` (the abstract item) + `product_entries` (per-supplier purchase records with FIFO pricing) is the central pattern. `recipes`/`recipe_items` cost from products; `finished_products`/`finished_product_items` cost from recipes; producing/packing deducts `inventory` and writes `stock_log`. Stock takes (`stock_takes`/`stock_take_items`) reconcile counted vs system stock.

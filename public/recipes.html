@@ -261,6 +261,20 @@
             <small id="recipeProductionModeHint" style="display:block;color:var(--text-muted);font-size:.78rem;margin-top:.35rem"></small>
           </div>
 
+          <!-- Pro restaurants only (shown by applyBatchWorkflowGating). A recipe is
+               taken to be made ahead: it is offered on every stock take so its tub
+               can be counted. Ticking this says it is never kept, and leaves it
+               off the count sheet. -->
+          <div class="form-group" id="recipeNotStockedGroup" style="display:none">
+            <label style="display:flex;align-items:center;gap:.5rem;font-weight:500;text-transform:none;letter-spacing:0;cursor:pointer">
+              <input type="checkbox" id="recipeNotStocked" style="width:auto;margin:0" />
+              Made to order — never kept in stock
+            </label>
+            <small style="display:block;color:var(--text-muted);font-size:.78rem;margin-top:.35rem">
+              Leave unticked for anything you prepare in advance. Ticked recipes are left off the stock take.
+            </small>
+          </div>
+
           <!-- Ingredient lines -->
           <h3 class="section-title"><i class="fas fa-list"></i> Ingredients</h3>
 
@@ -410,8 +424,8 @@
   </div>
 
   <script src="/static/env-banner.js?v=20260807-2"></script>
-  <script src="/static/utils.js?v=20261004-7"></script>
+  <script src="/static/utils.js?v=20261004-8"></script>
   <script src="/static/inventory.js?v=20261004-2"></script>
-  <script src="/static/recipes.js?v=20261004-6"></script>
+  <script src="/static/recipes.js?v=20261004-7"></script>
 </body>
 </html>

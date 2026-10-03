@@ -289,9 +289,25 @@ function purchaseAdminFieldsHidden() {
 // unchanged. Skipping them on save instead would silently wipe pack levels and
 // reorder levels on every Essential save — and only show up as damage later,
 // when that account upgraded to Pro and opened a count sheet.
+// A Pro restaurant's recipes are taken to be prep made ahead: saved as
+// 'batched', and offered on every stock take so a tub nobody recorded can still
+// be counted. The exception is a recipe ticked "made to order — never kept in
+// stock" ('to_order'). Pro only — Essential has no stock takes and nothing that
+// draws a tub down — and restaurants only, since a commissary declares how each
+// recipe is made itself. Unknown plan or type returns false: a recipe saved in
+// that brief window keeps the old default rather than guessing.
+function prepStockAssumed() {
+  return restaurantAccount() && String(window.__accountPlan || '').toLowerCase() === 'pro';
+}
+
 function applyBatchWorkflowGating() {
   const hide = (id) => { const el = document.getElementById(id); if (el) el.style.display = 'none'; };
   if (restaurantAccount()) { hide('recipeProductionModeGroup'); hide('packRunBtn'); }
+  // The one question a Pro restaurant IS asked about a recipe: is it ever kept?
+  // Everything else about how it is made is worked out from what the kitchen
+  // does. Not shown on Essential (no stock takes) or to a commissary (which
+  // keeps the full "How is this made?" choice above).
+  if (prepStockAssumed()) { const el = document.getElementById('recipeNotStockedGroup'); if (el) el.style.display = ''; }
   if (batchWorkflowHidden()) hide('produceBatchBtn');
   if (stockDetailFieldsHidden()) { hide('packLevelsSection'); hide('lowStockSection'); }
   // The matching Expiry and Invoice COLUMNS are hidden in renderEntriesTable()

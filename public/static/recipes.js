@@ -1026,7 +1026,12 @@ async function saveRecipe() {
   const desc      = document.getElementById('recipeDesc').value.trim();
   const yieldQty  = parseFloat(document.getElementById('recipeYieldQty').value) || 1;
   const yieldUnit = document.getElementById('recipeYieldUnit').value || 'kg';
-  const prodMode  = document.getElementById('recipeProductionMode').value || 'on_demand';
+  // A Pro restaurant is not asked how a recipe is made: it is made ahead unless
+  // ticked as never kept in stock (see prepStockAssumed in utils.js). Everyone
+  // else keeps the dropdown's answer.
+  const prodMode  = prepStockAssumed()
+    ? (document.getElementById('recipeNotStocked').checked ? 'to_order' : 'batched')
+    : (document.getElementById('recipeProductionMode').value || 'on_demand');
   const editId    = document.getElementById('editRecipeId').value;
 
   if (!name) { showToast('Recipe name is required.', 'error'); return; }
@@ -1123,6 +1128,8 @@ const PRODUCTION_MODE_HINTS = {
 };
 
 function setProductionMode(mode) {
+  const box = document.getElementById('recipeNotStocked');
+  if (box) box.checked = mode === 'to_order';
   const sel = document.getElementById('recipeProductionMode');
   if (!sel) return;
   sel.value = PRODUCTION_MODE_HINTS[mode] ? mode : 'on_demand';
@@ -1261,7 +1268,8 @@ async function openRecipeDetail(id) {
       ${recipe.description ? `<div class="detail-info-item"><span>Description</span><span>${esc(recipe.description)}</span></div>` : ''}
       <div class="detail-info-item"><span>Yield</span><span>${recipe.servings ? recipe.servings + ' ' + esc(yieldUnit) : '—'}</span></div>
       ${batchWorkflowHidden() ? '' : `<div class="detail-info-item"><span>How it's made</span><span>${
-        recipe.production_mode === 'batched' ? 'Made ahead in batches' : 'Made to order'
+        recipe.production_mode === 'batched' ? 'Made ahead in batches'
+          : recipe.production_mode === 'to_order' ? 'Made to order — never kept in stock' : 'Made to order'
       }</span></div>`}
     </div>
 

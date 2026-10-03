@@ -5753,6 +5753,23 @@ app.post('/api/stock-take/start', async (c) => {
 
   const items = inv.results || []
 
+  // Prep nobody recorded. The sheet used to be built from inventory rows alone,
+  // so a kitchen that cooked a tub of ragù without pressing Produce Batch was
+  // never asked to count it — and the beef inside that tub read as missing.
+  // Every recipe without a batch bin is therefore offered too, at an expected
+  // quantity of zero and in its own yield unit. These lines carry NO
+  // inventory_id: nothing exists to adjust until one is counted above zero, at
+  // which point submit creates the bin. A recipe marked 'to_order' (the
+  // "made to order — never kept in stock" box on the recipe) is left off.
+  const binned = new Set(items.filter(r => r.item_type === 'batch').map(r => r.item_id))
+  const recipeRows = await c.env.DB.prepare(
+    `SELECT id, name, yield_unit, production_mode FROM recipes WHERE org_id IS ?`
+  ).bind(org).all<{ id: string; name: string; yield_unit: string; production_mode: string }>()
+  const unrecordedPrep = (recipeRows.results || [])
+    .filter(r => !binned.has(r.id) && (r.production_mode || '') !== 'to_order')
+
+  // total_items stays the number of things actually in stock: an uncounted prep
+  // line is not an item somebody skipped.
   await c.env.DB.prepare(
     `INSERT INTO stock_takes (id, status, total_items, counted_items, org_id) VALUES (?, 'in_progress', ?, 0, ?)`
   ).bind(stockTakeId, items.length, org).run()
@@ -5765,6 +5782,15 @@ app.post('/api/stock-take/start', async (c) => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(uid(), stockTakeId, r.id, r.item_id, r.item_type, r.item_name, r.category || '', r.unit || '', r.quantity || 0, org)
   )
+  for (const r of unrecordedPrep) {
+    statements.push(
+      c.env.DB.prepare(
+        `INSERT INTO stock_take_items
+           (id, stock_take_id, inventory_id, item_id, item_type, item_name, category, unit, expected_qty, org_id)
+         VALUES (?, ?, '', ?, 'batch', ?, 'Batch', ?, 0, ?)`
+      ).bind(uid(), stockTakeId, r.id, r.name, r.yield_unit || 'kg', org)
+    )
+  }
   if (statements.length) await c.env.DB.batch(statements)
 
   const created = await c.env.DB.prepare(
@@ -5809,6 +5835,15 @@ app.post('/api/stock-take/:id/submit', async (c) => {
   }>()
   const snapshotById = new Map((snapshotRows.results || []).map(r => [r.id, r]))
 
+  // Batch bins as they stand NOW, for the prep lines that had none when the
+  // sheet was made (see /start). One may have appeared since — someone pressed
+  // Produce Batch while the count was open — and then it is adjusted, not
+  // duplicated.
+  const batchBins = await c.env.DB.prepare(
+    `SELECT id, item_id, quantity FROM inventory WHERE org_id IS ? AND item_type = 'batch'`
+  ).bind(org).all<{ id: string; item_id: string; quantity: number }>()
+  const binByRecipe = new Map((batchBins.results || []).map(b => [b.item_id, b]))
+
   const now = new Date().toISOString()
   let countedCount = 0
   const statements: D1PreparedStatement[] = []
@@ -5824,6 +5859,60 @@ app.post('/api/stock-take/:id/submit', async (c) => {
     const reason     = (it.reason || '').trim()
     const reasonCode = (it.reason_code || '').trim()
     countedCount++
+
+    // Prep that had no bin when the sheet was made. Counted above zero, the tub
+    // now exists: create its bin (or adjust one produced meanwhile), log where
+    // it came from, and mark the recipe made-ahead so the next sales draw this
+    // tub before raw ingredients — the same thing Produce Batch does. Counted
+    // at zero, there is nothing to create; the count is only recorded.
+    if (!snap.inventory_id) {
+      const bin      = snap.item_type === 'batch' ? binByRecipe.get(snap.item_id) : undefined
+      const binId    = bin ? bin.id : (counted > 0 ? uid() : '')
+      const before   = bin ? (Number(bin.quantity) || 0) : 0
+      const moved    = counted - before
+      if (bin) {
+        statements.push(
+          c.env.DB.prepare(`UPDATE inventory SET quantity = ? WHERE id = ? AND org_id IS ?`).bind(counted, bin.id, org)
+        )
+      } else if (counted > 0) {
+        statements.push(
+          c.env.DB.prepare(
+            `INSERT INTO inventory (id, item_id, item_type, item_name, category, quantity, unit, org_id)
+             VALUES (?, ?, 'batch', ?, 'Batch', ?, ?, ?)`
+          ).bind(binId, snap.item_id, snap.item_name, counted, snap.unit || '', org)
+        )
+      }
+      statements.push(
+        c.env.DB.prepare(
+          `UPDATE stock_take_items
+             SET inventory_id = ?, counted_qty = ?, variance = ?, reason = ?, reason_code = ?, counted_at = ?
+           WHERE id = ? AND org_id IS ?`
+        ).bind(binId, counted, variance, reason || (counted > 0 ? 'Production / batch' : ''),
+               reasonCode || (counted > 0 ? 'production' : ''), now, snap.id, org)
+      )
+      if (binId && moved !== 0) {
+        statements.push(
+          c.env.DB.prepare(
+            `INSERT INTO stock_log
+               (id, inventory_id, item_id, item_type, item_name, change, reason, reason_code, note, lot_number, moved_at, stock_take_id, org_id)
+             VALUES (?, ?, ?, 'batch', ?, ?, ?, ?, ?, '', ?, ?, ?)`
+          ).bind(
+            uid(), binId, snap.item_id, snap.item_name,
+            moved, reason || 'Production / batch', reasonCode || 'production',
+            `Stock take: prep counted that had not been recorded (expected ${before}, counted ${counted})`,
+            now, stockTakeId, org
+          )
+        )
+      }
+      if (counted > 0 && snap.item_type === 'batch') {
+        statements.push(
+          c.env.DB.prepare(
+            `UPDATE recipes SET production_mode = 'batched' WHERE id = ? AND org_id IS ? AND production_mode != 'batched'`
+          ).bind(snap.item_id, org)
+        )
+      }
+      continue
+    }
 
     // 1. Update inventory quantity
     statements.push(

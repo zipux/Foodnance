@@ -435,10 +435,16 @@ async function commitPosImport() {
     // counting. It isn't — the tub ran short, and whatever it couldn't cover was
     // never recorded as produced, so those ingredients were still on the shelf.
     // Say so in full, with the numbers, or someone will "fix" it by hand.
-    if ((res.fell_through || []).length) {
+    //
+    // On a Pro restaurant every recipe is taken to be made ahead, so a recipe
+    // with no tub at all would land here on every import and the message would
+    // list the whole menu. Nothing surprising happened in that case — no tub
+    // moved — so there it is kept for real splits only: a tub that ran short.
+    const fellThrough = (res.fell_through || []).filter(f => !prepStockAssumed() || Number(f.from_bin) > 0);
+    if (fellThrough.length) {
       alert(
         `Some prep was used that had never been recorded as made:\n\n  ` +
-        res.fell_through.map(f =>
+        fellThrough.map(f =>
           `${f.item_name}: ${f.from_bin} ${f.unit} came out of stock, ` +
           `the other ${f.from_raw} ${f.unit} was taken as raw ingredients`
         ).join('\n  ') +

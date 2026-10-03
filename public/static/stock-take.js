@@ -504,7 +504,7 @@ function render() {
       <section class="st-group" data-group-key="${esc(g.key)}">
         <div class="st-group-header">
           <i class="fas ${g.icon}"></i> ${esc(g.label)}
-          <span class="st-group-count">${countedInGroup} / ${g.items.length} counted</span>
+          <span class="st-group-count">${countedInGroup} / ${countableItems(g.items).length} counted</span>
         </div>
         ${isMobileView ? renderCards(items) : renderTable(items)}
       </section>
@@ -543,6 +543,20 @@ function updateFilterNote(shown) {
     render();
   });
 }
+
+// Prep nobody recorded: a recipe with no tub in stock, offered on the sheet so it
+// can be counted anyway (see POST /api/stock-take/start). It has no inventory
+// row yet — one is created at submit if it is counted above zero. Leaving it
+// blank is not "skipping an item": there is nothing in stock to keep or zero.
+function isUnrecordedPrep(it) {
+  return !!it && !it.inventory_id;
+}
+// What the progress figures and the "not counted" warning are about: everything
+// in stock, plus any unrecorded prep somebody did count.
+function countableItems(items) {
+  return items.filter(it => !isUnrecordedPrep(it) || hasCount(it.id));
+}
+const PREP_HINT = 'Not in stock yet — enter what you have made, or leave blank';
 
 function hasCount(snapId) {
   const s = inputState.get(snapId);
@@ -591,6 +605,7 @@ function rowHtml(it) {
       <td>
         <div class="st-name">${esc(it.item_name)}</div>
         ${it.category ? `<div class="st-cat">${esc(it.category)}</div>` : ''}
+        ${isUnrecordedPrep(it) ? `<div class="st-cat">${PREP_HINT}</div>` : ''}
       </td>
       <td class="st-expected-cell">${expectedHtml(it, false)}</td>
       <td>${countedCell}</td>
@@ -648,6 +663,7 @@ function cardHtml(it) {
         <div>
           <div class="st-card-name">${esc(it.item_name)}</div>
           ${it.category ? `<div class="st-card-cat">${esc(it.category)}</div>` : ''}
+          ${isUnrecordedPrep(it) ? `<div class="st-card-cat">${PREP_HINT}</div>` : ''}
         </div>
         <div class="st-card-expected-wrap">${expectedHtml(it, true)}</div>
       </div>
@@ -781,6 +797,10 @@ function onCountChange(e) {
   const snapId = e.target.dataset.snapId;
   const state  = inputState.get(snapId) || { counted: '', reason: '' };
   state.counted = e.target.value;
+  // A tub counted where none was on record has one explanation — it was made
+  // and not recorded — so the reason is filled in rather than asked for.
+  const snap = snapshotItems.find(x => x.id === snapId);
+  if (isUnrecordedPrep(snap)) state.reason = parseFloat(state.counted) > 0 ? 'production' : '';
   inputState.set(snapId, state);
   updateRow(snapId);
   scheduleAutosave(snapId);
@@ -913,7 +933,7 @@ function cssEscape(s) {
 }
 
 function updateProgress() {
-  const total   = snapshotItems.length;
+  const total   = countableItems(snapshotItems).length;
   const counted = snapshotItems.filter(it => hasCount(it.id)).length;
   const msg = `${counted} of ${total} counted`;
   document.getElementById('stProgress').textContent = msg;
@@ -929,7 +949,7 @@ function updateGroupCounts() {
     if (!items) return;
     const counted = items.filter(it => hasCount(it.id)).length;
     const label = el.querySelector('.st-group-count');
-    if (label) label.textContent = `${counted} / ${items.length} counted`;
+    if (label) label.textContent = `${counted} / ${countableItems(items).length} counted`;
   });
 }
 
@@ -966,7 +986,8 @@ async function submitStockTake() {
 
   // Anything left uncounted keeps its existing stock. That is a reasonable
   // default but a terrible surprise, so say so plainly before committing.
-  const uncounted = snapshotItems.filter(it => !hasCount(it.id));
+  // Blank unrecorded-prep lines are not part of this: nothing is in stock to keep.
+  const uncounted = snapshotItems.filter(it => !hasCount(it.id) && !isUnrecordedPrep(it));
   if (uncounted.length) { openSubmitSummary(uncounted); return; }
 
   await performSubmit();
@@ -974,7 +995,7 @@ async function submitStockTake() {
 
 // ── Pre-submit summary ─────────────────────────────────────────
 function openSubmitSummary(uncounted) {
-  const total = snapshotItems.length;
+  const total = countableItems(snapshotItems).length + uncounted.filter(isUnrecordedPrep).length;
   const done  = total - uncounted.length;
 
   document.getElementById('stSubmitLead').innerHTML =
@@ -1005,7 +1026,7 @@ function openSubmitSummary(uncounted) {
 
 async function confirmSubmit() {
   const zeroing = document.querySelector('input[name="stUncountedAction"]:checked').value === 'zero';
-  const uncounted = snapshotItems.filter(it => !hasCount(it.id));
+  const uncounted = snapshotItems.filter(it => !hasCount(it.id) && !isUnrecordedPrep(it));
 
   if (zeroing) {
     const reasonCode = document.getElementById('stZeroReason').value;
