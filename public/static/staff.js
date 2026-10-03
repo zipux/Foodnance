@@ -7,7 +7,6 @@ let currentPage = 1;
 let certsByStaff = {}; // staffId → [certs]
 let certTypes = [];    // the organization's certification types (for the add form)
 let viewingCertsFor = null;   // { id, name } of the staff member whose certificates window is open
-const NEW_TYPE = '__new_type__';
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadStaff();
@@ -38,7 +37,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('saveAddCertBtn').addEventListener('click', saveAddCert);
   document.getElementById('cancelAddCertModal').addEventListener('click', () => closeModal('addCertModal'));
   document.getElementById('closeAddCertModal').addEventListener('click', () => closeModal('addCertModal'));
-  document.getElementById('acType').addEventListener('change', onAddCertTypeChange);
+  document.getElementById('acType').addEventListener('change', autoSetAddCertExpiry);
   document.getElementById('acIssueDate').addEventListener('change', autoSetAddCertExpiry);
   const acArea = document.getElementById('acUploadArea'), acInput = document.getElementById('acFileInput');
   acArea.addEventListener('click', () => acInput.click());
@@ -119,14 +118,18 @@ function renderStats() {
     }
   }
 
-  document.getElementById('staffStats').innerHTML = `
-    <div class="stat-card"><div class="stat-value">${allStaff.length}</div><div class="stat-label">Total Staff</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:#059669">${active}</div><div class="stat-label">Active</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:#6b7280">${inactive}</div><div class="stat-label">Inactive</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:#d97706">${onLeave}</div><div class="stat-label">On Leave</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:#d97706">${expiring}</div><div class="stat-label">Certs Expiring Soon</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:#dc2626">${expired}</div><div class="stat-label">Certs Expired</div></div>
-  `;
+  // Chips, like the Products and Inventory tabs. (This used .stat-card, a class
+  // with no styling anywhere, so the figures showed as bare stacked text.)
+  // Total and Active always show; the rest only when there is something to say.
+  const chip = (icon, text, style) =>
+    `<div class="stat-chip"${style ? ` style="${style}"` : ''}><i class="fas ${icon}"></i> ${text}</div>`;
+  document.getElementById('staffStats').innerHTML =
+    chip('fa-users', `${allStaff.length} Staff`) +
+    chip('fa-user-check', `${active} Active`, 'background:#d1fae5;color:#065f46') +
+    (inactive > 0 ? chip('fa-user-slash', `${inactive} Inactive`, 'background:#f1f5f9;color:#64748b') : '') +
+    (onLeave  > 0 ? chip('fa-plane', `${onLeave} On leave`, 'background:#fef9c3;color:#854d0e') : '') +
+    (expiring > 0 ? chip('fa-clock', `${expiring} ${expiring === 1 ? 'certificate' : 'certificates'} expiring soon`, 'background:#fef9c3;color:#854d0e') : '') +
+    (expired  > 0 ? chip('fa-triangle-exclamation', `${expired} ${expired === 1 ? 'certificate' : 'certificates'} expired`, 'background:#fee2e2;color:#991b1b') : '');
 }
 
 function renderTable() {
@@ -328,34 +331,26 @@ function viewStaffCerts(staffId, staffName) {
 
 // ── Add certification (for one staff member) ───────────────────
 // The same record the Certifications page creates, added from where the person
-// already is: the staff member is fixed, and a type that doesn't exist yet can
-// be typed in ("+ New type…") — a new account starts with no types at all, and
-// the form can't be saved without one.
+// already is: the staff member is fixed, and the certificate is ONE box you type
+// its name into. Names used before are offered as you type; one that matches is
+// reused, a new one is added to the organization's list on save. (It was a
+// dropdown plus a "+ New type…" box, which on a new account — no types at all —
+// asked a question with nothing to choose.)
 async function loadCertTypes() {
   const data = await apiGet('tables/certification_types?limit=500');
   certTypes = (data.data || []).slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 }
 
-function fillAddCertTypes(selected) {
-  document.getElementById('acType').innerHTML =
-    '<option value="">— Select type —</option>' +
-    certTypes.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('') +
-    `<option value="${NEW_TYPE}">+ New type…</option>`;
-  document.getElementById('acType').value = selected || '';
-  onAddCertTypeChange();
-}
-
-function onAddCertTypeChange() {
-  const isNew = document.getElementById('acType').value === NEW_TYPE;
-  document.getElementById('acNewTypeGroup').classList.toggle('hidden', !isNew);
-  if (isNew) document.getElementById('acNewType').focus();
-  autoSetAddCertExpiry();
+// The existing type whose name was typed (any capitalisation), or undefined.
+function certTypeByName(name) {
+  const key = String(name || '').trim().toLowerCase();
+  return key ? certTypes.find(t => (t.name || '').trim().toLowerCase() === key) : undefined;
 }
 
 // Same convenience as the Certifications page: an existing type's validity
 // fills in the expiry date from the issue date. It stays editable.
 function autoSetAddCertExpiry() {
-  const type = certTypes.find(t => t.id === document.getElementById('acType').value);
+  const type = certTypeByName(document.getElementById('acType').value);
   const issueDate = document.getElementById('acIssueDate').value;
   if (!type || !type.validity_months || !issueDate) return;
   const d = new Date(issueDate);
@@ -367,7 +362,7 @@ async function openAddCert(staffId, staffName) {
   document.getElementById('acStaffId').value = staffId;
   document.getElementById('addCertModalTitle').innerHTML =
     `<i class="fas fa-certificate"></i> Add certification — ${esc(staffName)}`;
-  ['acNewType', 'acNumber', 'acIssuer', 'acIssueDate', 'acExpiryDate', 'acNotes', 'acFileKey', 'acFileName', 'acFileInput']
+  ['acType', 'acNumber', 'acIssuer', 'acIssueDate', 'acExpiryDate', 'acNotes', 'acFileKey', 'acFileName', 'acFileInput']
     .forEach(id => { document.getElementById(id).value = ''; });
   document.getElementById('acFilePreview').innerHTML = '';
   try {
@@ -376,10 +371,10 @@ async function openAddCert(staffId, staffName) {
     showToast('Could not load certification types: ' + e.message, 'error');
     return;
   }
-  // No types yet: open straight on "new type" rather than an empty list.
-  fillAddCertTypes(certTypes.length ? '' : NEW_TYPE);
+  document.getElementById('acTypeList').innerHTML =
+    certTypes.map(t => `<option value="${esc(t.name)}">`).join('');
   openModal('addCertModal');
-  if (!certTypes.length) document.getElementById('acNewType').focus();
+  document.getElementById('acType').focus();
 }
 
 async function uploadAddCertFile(file) {
@@ -399,14 +394,12 @@ async function uploadAddCertFile(file) {
 async function saveAddCert() {
   const staffId    = document.getElementById('acStaffId').value;
   const staff      = allStaff.find(s => s.id === staffId);
-  const typeChoice = document.getElementById('acType').value;
-  const newName    = document.getElementById('acNewType').value.trim();
+  const typeName   = document.getElementById('acType').value.trim();
   const issueDate  = document.getElementById('acIssueDate').value;
   const expiryDate = document.getElementById('acExpiryDate').value;
 
   if (!staff) { showToast('This staff member could not be found. Reload the page and try again.', 'error'); return; }
-  if (!typeChoice) { showToast('Please select a certification type.', 'error'); return; }
-  if (typeChoice === NEW_TYPE && !newName) { showToast('Enter a name for the new certification type.', 'error'); return; }
+  if (!typeName) { showToast('Enter the name of the certificate, for example FoodSafe Level 1.', 'error'); return; }
   if (!issueDate) { showToast('Issue date is required.', 'error'); return; }
   if (!expiryDate) { showToast('Expiry date is required.', 'error'); return; }
 
@@ -414,17 +407,14 @@ async function saveAddCert() {
   btn.disabled = true;
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
   try {
-    let type = certTypes.find(t => t.id === typeChoice);
-    if (typeChoice === NEW_TYPE) {
-      // A name that already exists is that type, not a second one beside it.
-      type = certTypes.find(t => (t.name || '').trim().toLowerCase() === newName.toLowerCase());
-      if (!type) {
-        // Same defaults the Certifications page's "Add Type" form starts with.
-        type = await apiPost('tables/certification_types', {
-          name: newName, description: '', validity_months: 12, is_mandatory: 0,
-        });
-        certTypes.push(type);
-      }
+    // A name that already exists is that type, not a second one beside it.
+    let type = certTypeByName(typeName);
+    if (!type) {
+      // Same defaults the Certifications page's "Add Type" form starts with.
+      type = await apiPost('tables/certification_types', {
+        name: typeName, description: '', validity_months: 12, is_mandatory: 0,
+      });
+      certTypes.push(type);
     }
     const created = await apiPost('tables/staff_certifications', {
       staff_id:       staffId,

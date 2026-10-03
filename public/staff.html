@@ -197,12 +197,9 @@
         <input type="hidden" id="acStaffId" />
         <div class="form-grid">
           <div class="form-group">
-            <label>Certification Type *</label>
-            <select id="acType"></select>
-          </div>
-          <div class="form-group hidden" id="acNewTypeGroup">
-            <label>New type name *</label>
-            <input type="text" id="acNewType" maxlength="120" placeholder="e.g. FoodSafe Level 1" />
+            <label>Certificate *</label>
+            <input type="text" id="acType" maxlength="120" placeholder="e.g. FoodSafe Level 1" list="acTypeList" autocomplete="off" />
+            <datalist id="acTypeList"></datalist>
           </div>
           <div class="form-group">
             <label>Certificate Number</label>
@@ -250,6 +247,6 @@
   <div id="toast" class="toast hidden"></div>
   <script src="/static/env-banner.js?v=20260807-2"></script>
   <script src="/static/utils.js?v=20261004-6"></script>
-  <script src="/static/staff.js?v=20261004-1"></script>
+  <script src="/static/staff.js?v=20261004-3"></script>
 </body>
 </html>

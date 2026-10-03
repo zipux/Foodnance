@@ -94,14 +94,18 @@ function renderStats() {
   const expired = allCerts.filter(c => c.expiry_date <= today).length;
   const staffWithCerts = new Set(allCerts.map(c => c.staff_id)).size;
 
-  document.getElementById('certStats').innerHTML = `
-    <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">Total Certifications</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:#059669">${valid}</div><div class="stat-label">Valid</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:#d97706">${expiring}</div><div class="stat-label">Expiring ≤ 30 days</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:#dc2626">${expired}</div><div class="stat-label">Expired</div></div>
-    <div class="stat-card"><div class="stat-value">${staffWithCerts}</div><div class="stat-label">Staff with Certs</div></div>
-    <div class="stat-card"><div class="stat-value">${allTypes.length}</div><div class="stat-label">Cert Types</div></div>
-  `;
+  // Chips, like the Staff, Products and Inventory tabs. (This used .stat-card, a
+  // class with no styling anywhere, so the figures showed as bare stacked text.)
+  // Expiring and expired show only when there is something to say.
+  const chip = (icon, text, style) =>
+    `<div class="stat-chip"${style ? ` style="${style}"` : ''}><i class="fas ${icon}"></i> ${text}</div>`;
+  document.getElementById('certStats').innerHTML =
+    chip('fa-certificate', `${total} ${total === 1 ? 'Certification' : 'Certifications'}`) +
+    chip('fa-check', `${valid} Valid`, 'background:#d1fae5;color:#065f46') +
+    (expiring > 0 ? chip('fa-clock', `${expiring} expiring within 30 days`, 'background:#fef9c3;color:#854d0e') : '') +
+    (expired  > 0 ? chip('fa-triangle-exclamation', `${expired} Expired`, 'background:#fee2e2;color:#991b1b') : '') +
+    chip('fa-users', `${staffWithCerts} Staff with certificates`) +
+    chip('fa-tag', `${allTypes.length} ${allTypes.length === 1 ? 'Type' : 'Types'}`);
 }
 
 // ── View Switcher ───────────────────────────────────────────────
