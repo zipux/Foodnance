@@ -545,10 +545,17 @@ function onProductChange(idx) {
   recalcCosts();
 }
 
+// Has this row's product never been purchased? It then has no price and the
+// line counts as $0 — allowed, but marked (see unpricedMark in utils.js).
+function rowUnpriced(r) {
+  return !!(r && r.product_id && rCostIndex.product.get(r.product_id)?.priced === false);
+}
+
 function _updateIngCostDisplay(idx) {
   const el = document.getElementById(`ing-cpu-${idx}`);
   if (!el) return;
   const r = ingredientRows[idx];
+  if (rowUnpriced(r)) { el.innerHTML = unpricedLineLabel(); return; }
   if (!r || !r.product_id || !r.unit_cost || !r.pack_unit) { el.textContent = ''; return; }
   const unit   = r.unit || r.pack_unit;
   // Used by its own sub-unit (1 can of a case): show the price of one, the same
@@ -949,7 +956,8 @@ function recalcCosts() {
   const yieldUnit = document.getElementById('recipeYieldUnit').value || 'kg';
   const costs = activeRows().map(calcIngredientLineCost);
   const total = costs.reduce((t, c) => t + (isUncostable(c) ? 0 : c), 0);
-  const warn  = costs.some(isUncostable) ? ' ⚠' : '';   // total excludes uncostable lines
+  // ⚠ when a line can't be costed, or its product has never been purchased ($0).
+  const warn  = (costs.some(isUncostable) || activeRows().some(rowUnpriced)) ? ' ⚠' : '';
   document.getElementById('totalCostDisplay').textContent       = fmt(total) + warn;
   // Quoted per kg / per L when the yield is in g / ml — a per-gram price rounds
   // to $0.00 and reads as free. The yield itself stays in the unit typed above.
@@ -1031,8 +1039,22 @@ async function saveRecipe() {
   const items = activeRows();
   if (!items.length) { showToast('Add at least one ingredient.', 'error'); return; }
 
-  if (anyUncostable(items)) {
-    showToast('Some ingredients can’t be costed in the unit chosen — look for the ⚠ rows. Saving counts those lines as $0.', 'warning');
+  // A line that can't be costed (its unit can't be converted, or the weight
+  // that would bridge it is missing) blocks the save. It used to be saved as $0
+  // behind a warning, which left a recipe on the books costing less than it
+  // does. The unit is still allowed on screen with its ⚠ — refusing it there is
+  // what once billed 200 cases of napkins — only the Save is refused. A product
+  // that has simply never been purchased is NOT blocked here.
+  const blocked = items.filter(r => isUncostable(calcIngredientLineCost(r)));
+  if (blocked.length) {
+    const first = blocked[0];
+    const more  = blocked.length - 1;
+    showToast(
+      'This recipe can’t be saved yet. ' +
+      uncostableReason(first.pack_unit, first.unit || 'kg', first.product_name) +
+      (more ? ` (${more} more ⚠ line${more === 1 ? '' : 's'} to fix as well.)` : ''),
+      'error');
+    return;
   }
 
   const total = sumLineCosts(items);
@@ -1162,7 +1184,7 @@ function renderRecipeList(query) {
     const cost = recipeLiveCost(r);
     const warn = rCostIndex.recipe.get(r.id)?.uncostable
       ? ' <span title="An ingredient could not be costed — set an average weight, or check its unit" style="color:#dc2626">&#9888;</span>'
-      : '';
+      : (rCostIndex.recipe.get(r.id)?.unpriced ? unpricedMark() : '');
     return `
     <div class="recipe-card" onclick="openRecipeDetail('${esc(r.id)}')">
       <div>
@@ -1230,7 +1252,7 @@ async function openRecipeDetail(id) {
   // this modal is the screen people open to check a cost in detail.
   const uncWarn = anyUnc
     ? ' <span title="An ingredient could not be costed — set an average weight, or check its unit" style="color:#dc2626">&#9888;</span>'
-    : '';
+    : (rIdx?.unpriced ? unpricedMark() : '');
 
   let body = `
     ${costBasisNote(rCostIndex.recipe.get(recipe.id)?.basis)}

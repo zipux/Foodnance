@@ -1580,6 +1580,19 @@ function subUnitWeightRate({ unitCost, packUnit, packQty, subName, subQty, avgWe
   return (perSubUnit / w) * to.factor;
 }
 
+// An ingredient that has never been purchased has no price, so it counts as $0.
+// That is allowed — a new customer builds recipes before every invoice is in —
+// but it must be visible: a total that silently leaves an ingredient out reads
+// as complete. Amber, not the red ⚠ of a line that can't be costed: that one
+// blocks saving, this one does not.
+const UNPRICED_NOTE = 'An ingredient has never been purchased, so it counts as $0 — this total is incomplete';
+function unpricedMark() {
+  return ` <span title="${UNPRICED_NOTE}" style="color:#d97706">&#9888;</span>`;
+}
+function unpricedLineLabel() {
+  return `<span style="color:#d97706" title="${UNPRICED_NOTE}"><i class="fas fa-triangle-exclamation"></i> no price yet</span>`;
+}
+
 // Cost of one product line: sub-unit path first, then unit conversion.
 // null when the units can't be bridged. Mirrors the recipe and finished-product
 // line calculations, which is the point — there was one of these per page.
@@ -1703,9 +1716,10 @@ function buildLiveCostIndex({
 
   const recipe = new Map();
   for (const r of recipes) {
-    let total = 0, uncostable = false, anyLatest = false;
+    let total = 0, uncostable = false, unpriced = false, anyLatest = false;
     for (const ri of itemsByRecipe.get(r.id) || []) {
       const pc = product.get(ri.product_id);
+      if (pc && pc.priced === false) unpriced = true;   // never purchased: counts as $0
       if (pc && pc.priced && pc.basis === COST_BASIS_LATEST) anyLatest = true;
       const c = liveProductLineCost(pc, ri.quantity, ri.unit);
       if (c === null || isNaN(c)) { uncostable = true; continue; }
@@ -1718,6 +1732,7 @@ function buildLiveCostIndex({
       yield_unit:          r.yield_unit || 'kg',
       servings,
       uncostable,
+      unpriced,
       // One ingredient on the latest-invoice basis is enough to make the whole
       // total a latest-invoice figure — say so rather than implying FIFO.
       basis: anyLatest ? COST_BASIS_LATEST : COST_BASIS_FIFO,
@@ -1733,9 +1748,11 @@ function buildLiveCostIndex({
 
   const finished = new Map();
   for (const fp of finishedProducts) {
-    let total = 0, uncostable = false, anyLatest = false;
+    let total = 0, uncostable = false, unpriced = false, anyLatest = false;
     for (const fi of itemsByFp.get(fp.id) || []) {
       const src = fi.item_type === 'recipe' ? recipe.get(fi.ref_id) : product.get(fi.ref_id);
+      // Never purchased (or a recipe holding such an ingredient): counts as $0.
+      if (src && (fi.item_type === 'recipe' ? src.unpriced : src.priced === false)) unpriced = true;
       if (fi.item_type === 'recipe') {
         if (src && src.basis === COST_BASIS_LATEST) anyLatest = true;
         // A recipe that couldn't be fully costed makes every product using it
@@ -1757,6 +1774,7 @@ function buildLiveCostIndex({
       profit: selling - total,
       margin_pct: selling > 0 ? ((selling - total) / selling) * 100 : null,
       uncostable,
+      unpriced,
       basis: anyLatest ? COST_BASIS_LATEST : COST_BASIS_FIFO,
     });
   }

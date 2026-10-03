@@ -83,6 +83,10 @@ function fpLiveCost(fp) {
 function fpLiveUncostable(fp) {
   return !!fpCostIndex.finished.get(fp?.id)?.uncostable;
 }
+// An ingredient never purchased counts as $0: allowed, but marked in amber.
+function fpLiveUnpriced(fp) {
+  return !!fpCostIndex.finished.get(fp?.id)?.unpriced;
+}
 
 // A line whose units can't be bridged shows a warning, never $0.00 — a zero
 // reads as "this ingredient is free" and hides the reason the total is low.
@@ -632,12 +636,19 @@ function fpSubUnitWeightRate(r, unit) {
     avgWeightKg: p.avg_weight_per_unit, toUnit: unit });
 }
 
+// Has this product line's product never been purchased? Then it has no price and
+// counts as $0 — allowed, but marked (see unpricedMark in utils.js).
+function fpRowUnpriced(r) {
+  return !!(r && r.ref_id && fpCostIndex.product.get(r.ref_id)?.priced === false);
+}
+
 // Cost per chosen unit, shown under the Unit dropdown (mirrors the recipe tab).
 function _updateFpProductCostDisplay(idx) {
   const el = document.getElementById(`fpp-cpu-${idx}`);
   if (!el) return;
   const r = fpProductRows[idx];
   if (!r || !r.ref_id) { el.textContent = ''; return; }
+  if (fpRowUnpriced(r)) { el.innerHTML = unpricedLineLabel(); return; }
   const unit    = r.unit || r.pack_unit || 'kg';
   const subName = (r.sub_unit_name || '');
   const subQty  = parseFloat(r.sub_unit_qty || 0);
@@ -859,6 +870,7 @@ function hideFpPickerSuggestions(kind, idx) {
 function recalcFpCosts() {
   let total = 0;
   let anyUncostable = false;   // a line whose units can't be bridged (⚠ on the total)
+  let anyUnpriced   = false;   // an ingredient never purchased: counts as $0 (⚠ too, but saving is allowed)
 
   // Sum recipe costs (quantity × cost_per_yield_unit × unit conversion)
   fpRecipeRows.filter(r => r && r.ref_id).forEach(r => {
@@ -868,6 +880,7 @@ function recalcFpCosts() {
     // Affogato whose Vanilla Cream carries a ⚠. The list card knew, because the
     // shared index carries the flag upwards; this form did not.
     if (fpCostIndex.recipe.get(r.ref_id)?.uncostable) anyUncostable = true;
+    if (fpCostIndex.recipe.get(r.ref_id)?.unpriced) anyUnpriced = true;
     const factor = fp_conversionFactor(r.yield_unit || 'kg', r.unit || 'kg');
     if (factor === null) { anyUncostable = true; return; }
     total += (r.cost_per_yield_unit || 0) * (r.quantity || 0) * factor;
@@ -875,6 +888,7 @@ function recalcFpCosts() {
 
   // Sum product costs (sub-unit / avg-weight aware)
   fpProductRows.filter(r => r && r.ref_id).forEach(r => {
+    if (fpRowUnpriced(r)) anyUnpriced = true;
     const c = calcFpProductLineCost(r);
     if (c === null) { anyUncostable = true; return; }
     total += c;
@@ -885,7 +899,7 @@ function recalcFpCosts() {
   const profit  = selling - total;
   const margin  = selling > 0 ? (profit / selling) * 100 : null;
 
-  document.getElementById('fpTotalCostDisplay').textContent = fmt(total) + (window._fpAnyUncostable ? ' ⚠' : '');
+  document.getElementById('fpTotalCostDisplay').textContent = fmt(total) + ((window._fpAnyUncostable || anyUnpriced) ? ' ⚠' : '');
 
   const profitEl  = document.getElementById('fpProfitDisplay');
   const marginEl  = document.getElementById('fpMarginDisplay');
@@ -920,6 +934,38 @@ function recalcFpCosts() {
 }
 
 // ── Save ───────────────────────────────────────────────────────
+// Why each line that can't be costed can't be — one sentence per line, naming
+// the line and the way out. The same three conditions recalcFpCosts() marks
+// with ⚠: a recipe that itself holds an uncostable ingredient, a recipe used in
+// a unit its yield can't be converted to, and a product line whose units can't
+// be bridged. A product that has never been purchased is not one of them.
+function fpUncostableLines(recipeRows, productRows) {
+  const out = [];
+  const dim = (u) => (invUnitInfo(u) ? invUnitInfo(u).dim : (invIsEachUnit(u) ? 'each' : 'other'));
+  recipeRows.forEach(r => {
+    const yieldU = r.yield_unit || 'kg', unit = r.unit || 'kg';
+    if (fp_conversionFactor(yieldU, unit) === null) {
+      out.push(`The recipe "${r.ref_name}" yields ${yieldU}, which can't be converted to ${unit} — choose a unit that matches.`);
+    } else if (fpCostIndex.recipe.get(r.ref_id)?.uncostable) {
+      out.push(`The recipe "${r.ref_name}" has an ingredient that can't be costed — open that recipe and fix its ⚠ line first.`);
+    }
+  });
+  productRows.forEach(r => {
+    if (calcFpProductLineCost(r) !== null) return;
+    const packU = r.pack_unit || 'kg', unit = r.unit || packU;
+    const from = dim(packU), to = dim(unit);
+    if (from === 'other' || to === 'other') {
+      out.push(`"${r.ref_name}" is priced by the ${packU}, and the app doesn't know what is inside one — ` +
+               `set a sub-unit on the product to use it by the ${unit}, or choose ${packU}.`);
+    } else if ((from === 'each' && to === 'weight') || (from === 'weight' && to === 'each')) {
+      out.push(`"${r.ref_name}" is bought by the ${packU}. To use it by the ${unit}, set an "Average Weight per Unit" on the product.`);
+    } else {
+      out.push(`"${r.ref_name}" is priced by the ${packU}, which can't be converted to ${unit} — choose a unit that matches.`);
+    }
+  });
+  return out;
+}
+
 async function saveFp() {
   const name     = document.getElementById('fpName').value.trim();
   const desc     = document.getElementById('fpDesc').value.trim();
@@ -933,6 +979,18 @@ async function saveFp() {
 
   if (!activeRecipes.length && !activeProducts.length) {
     showToast('Add at least one recipe or product.', 'error');
+    return;
+  }
+
+  // A line that can't be costed blocks the save — see the same rule in
+  // recipes.js saveRecipe. This form used to save it as $0 without a word.
+  const blocked = fpUncostableLines(activeRecipes, activeProducts);
+  if (blocked.length) {
+    const more = blocked.length - 1;
+    showToast(
+      'This finished product can’t be saved yet. ' + blocked[0] +
+      (more ? ` (${more} more ⚠ line${more === 1 ? '' : 's'} to fix as well.)` : ''),
+      'error');
     return;
   }
 
@@ -1053,7 +1111,7 @@ function renderFpList(query) {
     const margin     = selling > 0 ? (profit / selling) * 100 : 0;
     const warn       = fpLiveUncostable(fp)
       ? ' <span title="An ingredient could not be costed — set an average weight, or check its unit" style="color:#dc2626">&#9888;</span>'
-      : '';
+      : (fpLiveUnpriced(fp) ? unpricedMark() : '');
     const profitChip = selling > 0 && profit > 0
       ? `<span class="fp-chip fp-chip-profit"><i class="fas fa-arrow-trend-up"></i> +${fmt(profit)}</span>`
       : selling > 0 && profit < 0
@@ -1109,7 +1167,7 @@ async function openFpDetail(id) {
   // the shared index rather than looking only at its own lines.
   const uncWarn      = fpLiveUncostable(fp)
     ? ' <span title="An ingredient could not be costed — set an average weight, or check its unit" style="color:#dc2626">&#9888;</span>'
-    : '';
+    : (fpLiveUnpriced(fp) ? unpricedMark() : '');
   const selling      = parseFloat(fp.selling_price) || 0;
   const profit       = selling > 0 ? selling - totalCost : 0;
   const margin       = selling > 0 ? (profit / selling) * 100 : 0;
