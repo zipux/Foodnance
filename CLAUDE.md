@@ -187,7 +187,7 @@ from 0024 on — org scoping, plans, suspension, the invoice cap, POS sales impo
 — was applied **by hand and never recorded**, so the command would try to replay
 0024 onward.
 
-**`migrations/` now runs to `0052_invite_emails.sql`** (0047–0051 landed after this note was written; 0052 is not on prod yet). It first ran to `0046_recurring_expense_dates.sql`: 0044–0046
+**`migrations/` now runs to `0060_invoice_processing.sql`** (0058–0060 applied to production by `--command` on 2026-10-03, not recorded in `d1_migrations`; pre-change bookmark `000005b6-00000000-000050f9-0d0604a1c3a13f5c20f25018fe83498b`). Earlier it ran to `0052_invite_emails.sql` (0047–0051 landed after this note was written; 0052 is not on prod yet). It first ran to `0046_recurring_expense_dates.sql`: 0044–0046
 landed after that audit: 0044 is recorded as applied on 2026-08-04, 0045 and 0046
 are unconfirmed either way. Re-verify against live D1 — do not read the 0043
 figure as current.
