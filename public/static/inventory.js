@@ -153,9 +153,8 @@ function buildPriceMap(inventory, generics, entries, recipes, finishedProducts, 
     // entries it created so they stop counting toward pricing. Leaving them in
     // both prices off a cancelled invoice AND inflates the purchased total,
     // which shifts the FIFO layer to the wrong one.
-    const myEntries = entries
-      .filter(e => e.generic_product_id === g.id && !e.voided_at)
-      .sort((a, b) => (a.purchase_date || '') > (b.purchase_date || '') ? 1 : -1);
+    const myEntries = purchasesOldestFirst(entries
+      .filter(e => e.generic_product_id === g.id && !e.voided_at));
 
     if (!myEntries.length) { map[r.item_id] = null; return; }
 

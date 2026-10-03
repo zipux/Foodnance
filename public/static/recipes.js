@@ -272,6 +272,17 @@ function uncostableReason(packU, wantU, productName) {
          `there is no way to convert between them, so this line won't be costed.`;
 }
 
+// Cost of one `unit` of a recipe row's product through the weight of its
+// sub-unit (see subUnitWeightRate in utils.js), or null when that doesn't apply.
+function rowSubUnitWeightRate(r, unit) {
+  const p = r && r.product_id ? allProducts.find(x => x.id === r.product_id) : null;
+  if (!p) return null;
+  return subUnitWeightRate({
+    unitCost: r.unit_cost, packUnit: r.pack_unit, packQty: packQty(p),
+    subName: p.sub_unit_name, subQty: p.sub_unit_qty,
+    avgWeightKg: rowAvgWeightKg(r), toUnit: unit });
+}
+
 // Average weight (kg per each) for the product referenced by a recipe row, or 0.
 function rowAvgWeightKg(r) {
   const p = r && r.product_id ? allProducts.find(x => x.id === r.product_id) : null;
@@ -345,9 +356,8 @@ async function loadProductCatalogue() {
       // the entries it created so they stop counting toward pricing. Leaving
       // them in both prices off a cancelled invoice AND inflates the purchased
       // total, which shifts the FIFO layer to the wrong one.
-      const entries = allEntries_r
-        .filter(e => e.generic_product_id === g.id && !e.voided_at)
-        .sort((a, b) => (a.purchase_date || '') > (b.purchase_date || '') ? 1 : -1);
+      const entries = purchasesOldestFirst(allEntries_r
+        .filter(e => e.generic_product_id === g.id && !e.voided_at));
 
       // Never purchased: no price yet, but the product's declared stocking unit
       // is a better default than 'unit', which isn't in the units list at all.
@@ -541,8 +551,20 @@ function _updateIngCostDisplay(idx) {
   const r = ingredientRows[idx];
   if (!r || !r.product_id || !r.unit_cost || !r.pack_unit) { el.textContent = ''; return; }
   const unit   = r.unit || r.pack_unit;
+  // Used by its own sub-unit (1 can of a case): show the price of one, the same
+  // figure calcIngredientLineCost charges. This used to fall through to the
+  // converter and read "can't cost in can" beside a correctly costed line.
+  const subName = String(r.sub_unit_name || '').toLowerCase().trim();
+  const subQty  = parseFloat(r.sub_unit_qty) || 0;
+  if (subName && subQty > 0 && String(unit).toLowerCase().trim() === subName) {
+    const product = allProducts.find(p => p.id === r.product_id);
+    el.textContent = fmtUnitCost(r.unit_cost * (product ? packQty(product) : 1) / subQty, unit);
+    return;
+  }
   const factor = unitConversionFactor(r.pack_unit, unit, rowAvgWeightKg(r));
   if (factor === null) {
+    const subRate = rowSubUnitWeightRate(r, unit);
+    if (subRate !== null) { el.textContent = fmtUnitCost(subRate, unit); return; }
     // The title carries the specific remedy. The old text always said "set an
     // average weight", which is the fix for exactly one of the three reasons a
     // line can't be costed — useless advice for a case-priced item.
@@ -589,7 +611,7 @@ function onUnitChange(idx) {
     const packU   = row.pack_unit || prevUnit || 'kg';
     const subName = (row.sub_unit_name || '').toLowerCase().trim();
     const isSub   = subName && newUnit.toLowerCase().trim() === subName;
-    if (!isSub && !_unitsCompatible(packU, newUnit)) {
+    if (!isSub && !_unitsCompatible(packU, newUnit) && rowSubUnitWeightRate(row, newUnit) === null) {
       showToast(uncostableReason(packU, newUnit, row.product_name), 'warning');
     }
   }
@@ -958,7 +980,11 @@ function calcIngredientLineCost(r) {
 
   // Standard path: use unit conversion factor (avg-weight-aware for each↔weight)
   const factor = unitConversionFactor(r.pack_unit || 'kg', r.unit || 'kg', rowAvgWeightKg(r));
-  if (factor === null) return null;   // uncostable (each↔weight with no avg weight set)
+  if (factor === null) {
+    // Bought by the pack, used by weight: through the weight of one sub-unit.
+    const subRate = rowSubUnitWeightRate(r, r.unit || 'kg');
+    return subRate === null ? null : subRate * (r.quantity || 1);
+  }
   return (r.unit_cost || 0) * (r.quantity || 1) * factor;
 }
 

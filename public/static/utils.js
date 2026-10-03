@@ -1556,6 +1556,30 @@ function entryPackFacts(entry) {
  * ingredient is free" and quietly understates every margin above it.
  */
 
+// A product bought by the pack (case, box, dozen…) used BY WEIGHT, through the
+// weight of one sub-unit: a case of 6 cans at $35.70, one can = 2.55 kg, costs
+// $5.95 a can and so $2.33 a kg. Returns the cost of ONE `toUnit`, or null when
+// this bridge does not apply.
+//
+// Deliberately narrow, so nothing that costs today changes:
+//   - only for a pack unit the app can't otherwise convert (not a weight, a
+//     volume or "each" — those keep their own rules, and for an each-priced
+//     product the same box still means the weight of one each);
+//   - only into a weight unit;
+//   - only when the product has a sub-unit, units per pack AND a weight.
+// The cost of one sub-unit is the figure the sub-unit path already uses
+// (unit cost × pack qty ÷ units per pack), so "1 can" and "2.55 kg" agree.
+function subUnitWeightRate({ unitCost, packUnit, packQty, subName, subQty, avgWeightKg, toUnit }) {
+  const to   = invUnitInfo(toUnit);
+  const n    = parseFloat(subQty) || 0;
+  const w    = parseFloat(avgWeightKg) || 0;
+  if (!to || to.dim !== 'weight') return null;
+  if (!String(subName || '').trim() || n <= 0 || w <= 0) return null;
+  if (!String(packUnit || '').trim() || invUnitInfo(packUnit) || invIsEachUnit(packUnit)) return null;
+  const perSubUnit = (parseFloat(unitCost) || 0) * (parseFloat(packQty) || 1) / n;
+  return (perSubUnit / w) * to.factor;
+}
+
 // Cost of one product line: sub-unit path first, then unit conversion.
 // null when the units can't be bridged. Mirrors the recipe and finished-product
 // line calculations, which is the point — there was one of these per page.
@@ -1572,7 +1596,12 @@ function liveProductLineCost(pc, quantity, unit) {
   }
   const conv = invConvertUnitCost(
     pc.cost_per_unit || 0, pc.pack_unit || 'kg', u || 'kg', pc.avg_weight);
-  return conv.error ? null : conv.cost * qty;
+  if (!conv.error) return conv.cost * qty;
+  // Bought by the pack, used by weight: through the weight of one sub-unit.
+  const rate = subUnitWeightRate({
+    unitCost: pc.cost_per_unit, packUnit: pc.pack_unit, packQty: pc.pack_qty,
+    subName, subQty, avgWeightKg: pc.avg_weight, toUnit: u });
+  return rate === null ? null : rate * qty;
 }
 
 // Cost of one recipe line inside a finished product, priced off the recipe's
@@ -1585,6 +1614,29 @@ function liveRecipeLineCost(rc, quantity, unit) {
     rc.cost_per_yield_unit, rc.yield_unit || 'kg',
     String(unit || rc.yield_unit || 'kg').trim() || 'kg', null);
   return conv.error ? null : conv.cost * qty;
+}
+
+// ── Purchase order: one rule for "which purchase is the latest" ──
+// Purchases are ordered by purchase date, and two on the SAME day by the order
+// they were entered — the one entered last is the later one. Every page must
+// agree on this: the old per-page sorts broke a same-day tie differently, so the
+// Products page showed one price as "latest" while recipes were costed from the
+// other.
+//
+// `entries` must be in the order the server lists them (most recently entered
+// first, which is how /api/tables/product_entries answers); the entry order is
+// read from that, since rows carry no sequence number. `dateOf` picks the date
+// to order by (default: purchase_date). Returns a new array.
+function purchasesOldestFirst(entries, dateOf) {
+  const key = dateOf || (e => e.purchase_date || '');
+  // Reversed = entered first → last; the sort is stable, so a tie keeps that.
+  return entries.slice().reverse().sort((a, b) => {
+    const ka = key(a), kb = key(b);
+    return ka > kb ? 1 : ka < kb ? -1 : 0;
+  });
+}
+function purchasesNewestFirst(entries, dateOf) {
+  return purchasesOldestFirst(entries, dateOf).reverse();
 }
 
 /**
@@ -1614,8 +1666,7 @@ function buildLiveCostIndex({
 
   const product = new Map();
   for (const g of generics) {
-    const mine = (entriesByProduct.get(g.id) || [])
-      .sort((a, b) => (a.purchase_date || '') > (b.purchase_date || '') ? 1 : -1);
+    const mine = purchasesOldestFirst(entriesByProduct.get(g.id) || []);
     const avgW = g.avg_weight_per_unit != null ? parseFloat(g.avg_weight_per_unit) : null;
     const base = {
       sub_unit_name: g.sub_unit_name || '',

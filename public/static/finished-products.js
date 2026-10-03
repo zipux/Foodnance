@@ -183,9 +183,8 @@ async function loadFpCatalogues() {
       // entries it created precisely so they stop counting toward pricing.
       // Leaving them in both prices off a cancelled invoice AND inflates the
       // purchased total, which shifts the FIFO layer to the wrong one.
-      const myEntries = entries
-        .filter(e => e.generic_product_id === g.id && !e.voided_at)
-        .sort((a, b) => (a.purchase_date || '') > (b.purchase_date || '') ? 1 : -1);
+      const myEntries = purchasesOldestFirst(entries
+        .filter(e => e.generic_product_id === g.id && !e.voided_at));
 
       // Never purchased: there is no price yet, but the product still has a
       // declared stocking unit. Defaulting to 'unit' here would put the line on
@@ -621,6 +620,18 @@ function onFpProductChange(idx) {
   _updateFpProductCostDisplay(idx);
 }
 
+// Cost of one `unit` of a product line through the weight of its sub-unit (see
+// subUnitWeightRate in utils.js), or null when that doesn't apply. Read from the
+// product itself: a line reopened for editing doesn't carry these facts.
+function fpSubUnitWeightRate(r, unit) {
+  const p = r && r.ref_id ? allProducts_fp.find(x => x.id === r.ref_id) : null;
+  if (!p) return null;
+  return subUnitWeightRate({
+    unitCost: r.unit_cost, packUnit: r.pack_unit, packQty: p.pack_qty,
+    subName: p.sub_unit_name, subQty: p.sub_unit_qty,
+    avgWeightKg: p.avg_weight_per_unit, toUnit: unit });
+}
+
 // Cost per chosen unit, shown under the Unit dropdown (mirrors the recipe tab).
 function _updateFpProductCostDisplay(idx) {
   const el = document.getElementById(`fpp-cpu-${idx}`);
@@ -637,7 +648,7 @@ function _updateFpProductCostDisplay(idx) {
     rate = (r.unit_cost || 0) * pQty / subQty;
   } else {
     const factor = fp_conversionFactor(r.pack_unit || 'kg', unit, r.avg_weight);
-    rate = factor === null ? null : (r.unit_cost || 0) * factor;
+    rate = factor === null ? fpSubUnitWeightRate(r, unit) : (r.unit_cost || 0) * factor;
   }
   if (rate === null) {
     const eachWt = (_fpUnitDim(r.pack_unit) === 'each' && _fpUnitDim(unit) === 'weight') ||
@@ -663,7 +674,11 @@ function calcFpProductLineCost(r) {
     return (r.unit_cost || 0) * pQty / subQty * qty;
   }
   const factor = fp_conversionFactor(r.pack_unit || 'kg', unit, r.avg_weight);
-  if (factor === null) return null;
+  if (factor === null) {
+    // Bought by the pack, used by weight: through the weight of one sub-unit.
+    const subRate = fpSubUnitWeightRate(r, unit);
+    return subRate === null ? null : subRate * qty;
+  }
   return (r.unit_cost || 0) * factor * qty;
 }
 
@@ -691,7 +706,8 @@ function onFpProductUnitChange(idx) {
   // Allowed, not refused — see the recipe-line branch above. A case-priced
   // product used by the each is the case this exists for: refusing left "200"
   // sitting under `case` and billed 200 cases.
-  if (newUnit !== prevUnit && !isSub && !_fpUnitsCompatible(packU, newUnit, true)) {
+  if (newUnit !== prevUnit && !isSub && !_fpUnitsCompatible(packU, newUnit, true) &&
+      fpSubUnitWeightRate(fpProductRows[idx], newUnit) === null) {
     const dim = (u) => (invUnitInfo(u) ? invUnitInfo(u).dim : (invIsEachUnit(u) ? 'each' : 'other'));
     showToast(
       (dim(packU) === 'other' || dim(newUnit) === 'other')

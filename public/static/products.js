@@ -63,6 +63,8 @@ document.getElementById('saveProductBtn').addEventListener('click', saveGenericP
     if (el) el.addEventListener('change', updatePackPreview);
   });
 
+  document.getElementById('pSubUnitName').addEventListener('input', updateAvgWeightLabel);
+
   // Inventory prompt modal (after saving a supplier entry)
   document.getElementById('closeEntryInvModal').addEventListener('click', () => closeModal('entryInvModal'));
   document.getElementById('skipEntryInvBtn').addEventListener('click',    () => closeModal('entryInvModal'));
@@ -220,8 +222,7 @@ function renderProductTable() {
     // not the historical lowest which could be a year old. Newest-first sort
     // matches the product detail modal so the two views agree.
     // Prefer stored cost_per_unit; fall back to computing from cost/pack_qty.
-    const latestEntry = [...entries]
-      .sort((a, b) => (b.purchase_date || b.created_at || '') > (a.purchase_date || a.created_at || '') ? 1 : -1)[0];
+    const latestEntry = purchasesNewestFirst(entries, e => e.purchase_date || e.created_at || '')[0];
     let latestCpu = null;
     let latestUnit = '';
     if (latestEntry) {
@@ -348,6 +349,7 @@ async function openAddProductModal() {
   document.getElementById('pTopName').value     = '';
   document.getElementById('pTopLb').value       = '';
   updatePackPreview();
+  updateAvgWeightLabel();
   document.getElementById('pReorderLevel').value = '';
   syncReorderUnit();   // unit mirrors the Pack Size unit
   renderAliases(null);          // no product yet — prompt to save first
@@ -406,6 +408,7 @@ async function openEditProduct(id) {
   document.getElementById('pTopName').value         = g.top_name             || '';
   document.getElementById('pTopLb').value           = g.top_lb               != null ? g.top_lb : '';
   updatePackPreview();
+  updateAvgWeightLabel();
   document.getElementById('pReorderLevel').value    = g.reorder_level        != null ? g.reorder_level : '';
   // pReorderUnit mirrors the declared stocking unit via syncReorderUnit(),
   // already called by the updatePackPreview() above.
@@ -414,9 +417,8 @@ async function openEditProduct(id) {
   await renderAliases(id);
 
   // ── Pre-fill entry form with most recent entry ──────────────
-  const entries = allEntries
-    .filter(e => e.generic_product_id === id)
-    .sort((a, b) => (b.purchase_date || b.created_at || '') > (a.purchase_date || a.created_at || '') ? 1 : -1);
+  const entries = purchasesNewestFirst(
+    allEntries.filter(e => e.generic_product_id === id), e => e.purchase_date || e.created_at || '');
 
   const latest = entries[0] || null;
 
@@ -647,8 +649,8 @@ async function restoreGenericProduct(id) {
 
 // ── Supplier entries table (inside modal) ──────────────────────
 function renderEntriesTable(genericId) {
-  const allSorted = allEntries.filter(e => e.generic_product_id === genericId)
-    .slice().sort((a, b) => (b.purchase_date || b.created_at || '') > (a.purchase_date || a.created_at || '') ? 1 : -1); // newest first
+  const allSorted = purchasesNewestFirst(
+    allEntries.filter(e => e.generic_product_id === genericId), e => e.purchase_date || e.created_at || ''); // newest first
 
   const scroll = document.getElementById('entriesTableScroll');
   const tbody  = document.getElementById('entriesBody');
@@ -918,6 +920,20 @@ function syncReorderUnit() {
   const src = document.getElementById('pStockUnit');
   const dst = document.getElementById('pReorderUnit');
   if (src && dst) dst.value = src.value || '';
+}
+
+// The weight box means "one each" for an item bought by the each, and "one
+// sub-unit" (one can) for an item bought by the pack that has a sub-unit — which
+// is what lets a recipe use a case-priced product by weight. The label follows
+// the sub-unit name so it reads as what it will be used for.
+const AVG_WEIGHT_LABEL = 'Average Weight per Unit (kg)';
+const AVG_WEIGHT_HINT  = 'Used for recipe costing of items sold by each (e.g. 0.300 kg per fennel)';
+function updateAvgWeightLabel() {
+  const sub = document.getElementById('pSubUnitName').value.trim();
+  document.getElementById('pAvgWeightLabel').textContent = sub ? `Weight of one ${sub} (kg)` : AVG_WEIGHT_LABEL;
+  document.getElementById('pAvgWeightHint').textContent  = sub
+    ? `Lets recipes use this item by weight (g, kg, lb, oz) as well as by the ${sub}`
+    : AVG_WEIGHT_HINT;
 }
 
 // Keep the Pack Sizes section's echoed labels and the plain-language preview in

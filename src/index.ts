@@ -5460,7 +5460,10 @@ app.get('/api/price-movers', async (c) => {
   const args: (string | null)[] = [org]
   if (from) { sql += ' AND pe.purchase_date >= ?'; args.push(from) }
   if (to)   { sql += ' AND pe.purchase_date <= ?'; args.push(to)   }
-  sql += ' ORDER BY pe.purchase_date DESC, pe.created_at DESC'
+  // Same day → the purchase entered last is the later one (rowid), the rule every
+  // costing page uses (purchasesOldestFirst in utils.js). created_at can't break
+  // the tie: lines saved from one invoice share the same second.
+  sql += ' ORDER BY pe.purchase_date DESC, pe.rowid DESC'
 
   const rows = await c.env.DB.prepare(sql).bind(...args).all()
 
@@ -6850,7 +6853,8 @@ app.get('/api/pnl', async (c) => {
       c.env.DB.prepare(`SELECT name, type FROM categories WHERE org_id IS ?`).bind(org).all<{ name: string; type: string }>(),
       c.env.DB.prepare(
         `SELECT generic_product_id, cost_per_unit, pack_unit, purchase_date, created_at
-           FROM product_entries WHERE org_id IS ? AND voided_at IS NULL`
+           FROM product_entries WHERE org_id IS ? AND voided_at IS NULL
+          ORDER BY rowid DESC`
       ).bind(org).all<{ generic_product_id: string; cost_per_unit: number; pack_unit: string; purchase_date: string; created_at: string }>(),
       c.env.DB.prepare(`SELECT id, avg_weight_per_unit, category FROM generic_products WHERE org_id IS ?`)
         .bind(org).all<{ id: string; avg_weight_per_unit: number | null; category: string | null }>(),
@@ -6866,8 +6870,9 @@ app.get('/api/pnl', async (c) => {
       entries.get(e.generic_product_id)!.push(e)
     }
     for (const list of entries.values()) {
-      list.sort((a, b) => (b.purchase_date || '').localeCompare(a.purchase_date || '')
-                       || (b.created_at || '').localeCompare(a.created_at || ''))
+      // Rows arrive most recently entered first and the sort is stable, so two
+      // purchases on the same day stay in that order: entered last = latest.
+      list.sort((a, b) => (b.purchase_date || '').localeCompare(a.purchase_date || ''))
     }
 
     const avgWeight = new Map<string, number | null>()
