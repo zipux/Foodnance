@@ -1,5 +1,12 @@
 # Foodnance — Terms of Service (WORKING DRAFT)
 
+> **4 October 2026: the live page (`public/terms.html`) is ahead of this draft.**
+> Changed for Paddle's review: §1 and §19 now say "Simone Isonni, doing business as
+> Foodnance" with city and country in Contact (no "resident in Japan" sentence); §4
+> first-payment refund is 14 days with no conditions, can be asked through Paddle, and
+> the words "non-refundable" / "no-refund" are gone; §11 and §18 link to /privacy.
+> Bring Part 1 below in step before editing it again.
+
 > **Status: draft, 2026-08-09. Not legal advice. Not signed, not published, not
 > enforceable.** This exists so the app can be built against a known set of
 > promises. A lawyer qualified in the governing province must review and rewrite

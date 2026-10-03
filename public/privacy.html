@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en-CA">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Added 2026-10-03. Indexable, listed in sitemap.xml. Mirrors the Terms page layout. -->
+
+  <title>Foodnance Privacy Policy</title>
+  <meta name="description" content="What Foodnance collects, why, who it is shared with, how invoices are read by AI, how long data is kept, and your rights under privacy law." />
+  <link rel="canonical" href="https://foodnance.com/privacy" />
+  <meta name="theme-color" content="#0369a1" />
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
+  <link rel="mask-icon" href="/favicon.svg?v=2" color="#0369a1" />
+  <link rel="icon" type="image/x-icon" sizes="48x48" href="/favicon.ico?v=2" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560;9..144,620&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
+
+  <style>
+    /* Standalone like index.html / pricing.html: no shared stylesheet, tokens copied from it. */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary:    #0369a1;
+      --primary-d:  #075985;
+      --nav-bg:     #0f172a;
+      --nav-bg-d:   #1e293b;
+      --bg:         #faf9f6;
+      --bg-alt:     #f3f1ec;
+      --border:     #e4e0d8;
+      --text:       #171512;
+      --text-muted: #6b6659;
+      --radius:     12px;
+      --radius-sm:  6px;
+      --shadow:     0 2px 16px rgba(0,0,0,.06);
+      --maxw:       1080px;
+      --maxw-prose: 700px;
+    }
+
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+      color: var(--text); background: var(--bg);
+      font-size: 16px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 1.25rem; }
+    .prose { max-width: var(--maxw-prose); margin: 0 auto; padding: 0 1.25rem; }
+    .ic { height: 1em; fill: currentColor; vertical-align: -.125em; flex: none; }
+    .kicker { font-family: 'IBM Plex Mono', monospace; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+
+    /* ===== NAV (same as pricing.html) ===== */
+    header.nav {
+      position: sticky; top: 0; z-index: 50;
+      background: rgba(250,249,246,.88); backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: var(--maxw); margin: 0 auto; padding: .85rem 1.25rem;
+      display: flex; align-items: center; gap: 1rem;
+    }
+    .brand {
+      display: flex; align-items: center; gap: .55rem;
+      font-weight: 700; font-size: 1.15rem; letter-spacing: -.01em;
+      color: var(--text); text-decoration: none;
+    }
+    .brand .ic { color: var(--primary); }
+    .brand-logo { display: block; height: 42px; width: auto; }
+    @media (max-width: 430px) { .brand-logo { height: 38px; } }
+    .nav-spacer { flex: 1; }
+    .nav-link {
+      color: var(--text-muted); text-decoration: none; font-size: .92rem;
+      font-weight: 500; padding: .4rem .6rem; border-radius: 6px;
+      white-space: nowrap;
+    }
+    .nav-link:hover { color: var(--text); background: var(--bg-alt); }
+    .nav-link[aria-current="page"] { color: var(--text); font-weight: 600; }
+    .nav-toggle { display: none; }
+    .nav-menu { display: none; }
+
+    /* ===== BUTTONS ===== */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+      font-family: inherit; font-size: .93rem; font-weight: 600;
+      padding: .7rem 1.2rem; border-radius: var(--radius-sm);
+      text-decoration: none; border: 1px solid transparent; cursor: pointer;
+      transition: background .15s ease; white-space: nowrap;
+    }
+    .btn-primary { background: var(--nav-bg); color: #fff; }
+    .btn-primary:hover { background: var(--nav-bg-d); }
+    .btn-ghost { background: #fff; color: var(--text); border-color: var(--border); }
+    .btn-ghost:hover { background: var(--bg-alt); }
+    .btn:focus-visible, .nav-link:focus-visible, .brand:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+    /* ===== HERO ===== */
+    .hero { padding: 4rem 0 1.6rem; text-align: center; }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: .5rem;
+      color: var(--primary); margin-bottom: 1.2rem;
+    }
+    .eyebrow .rule { width: 22px; height: 1px; background: var(--primary); display: inline-block; }
+    .eyebrow .kicker { font-size: .72rem; }
+    h1 {
+      font-family: 'Fraunces', Georgia, serif; font-weight: 600;
+      font-size: clamp(1.9rem, 4.6vw, 2.8rem); line-height: 1.14; letter-spacing: -.01em;
+      max-width: 22ch; margin: 0 auto 1rem;
+    }
+    .sub { font-size: clamp(.98rem, 2.2vw, 1.06rem); color: var(--text-muted); max-width: 54ch; margin: 0 auto; }
+    .updated { font-size: .82rem; color: var(--text-muted); margin-top: 1.2rem; }
+
+    /* ===== SUMMARY CARD ===== */
+    .summary {
+      background: #fff; border: 1px solid var(--border); border-radius: var(--radius);
+      box-shadow: var(--shadow); padding: 1.6rem 1.8rem; margin: 2rem auto 0;
+    }
+    .summary h2 { font-size: .8rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--primary); margin-bottom: .9rem; }
+    .summary ul { list-style: none; display: grid; gap: .7rem; font-size: .95rem; text-align: left; }
+    .summary li { display: flex; gap: .65rem; align-items: flex-start; }
+    .summary .ic { color: var(--primary); margin-top: .3em; }
+
+    /* ===== POLICY BODY ===== */
+    .policy { padding: 3rem 0; }
+    .policy h2 {
+      font-family: 'Fraunces', Georgia, serif; font-weight: 600;
+      font-size: clamp(1.2rem, 2.6vw, 1.5rem); letter-spacing: -.01em;
+      line-height: 1.25; margin: 2.2rem 0 .7rem;
+    }
+    .policy h2:first-child { margin-top: 0; }
+    .policy p { margin-bottom: .9rem; color: var(--text); }
+    .policy p.muted { color: var(--text-muted); font-size: .92rem; }
+    .policy strong { font-weight: 600; }
+    .policy a { color: var(--primary); }
+
+    .policy ul { margin: 0 0 .9rem 1.3rem; }
+    .policy li { margin-bottom: .45rem; }
+    .summary-note { font-size: .82rem; color: var(--text-muted); margin-top: 1rem; text-align: left; }
+    .toc { background: var(--bg-alt); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1.1rem 1.4rem; margin-bottom: 2.4rem; }
+    .toc h2 { font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: .8rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--primary); margin: 0 0 .6rem; }
+    .toc ol { margin: 0 0 0 1.3rem; font-size: .92rem; columns: 2; column-gap: 2rem; }
+    .toc li { margin-bottom: .25rem; break-inside: avoid; }
+    .toc a { text-decoration: none; }
+    .toc a:hover { text-decoration: underline; }
+    .policy h2[id] { scroll-margin-top: 5rem; }
+
+    /* ===== FOOTER ===== */
+    footer { border-top: 1px solid var(--border); padding: 2rem 0; font-size: .86rem; color: var(--text-muted); }
+    .foot-inner { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    footer a { color: var(--text-muted); text-decoration: none; }
+    footer a:hover { color: var(--text); text-decoration: underline; }
+
+    @media (max-width: 640px) {
+      .hero { padding: 2.8rem 0 1.2rem; }
+      .policy { padding: 2rem 0; }
+      .summary { padding: 1.3rem 1.4rem; }
+      .toc ol { columns: 1; }
+      .nav-inner { padding: .7rem 1rem; gap: .4rem; }
+      .brand { font-size: 1.05rem; }
+      .nav-anchor { display: none; }
+      .nav-inner .btn { padding: .5rem .85rem; font-size: .88rem; }
+
+      .nav-toggle {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 2.2rem; height: 2.2rem; margin-right: -.3rem;
+        background: none; border: none; border-radius: 6px;
+        color: var(--text); cursor: pointer; flex: none;
+      }
+      .nav-toggle:hover { background: var(--bg-alt); }
+      .nav-toggle .ic { width: 1.1rem; height: 1.1rem; }
+      .nav-toggle .ic-close { display: none; }
+      .nav-toggle[aria-expanded="true"] .ic-open { display: none; }
+      .nav-toggle[aria-expanded="true"] .ic-close { display: block; }
+
+      .nav-menu.open {
+        display: flex; flex-direction: column; gap: .1rem;
+        position: absolute; top: 100%; left: 0; right: 0;
+        background: #faf9f6; border-bottom: 1px solid var(--border);
+        padding: .5rem 1rem 1rem;
+        box-shadow: 0 16px 28px rgba(15,23,42,.1);
+      }
+      .nav-menu .nav-link { padding: .75rem .5rem; font-size: .98rem; }
+    }
+    @media (max-width: 359px) {
+      .nav-login { display: none; }
+    }
+    .prose h3 { font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 1.02rem; font-weight: 600; margin: 1.6rem 0 .5rem; }
+    .prose code { font-family: 'IBM Plex Mono', monospace; font-size: .88em; background: var(--bg-alt); padding: .1em .35em; border-radius: 4px; }
+    .table-wrap { overflow-x: auto; margin: 1rem 0 1.4rem; }
+    .table-wrap table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: .9rem; }
+    .table-wrap th, .table-wrap td { text-align: left; vertical-align: top; padding: .65rem .75rem; border-bottom: 1px solid var(--border); }
+    .table-wrap th { font-size: .75rem; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+  </style>
+</head>
+<body>
+
+  <!-- Icons: Font Awesome Free 6.4.0 by @fontawesome, https://fontawesome.com/license/free
+       (icons CC BY 4.0). Inlined so the page loads no icon font. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="i-receipt" viewBox="0 0 384 512"><path d="M14 2.2C22.5-1.7 32.5-.3 39.6 5.8L80 40.4 120.4 5.8c9-7.7 22.3-7.7 31.2 0L192 40.4 232.4 5.8c9-7.7 22.3-7.7 31.2 0L304 40.4 344.4 5.8c7.1-6.1 17.1-7.5 25.6-3.6s14 12.4 14 21.8V488c0 9.4-5.5 17.9-14 21.8s-18.5 2.5-25.6-3.6L304 471.6l-40.4 34.6c-9 7.7-22.3 7.7-31.2 0L192 471.6l-40.4 34.6c-9 7.7-22.3 7.7-31.2 0L80 471.6 39.6 506.2c-7.1 6.1-17.1 7.5-25.6 3.6S0 497.4 0 488V24C0 14.6 5.5 6.1 14 2.2zM96 144c-8.8 0-16 7.2-16 16s7.2 16 16 16H288c8.8 0 16-7.2 16-16s-7.2-16-16-16H96zM80 352c0 8.8 7.2 16 16 16H288c8.8 0 16-7.2 16-16s-7.2-16-16-16H96c-8.8 0-16 7.2-16 16zM96 240c-8.8 0-16 7.2-16 16s7.2 16 16 16H288c8.8 0 16-7.2 16-16s-7.2-16-16-16H96z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 448 512"><path d="M438.6 105.4c12.5 12.5 12.5 32.8 0 45.3l-256 256c-12.5 12.5-32.8 12.5-45.3 0l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L160 338.7 393.4 105.4c12.5-12.5 32.8-12.5 45.3 0z"/></symbol>
+    <symbol id="i-bars" viewBox="0 0 448 512"><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></symbol>
+    <symbol id="i-xmark" viewBox="0 0 384 512"><path d="M342.6 150.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L192 210.7 86.6 105.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3L146.7 256 41.4 361.4c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L192 301.3 297.4 406.6c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L237.3 256 342.6 150.6z"/></symbol>
+  </svg>
+
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="/"><picture><source media="(max-width: 430px)" srcset="/logo/foodnance-icon.svg"><img class="brand-logo" src="/logo/foodnance-logo-horizontal.svg" width="176" height="42" alt="Foodnance"></picture></a>
+      <div class="nav-spacer"></div>
+      <a class="nav-link nav-anchor" href="/#features">Features</a>
+      <a class="nav-link nav-anchor" href="/food-cost-calculator">Food cost calculator</a>
+      <a class="nav-link nav-anchor" href="/pricing">Pricing</a>
+      <a class="nav-link nav-anchor" href="/#faq">FAQ</a>
+      <a class="nav-link nav-login" href="/login">Log in</a>
+      <button class="nav-toggle" id="navToggle" type="button" aria-expanded="false" aria-controls="navMenu" aria-label="Open menu">
+        <svg class="ic ic-open" aria-hidden="true" focusable="false"><use href="#i-bars"/></svg>
+        <svg class="ic ic-close" aria-hidden="true" focusable="false"><use href="#i-xmark"/></svg>
+      </button>
+      <a class="btn btn-primary" href="mailto:hello@foodnance.com?subject=Request%20access%20to%20Foodnance&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">Request access</a>
+    </div>
+    <nav class="nav-menu" id="navMenu" aria-label="Mobile">
+      <a class="nav-link" href="/#features">Features</a>
+      <a class="nav-link" href="/food-cost-calculator">Food cost calculator</a>
+      <a class="nav-link" href="/pricing">Pricing</a>
+      <a class="nav-link" href="/#faq">FAQ</a>
+      <a class="nav-link" href="/login">Log in</a>
+    </nav>
+  </header>
+
+  <script>
+    (function () {
+      var toggle = document.getElementById('navToggle');
+      var menu = document.getElementById('navMenu');
+      if (!toggle || !menu) return;
+      function close() { menu.classList.remove('open'); toggle.setAttribute('aria-expanded', 'false'); }
+      function open() { menu.classList.add('open'); toggle.setAttribute('aria-expanded', 'true'); }
+      toggle.addEventListener('click', function () {
+        if (menu.classList.contains('open')) close(); else open();
+      });
+      menu.addEventListener('click', function (e) { if (e.target.tagName === 'A') close(); });
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+      document.addEventListener('click', function (e) {
+        if (!menu.classList.contains('open')) return;
+        if (!menu.contains(e.target) && !toggle.contains(e.target)) close();
+      });
+      window.addEventListener('resize', function () { if (window.innerWidth > 640) close(); });
+    })();
+  </script>
+
+  <main>
+  <!-- ══ HERO ══
+       Source of truth for the wording: this page. docs/PRIVACY-POLICY-DRAFT.md is the
+       older working draft with the research notes. Keep the "Last updated" date current,
+       and re-check every factual claim (cookies, stored items, providers, analytics)
+       before changing it. -->
+  <div class="hero wrap">
+    <div class="eyebrow"><span class="rule"></span><span class="kicker">Legal</span></div>
+    <h1>Privacy Policy</h1>
+    <p class="sub">What we collect, why, who we share it with, and what you can ask us to do. Written to be read, not skimmed past.</p>
+
+    <div class="summary prose">
+      <h2>The short version</h2>
+      <ul>
+        <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> <span>We collect only what we need to run Foodnance: your name, work email, a password we store only as a one-way hash, and the business information you choose to put in.</span></li>
+        <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> <span>We do <strong>not</strong> sell personal information, and we use no advertising or cross-site tracking.</span></li>
+        <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> <span><strong>Invoices and recipes you upload are sent to an AI provider (Anthropic, in the United States)</strong> so they can be read. Please do not upload anything you do not want processed that way.</span></li>
+        <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> <span>Your data is stored with Cloudflare and may be processed outside Canada, including in the United States and Japan.</span></li>
+        <li><svg class="ic" style="width:.875em" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> <span>You can ask to see, correct or delete your information at any time: <a href="mailto:privacy@foodnance.com">privacy@foodnance.com</a>.</span></li>
+      </ul>
+      <p class="summary-note">This summary helps you find your way. The full policy below is what applies.</p>
+    </div>
+    <p class="updated">Last updated: 4 October 2026</p>
+  </div>
+
+  <!-- ══ POLICY ══ -->
+  <div class="policy prose">
+    <nav class="toc" aria-label="Contents">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#s1">Who we are, and what this covers</a></li>
+        <li><a href="#s2">Your own information</a></li>
+        <li><a href="#s3">Information a business puts into Foodnance</a></li>
+        <li><a href="#s4">Who we share information with</a></li>
+        <li><a href="#s5">Artificial intelligence and your invoices</a></li>
+        <li><a href="#s6">How long we keep information</a></li>
+        <li><a href="#s7">Where information is stored</a></li>
+        <li><a href="#s8">Security</a></li>
+        <li><a href="#s9">Your rights</a></li>
+        <li><a href="#s10">Children</a></li>
+        <li><a href="#s11">Changes to this policy</a></li>
+        <li><a href="#s12">Contact</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="s1">1. Who we are, and what this covers</h2>
+    <p>Foodnance is operated by <strong>Simone Isonni</strong>, doing business as <strong>Foodnance</strong> (&ldquo;Foodnance&rdquo;, &ldquo;we&rdquo;, &ldquo;us&rdquo;). We handle personal information in line with applicable privacy law, including Canada&rsquo;s Personal Information Protection and Electronic Documents Act (PIPEDA).</p>
+    <p>Foodnance is back-office software for food businesses. It reads supplier invoices and tracks products, recipes and stock, and reports costs and profit. It is sold to businesses, not to individuals.</p>
+    <p>This policy covers two different situations, and the difference matters:</p>
+    <ol>
+      <li><strong>Your own information.</strong> When you visit foodnance.com, contact us, or have a Foodnance account (your name, work email, sign-in details). Here we decide why and how the information is used. See section 2.</li>
+      <li><strong>Information a business puts into Foodnance.</strong> Invoices, supplier and product records, recipes, sales, and records about the business&rsquo;s own staff. Here the business decides what goes in and why, and we only process it for them. See section 3.</li>
+    </ol>
+
+    <h2 id="s2">2. Your own information</h2>
+
+    <h3>2.1 What we collect</h3>
+    <p><strong>What you give us:</strong></p>
+    <ul>
+      <li>Your name and work email address, when an account is created or you are invited to a team.</li>
+      <li>A password, if you set one. We store only a salted, one-way hash, never the password itself.</li>
+      <li>Your business name and type, when your organization is set up.</li>
+      <li>What you tell us when you ask for access or write to us, including your business name, the plan you are interested in and any message you add.</li>
+      <li>Billing details. When you subscribe, payment is handled by our reseller, Paddle.com, which is the Merchant of Record. Card numbers go to Paddle and never reach our servers.</li>
+    </ul>
+    <p><strong>What is created when you use the service:</strong></p>
+    <ul>
+      <li>Your role in the organization and when you last signed in, for access control.</li>
+      <li>A count of failed sign-in attempts, for security. Five wrong passwords in a row sends a password-reset email to the account holder.</li>
+      <li>Password-reset and invitation records. We keep only a hash of each reset link, so a link works once and then expires.</li>
+      <li>A log of how many invoices your organization has had read by AI, the size and cost of each request, and any request refused for being over your plan&rsquo;s limit. It does not contain the documents.</li>
+    </ul>
+    <p><strong>Collected automatically:</strong> the app itself does not record your IP address or browser details. Our hosting provider, Cloudflare, processes IP addresses and request details to deliver the site and defend it against abuse, under its own policy. Your browser also contacts Google Fonts (Google) and jsDelivr, a code-delivery network, to load fonts and code libraries, which shows your IP address to those providers.</p>
+
+    <h3>2.2 Why we use it</h3>
+    <ul>
+      <li>To create and run your account, sign you in and keep it secure.</li>
+      <li>To send <strong>service emails</strong>: invitations, password-reset links and notices about your account. We send these through Resend. They are not marketing.</li>
+      <li>To answer questions, provide support, and fix and improve the service.</li>
+      <li>To bill you, through Paddle.</li>
+      <li>To meet legal obligations and to protect our rights.</li>
+    </ul>
+    <p><strong>Outreach.</strong> We may email businesses we think Foodnance could help, using a business address that is published publicly, about something relevant to that business. Each message says who we are and how to stop hearing from us, and we stop as soon as you ask. Anything beyond that, such as a newsletter, would be sent only with your express consent.</p>
+
+    <h3>2.3 Your consent</h3>
+    <p>By creating an account, accepting an invitation or using the service, you agree to the collection, use and disclosure described here. You can withdraw consent at any time by contacting us, though we may then be unable to provide the service. Where the law allows us to process information without consent, for example to comply with a legal demand, we may do so.</p>
+
+    <h3>2.4 Cookies and local storage</h3>
+    <p>We use <strong>one essential cookie</strong>, <code>dm_session</code>, which keeps you signed in. Scripts on the page cannot read it, it is sent only over a secure connection on the live site, and it lasts 14 days unless you sign out. Foodnance staff who are authorised to help a customer may also carry a second, internal support cookie that applies only to their own signed-in session.</p>
+    <p>The app also keeps four small items in your browser&rsquo;s local storage: your chosen profit-and-loss cost basis; the list of features your plan includes, so menu tabs your plan does not have are hidden before the page is drawn; the name of your business (never your email address), so the account box in the menu bar appears straight away; and that box&rsquo;s width, so the menu does not shift as the page loads. All but the first are removed when you sign out. None of them is sent to us.</p>
+    <p><strong>The food cost calculator.</strong> Anything you type into the calculator stays in your browser and is never saved or sent.</p>
+    <p>We use <strong>no advertising or cross-site tracking cookies</strong>. Because nothing here tracks you across sites, there is nothing to switch off, and browser &ldquo;Do Not Track&rdquo; settings do not change what we do.</p>
+
+    <h2 id="s3">3. Information a business puts into Foodnance</h2>
+
+    <h3>3.1 What it is</h3>
+    <p>Whatever a customer or its users upload or type: invoice images and PDFs; supplier, product and price records; recipes; inventory and stock counts; point-of-sale sales files; profit-and-loss inputs; and <strong>staff records</strong>, which can include names, roles, emails, phone numbers, hire dates and certificates (with uploaded copies).</p>
+    <p>Most of this is business information. Some of it is personal information, such as a supplier contact&rsquo;s name on an invoice, a delivery driver&rsquo;s signature, or a staff member&rsquo;s phone number or food-safety certificate.</p>
+
+    <h3>3.2 Who is responsible for it</h3>
+    <p><strong>The customer is responsible for its data and decides what goes in.</strong> We process it on the customer&rsquo;s behalf, only to provide, secure and support the service, and to produce totals that do not identify any customer or individual. We do not sell it, use it for advertising, or use it to build profiles.</p>
+    <p>Customers are responsible for having the right to upload what they upload, including any notice or consent their own staff and suppliers are owed.</p>
+
+    <h3>3.3 Access by us</h3>
+    <p>Customer data is separated by organization throughout the application, and one customer cannot see another&rsquo;s. We can access an organization&rsquo;s data to provide support, investigate a problem or run the service.</p>
+
+    <h3>3.4 If you are an employee or supplier contact of a customer</h3>
+    <p>If your information is in Foodnance because your employer or a business you work with put it there, <strong>that business, not Foodnance, decides why it is held.</strong> Please make access, correction and deletion requests to them. If you write to us instead, we will pass your request to the business and tell you we have done so, unless the law requires us to answer directly.</p>
+
+    <h2 id="s4">4. Who we share information with</h2>
+    <p>We do not sell personal information. We share it only with the service providers below, who may use it only to provide their service to us, and where the law requires or permits.</p>
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>Provider</th><th>What for</th><th>What they receive</th><th>Where</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Cloudflare, Inc.</strong></td><td>Hosting, database, file storage, network delivery and security</td><td>All information in the service, including uploaded files</td><td>Global network; mainly the United States</td></tr>
+        <tr><td><strong>Anthropic, PBC</strong></td><td>Reading invoices and recipes, and suggesting categories for new products (section 5)</td><td>Invoice and recipe images and text; product names</td><td>United States</td></tr>
+        <tr><td><strong>Resend</strong></td><td>Delivering service emails</td><td>Recipient name and email, and the message (for example a reset link)</td><td>United States</td></tr>
+        <tr><td><strong>Paddle.com</strong></td><td>Payment, invoicing and sales tax, as Merchant of Record</td><td>Billing details you give it</td><td>United Kingdom and worldwide</td></tr>
+        <tr><td><strong>Google Fonts</strong>, <strong>jsDelivr</strong></td><td>Loading fonts and code libraries in your browser</td><td>Your IP address and browser details, directly from your browser</td><td>Various</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p>We may also disclose information: (a) to comply with a law, court order or lawful request; (b) to protect the rights, property or safety of Foodnance, our customers or others; (c) in a merger, acquisition, financing or sale of the business, subject to confidentiality; and (d) with your consent.</p>
+
+    <h2 id="s5">5. Artificial intelligence and your invoices</h2>
+    <p>To turn an uploaded invoice or recipe into structured data, we send its <strong>image or text</strong> to Anthropic through its commercial API. To suggest a category for a newly created product, we send the <strong>product names</strong> (not the invoice). That is the only AI processing we do.</p>
+    <ul>
+      <li><strong>Invoices can contain personal information</strong>, such as a contact&rsquo;s name, a signature, an address or a phone number. It goes to Anthropic along with everything else on the page.</li>
+      <li>Under Anthropic&rsquo;s commercial terms, it may not train its models on customer content sent through its services. Its published policy is currently to delete API inputs and outputs automatically after a short period (currently 7 days). These terms are set by Anthropic and can change.</li>
+      <li>We do not use your documents to train any model of our own.</li>
+      <li><strong>AI makes mistakes.</strong> What it reads is a suggestion for you to check, not a verified result. See our <a href="/terms">Terms of Service</a>. No decision about a person is made by AI. It reads figures and text from business documents.</li>
+    </ul>
+
+    <h2 id="s6">6. How long we keep information</h2>
+    <ul>
+      <li><strong>While your account is active</strong>, we keep your account information and your data so you can use the service.</li>
+      <li><strong>Invoices, products, stock and recipes are voided or archived, not erased,</strong> when you remove them, so your history and reports stay consistent. They stay in your account until it closes. This also means a deleted staff member or supplier contact can remain in historical records.</li>
+      <li><strong>When an account closes</strong>, we keep its data for <strong>30 days</strong> so it can be exported, and then permanently delete it. Copies may remain for a short time afterwards in our provider&rsquo;s backups, until they rotate out.</li>
+      <li><strong>Password-reset and invitation links</strong> are single-use and expire.</li>
+      <li>Emails you send us are kept for as long as needed to answer you and for our records, and generally no longer than two years.</li>
+      <li>We may keep information longer where the law requires, for example financial records, or to resolve a dispute.</li>
+    </ul>
+
+    <h2 id="s7">7. Where information is stored</h2>
+    <p>Our providers include companies in the <strong>United States</strong> and elsewhere. Cloudflare operates globally, and we do not currently choose a single country for storage. Your information may therefore be <strong>stored or processed outside Canada, including in the United States and Japan, and while there it may be accessible to courts, law enforcement and national-security authorities of that country under its laws.</strong> We rely on our providers&rsquo; contracts and security practices to protect it and to use it only for our purposes, but we cannot promise that foreign law will not apply to it.</p>
+
+    <h2 id="s8">8. Security</h2>
+    <p>We protect information with measures appropriate to how sensitive it is. These include encryption of data in transit; one-way hashing of passwords with a unique salt; sign-in cookies that scripts cannot read; separation of each customer&rsquo;s data; access controls by role; and single-use, expiring reset and invitation links.</p>
+    <p><strong>No system is perfectly secure</strong>, and we cannot guarantee that information will never be accessed without authorisation. Please choose a strong, unique password and tell us straight away at <a href="mailto:privacy@foodnance.com">privacy@foodnance.com</a> if you think your account has been compromised.</p>
+    <p>If a breach of our security safeguards creates a real risk of significant harm to someone, we will report it to the regulator, notify the people affected, and notify affected customers, as the law requires. We keep a record of every breach.</p>
+
+    <h2 id="s9">9. Your rights</h2>
+    <p>Under applicable privacy law you may ask us to:</p>
+    <ul>
+      <li><strong>tell you</strong> what personal information we hold about you, how we use it and who we have shared it with;</li>
+      <li><strong>give you a copy</strong> of it;</li>
+      <li><strong>correct</strong> anything inaccurate;</li>
+      <li><strong>delete it or stop using it</strong>, where we no longer need it or the law does not require us to keep it; and</li>
+      <li><strong>withdraw your consent</strong>, subject to legal and contractual limits.</li>
+    </ul>
+    <p>Write to <a href="mailto:privacy@foodnance.com">privacy@foodnance.com</a>. We may need to confirm who you are first. We respond within <strong>30 days</strong> and will explain if we cannot do what you ask, for instance because it would reveal someone else&rsquo;s information. Access is free unless the request is unreasonable, and we will tell you any cost beforehand.</p>
+    <p>Your organization&rsquo;s <strong>owner</strong> can also correct team-member details and remove users from the account inside Foodnance. To ask for a copy of your organization&rsquo;s data, email us.</p>
+    <p>If you are unhappy with our answer, you can complain to us first, and then to the <strong>Office of the Privacy Commissioner of Canada</strong> (priv.gc.ca).</p>
+
+    <h2 id="s10">10. Children</h2>
+    <p>Foodnance is business software and is <strong>not intended for anyone under 18</strong>. We do not knowingly collect information from minors. If you think we have, contact us and we will delete it.</p>
+
+    <h2 id="s11">11. Changes to this policy</h2>
+    <p>We will post any change here and update the &ldquo;last updated&rdquo; date. For a <strong>material change</strong>, such as a new category of information, a new kind of sharing, or a new provider that handles customer data, we will notify account owners by email or in the app at least 30 days before it takes effect.</p>
+
+    <h2 id="s12">12. Contact</h2>
+    <p>Privacy contact: <strong>Simone Isonni</strong>, <a href="mailto:privacy@foodnance.com">privacy@foodnance.com</a>. Foodnance is operated by Simone Isonni, doing business as Foodnance, Yokohama, Japan. For other questions: <a href="mailto:hello@foodnance.com">hello@foodnance.com</a>. For questions about a charge: <a href="mailto:billing@foodnance.com">billing@foodnance.com</a>.</p>
+  </div>
+  </main>
+
+  <footer>
+    <div class="wrap foot-inner">
+      <a class="brand" href="/" style="font-size:1rem"><img class="brand-logo" src="/logo/foodnance-logo.svg" width="230" height="134" alt="Foodnance, food meets profit" style="width:230px;height:auto"></a>
+      <div class="nav-spacer"></div>
+      <span>&copy; 2026 Foodnance</span>
+      <a href="/">Home</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/food-cost-calculator">Food cost calculator</a>
+      <a href="/login">Log in</a>
+      <a href="/refund-policy">Refund policy</a>
+      <a href="/terms">Terms</a>
+      <a href="/privacy">Privacy</a>
+      <a href="mailto:hello@foodnance.com">Contact</a>
+    </div>
+  </footer>
+
+  <script src="/static/env-banner.js?v=20260807-2"></script>
+  <script src="/static/analytics.js?v=20261003-1"></script>
+</body>
+</html>
