@@ -303,7 +303,7 @@ function applyBatchWorkflowGating() {
   }
 }
 
-// The chip's markup and its two actions. `email` is only known once the server
+// The chip's markup and its actions (Settings, Sign out). Change password lives on the Settings page only. `email` is only known once the server
 // has answered, so a chip drawn from memory has no tooltip until then.
 function buildSessionChip(label, superAdmin, email) {
   const chip = document.createElement('div');
@@ -317,17 +317,9 @@ function buildSessionChip(label, superAdmin, email) {
     ${superAdmin
       ? '<a href="/admin" class="session-icon" title="Admin" aria-label="Admin"><i class="fas fa-gear"></i></a>'
       : '<a href="/settings" class="session-icon" title="Settings" aria-label="Settings"><i class="fas fa-gear"></i></a>'}
-    <a href="#" id="navChangePw" class="session-icon" title="Change password" aria-label="Change password">
-      <i class="fas fa-key"></i>
-    </a>
     <a href="#" id="navSignOut" class="session-signout" title="Sign out" aria-label="Sign out">
       <i class="fas fa-arrow-right-from-bracket"></i><span>Sign out</span>
     </a>`;
-
-  chip.querySelector('#navChangePw').addEventListener('click', (e) => {
-    e.preventDefault();
-    openChangePasswordModal();
-  });
 
   const signOut = chip.querySelector('#navSignOut');
   signOut.addEventListener('click', async (e) => {
