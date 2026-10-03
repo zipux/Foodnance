@@ -20,7 +20,7 @@
   // The script address from the Plausible dashboard (Site settings → Site
   // installation), e.g. 'https://plausible.io/js/pa-XXXXXXXX.js'.
   // Empty = analytics off.
-  var PLAUSIBLE_SRC = '';
+  var PLAUSIBLE_SRC = 'https://plausible.io/js/pa-pWQeZlgdzZzDefgsJVrkw.js';
   var LIVE_HOSTS = ['foodnance.com', 'www.foodnance.com'];
 
   var live = !!PLAUSIBLE_SRC && LIVE_HOSTS.indexOf(location.hostname) !== -1;

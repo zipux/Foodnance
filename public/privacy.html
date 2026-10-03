@@ -319,7 +319,7 @@
       <li>Password-reset and invitation records. We keep only a hash of each reset link, so a link works once and then expires.</li>
       <li>A log of how many invoices your organization has had read by AI, the size and cost of each request, and any request refused for being over your plan&rsquo;s limit. It does not contain the documents.</li>
     </ul>
-    <p><strong>Collected automatically:</strong> the app itself does not record your IP address or browser details. Our hosting provider, Cloudflare, processes IP addresses and request details to deliver the site and defend it against abuse, under its own policy. Your browser also contacts Google Fonts (Google) and jsDelivr, a code-delivery network, to load fonts and code libraries, which shows your IP address to those providers.</p>
+    <p><strong>Collected automatically:</strong> the app itself does not record your IP address or browser details. Our hosting provider, Cloudflare, processes IP addresses and request details to deliver the site and defend it against abuse, under its own policy. Your browser also contacts Google Fonts (Google) and jsDelivr, a code-delivery network, to load fonts and code libraries, which shows your IP address to those providers. Our public pages also use privacy-friendly analytics, described in section 2.4.</p>
 
     <h3>2.2 Why we use it</h3>
     <ul>
@@ -334,10 +334,11 @@
     <h3>2.3 Your consent</h3>
     <p>By creating an account, accepting an invitation or using the service, you agree to the collection, use and disclosure described here. You can withdraw consent at any time by contacting us, though we may then be unable to provide the service. Where the law allows us to process information without consent, for example to comply with a legal demand, we may do so.</p>
 
-    <h3>2.4 Cookies and local storage</h3>
+    <h3>2.4 Cookies, local storage and analytics</h3>
     <p>We use <strong>one essential cookie</strong>, <code>dm_session</code>, which keeps you signed in. Scripts on the page cannot read it, it is sent only over a secure connection on the live site, and it lasts 14 days unless you sign out. Foodnance staff who are authorised to help a customer may also carry a second, internal support cookie that applies only to their own signed-in session.</p>
     <p>The app also keeps four small items in your browser&rsquo;s local storage: your chosen profit-and-loss cost basis; the list of features your plan includes, so menu tabs your plan does not have are hidden before the page is drawn; the name of your business (never your email address), so the account box in the menu bar appears straight away; and that box&rsquo;s width, so the menu does not shift as the page loads. All but the first are removed when you sign out. None of them is sent to us.</p>
-    <p><strong>The food cost calculator.</strong> Anything you type into the calculator stays in your browser and is never saved or sent.</p>
+    <p><strong>Website analytics.</strong> On our public pages (the home page, pricing, the food cost calculator and our legal pages) we use <strong>Plausible Analytics</strong>. It does not use cookies, does not collect or store personal information about individual visitors, and does not build profiles or follow you across other sites. We see totals: how many people visited, which pages they viewed, which site sent them, their country and device type, and which buttons were clicked. Plausible is operated by a company in Estonia and keeps its data on servers in the European Union. We do not run analytics inside the signed-in app.</p>
+    <p><strong>The food cost calculator.</strong> Anything you type into the calculator stays in your browser and is never saved or sent. Analytics may count that the calculator was used, but never what you enter.</p>
     <p>We use <strong>no advertising or cross-site tracking cookies</strong>. Because nothing here tracks you across sites, there is nothing to switch off, and browser &ldquo;Do Not Track&rdquo; settings do not change what we do.</p>
 
     <h2 id="s3">3. Information a business puts into Foodnance</h2>
@@ -366,6 +367,7 @@
         <tr><td><strong>Anthropic, PBC</strong></td><td>Reading invoices and recipes, and suggesting categories for new products (section 5)</td><td>Invoice and recipe images and text; product names</td><td>United States</td></tr>
         <tr><td><strong>Resend</strong></td><td>Delivering service emails</td><td>Recipient name and email, and the message (for example a reset link)</td><td>United States</td></tr>
         <tr><td><strong>Paddle.com</strong></td><td>Payment, invoicing and sales tax, as Merchant of Record</td><td>Billing details you give it</td><td>United Kingdom and worldwide</td></tr>
+        <tr><td><strong>Plausible Analytics</strong></td><td>Counting visits to our public pages, without cookies</td><td>Anonymous page-view and click totals; no personal profile</td><td>European Union</td></tr>
         <tr><td><strong>Google Fonts</strong>, <strong>jsDelivr</strong></td><td>Loading fonts and code libraries in your browser</td><td>Your IP address and browser details, directly from your browser</td><td>Various</td></tr>
       </tbody>
     </table>
@@ -440,6 +442,6 @@
   </footer>
 
   <script src="/static/env-banner.js?v=20260807-2"></script>
-  <script src="/static/analytics.js?v=20261003-1"></script>
+  <script src="/static/analytics.js?v=20261004-1"></script>
 </body>
 </html>
