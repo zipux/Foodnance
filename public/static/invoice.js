@@ -80,6 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (!document.getElementById('dropZone')) return;
 
   checkAiStatus();
+  showStartDateNote();
 
   const dz = dropZone();
   dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('dragging'); });
@@ -704,6 +705,7 @@ async function processPDFBatch() {
     hideProgress();
     if (aiErr.paused) showPausedBlocker();
     else if (aiErr.capBlocked) showCapBlocker(aiErr.message);
+    else if (aiErr.beforeStart) showBeforeStartBlocker(aiErr.message);
     else showToast('Claude parsing failed: ' + aiErr.message, 'error');
     resetSubmitButton();
     return;
@@ -757,6 +759,7 @@ async function processImageBatch() {
     hideProgress();
     if (aiErr.paused) showPausedBlocker();
     else if (aiErr.capBlocked) showCapBlocker(aiErr.message);
+    else if (aiErr.beforeStart) showBeforeStartBlocker(aiErr.message);
     else showToast('Claude parsing failed: ' + aiErr.message, 'error');
     resetSubmitButton();
     return;
@@ -888,6 +891,7 @@ async function saveQuickInvoice() {
   };
 
   let savedInvoiceId = null;
+  let savedStatus = 'Action Required';
   try {
     const payload = {
       vendor:          currentVendor          || '',
@@ -917,6 +921,9 @@ async function saveQuickInvoice() {
     };
     const saved = await apiPost('tables/invoices', payload);
     savedInvoiceId = saved.id || null;
+    // The server decides the status (Processing while our team checks it, or
+    // Action Required) and echoes it back — the banner says which.
+    savedStatus = saved.status || 'Action Required';
   } catch (e) {
     hideProgress();
     showToast('Save failed: ' + e.message, 'error');
@@ -926,7 +933,7 @@ async function saveQuickInvoice() {
 
   showProgress(100, 'Saved!');
   hideProgress();
-  showSavedBanner(parsedData, savedInvoiceId);
+  showSavedBanner(parsedData, savedInvoiceId, savedStatus);
 
   // Reset the staging area so the user can upload another invoice
   stagedFiles = [];
@@ -950,7 +957,7 @@ function stagedPageRotations() {
   return Object.keys(out).length ? JSON.stringify(out) : '';
 }
 
-function showSavedBanner(parsedData, invoiceId) {
+function showSavedBanner(parsedData, invoiceId, status) {
   const banner = savedBanner();
   if (!banner) return;
   const titleEl = document.getElementById('savedTitleText');
@@ -960,11 +967,17 @@ function showSavedBanner(parsedData, invoiceId) {
   const items   = parsedData.items?.length || 0;
   const warns   = parsedData.warnings?.length || 0;
 
-  titleEl.textContent = `Saved! Invoice ${invNum}${vendor} is in your Action Required queue.`;
-  let msg = `${items} line item${items === 1 ? '' : 's'} parsed.`;
-  if (warns) msg += ` ${warns} warning${warns === 1 ? '' : 's'} flagged for review.`;
-  msg += ' Open the invoice from the Invoices page to review and confirm.';
-  msgEl.textContent = msg;
+  if (status === 'Processing') {
+    // Operator check (migration 0060): nothing for the customer to do yet.
+    titleEl.textContent = `Saved! Our team is checking invoice ${invNum}${vendor}.`;
+    msgEl.textContent = "It will be ready for you to approve on the Invoices page once it's checked.";
+  } else {
+    titleEl.textContent = `Saved! Invoice ${invNum}${vendor} is in your Action Required queue.`;
+    let msg = `${items} line item${items === 1 ? '' : 's'} parsed.`;
+    if (warns) msg += ` ${warns} warning${warns === 1 ? '' : 's'} flagged for review.`;
+    msg += ' Open the invoice from the Invoices page to review and confirm.';
+    msgEl.textContent = msg;
+  }
 
   const viewLink = banner.querySelector('a[href*="invoices"]');
   if (viewLink && invoiceId) viewLink.href = `/invoices.html?open=${encodeURIComponent(invoiceId)}`;
@@ -975,6 +988,26 @@ function showSavedBanner(parsedData, invoiceId) {
 function hideSavedBanner() {
   const banner = savedBanner();
   if (banner) banner.style.display = 'none';
+}
+
+// ══════════════════════════════════════════════════════════════
+// ACCOUNT START DATE (migration 0058)
+// ══════════════════════════════════════════════════════════════
+// Tells the customer up front which invoices will be accepted, so nobody spends
+// a read finding out. Stays hidden when there is no limit, or if the request
+// fails — the server enforces the rule either way.
+async function showStartDateNote() {
+  const el = document.getElementById('startDateNote');
+  if (!el) return;
+  try {
+    const data = await apiGet('account/plan');
+    const d = data && data.invoice_start_date;
+    if (!d) return;
+    const label = new Date(d + 'T00:00:00Z').toLocaleDateString(undefined,
+      { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+    el.textContent = `Upload invoices dated ${label} or later.`;
+    el.hidden = false;
+  } catch (_) { /* no note — not worth an error */ }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1044,6 +1077,17 @@ function showCapBlocker(message) {
     tone:  'limit',
     title: "You've used this month's AI invoice reads",
     toast: 'Monthly AI invoice limit reached — see details on screen.',
+  });
+}
+
+// The invoice is dated before this account's start date. Persistent panel, like
+// the cap: the message carries the date the AI read, which is how a customer
+// spots a misread (03/10 read as Mar 10) — a toast would vanish before that.
+function showBeforeStartBlocker(message) {
+  showParseBlocker(message, {
+    tone:  'limit',
+    title: 'Invoice is older than your account start date',
+    toast: 'Invoice not saved — it is dated before your start date.',
   });
 }
 
@@ -1144,6 +1188,9 @@ async function callClaudeParse(files) {
     // before it calls Anthropic, so a paused account cannot run up a bill.
     if (response.status === 402 || data.suspended) err.paused = true;
     // Over the monthly allowance — not a parsing failure, and shown differently.
+    // Dated before the account's start date (migration 0058) — a rule, not a
+    // reading failure, so it gets its own panel with the date it read.
+    if (data.before_start_date) err.beforeStart = true;
     if (data.upgrade_required) {
       err.capBlocked = true;
       err.cap  = data.cap;

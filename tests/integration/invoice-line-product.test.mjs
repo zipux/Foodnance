@@ -80,6 +80,9 @@ async function mkOrg(tag) {
     name: o.name, owner_email: o.email, owner_password: o.password, account_type: 'restaurant',
   });
   t.check(`test restaurant ${tag} created`, created.status === 200, JSON.stringify(created.data));
+  // A new account's uploads go to Processing for its first month (migration
+  // 0060); this test is about lines, so its invoices skip the operator check.
+  await post(admin, `/api/admin/organizations/${created.data?.organization?.id}/review-mode`, { mode: 'direct' });
   const j = jar();
   await post(j, '/api/auth/login', { email: o.email, password: o.password });
   return j;
@@ -115,6 +118,9 @@ const inv = await post(own, '/api/tables/invoices', {
 });
 const invId = inv.data?.data?.id || inv.data?.id;
 t.check('invoice created', !!invId, JSON.stringify(inv.data));
+// The server creates every invoice as Action Required (guardInvoiceWrite);
+// approving is the only way to Closed — the same step Confirm & Save takes.
+await call(own, 'PATCH', `/api/tables/invoices/${invId}`, { status: 'Closed' });
 
 // Exactly what Confirm & Save sends: lines first (vendor wording), ids back.
 const lines = [
@@ -228,6 +234,7 @@ const inv2 = await post(own, '/api/tables/invoices', {
   vendor: 'Yen Test', invoice_number: `YEN2-${STAMP}`, invoice_date: '2026-05-09', status: 'Closed', total: 5,
 });
 const inv2Id = inv2.data?.data?.id || inv2.data?.id;
+await call(own, 'PATCH', `/api/tables/invoices/${inv2Id}`, { status: 'Closed' });
 await post(own, `/api/invoice-lines/${inv2Id}/replace`, {
   lines: [{ product_name: 'Heavy Cream 36%', price: 5, qty: 1, line_total: 5 }],
 });

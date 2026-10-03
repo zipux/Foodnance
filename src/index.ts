@@ -1045,6 +1045,46 @@ function normalizeEmail(s: unknown): string {
   return String(s || '').trim().toLowerCase()
 }
 
+// ─── Account start date (migration 0058) ──────────────────────
+// Stamps the moment an account's owner first signs in, once. From it:
+//   invoice_start_date = 7 days earlier — /api/ai/parse-invoice refuses
+//   invoices dated before that line (a fixed line, not a rolling window), so a
+//   new account starts from recent invoices rather than a months-deep backlog.
+// COALESCE keeps a date the operator already set from the admin screen before
+// the owner arrived. `started_at IS NULL` makes every later call a no-op —
+// existing accounts were backfilled by the migration, so they are never
+// stamped and never get a limit.
+//
+// Fail-soft: a missing column (code deployed ahead of 0058) must never break
+// signing in.
+async function markOrgStarted(db: D1Database, orgId: string): Promise<void> {
+  try {
+    await db.prepare(
+      `UPDATE organizations
+          SET started_at = datetime('now'),
+              invoice_start_date = COALESCE(invoice_start_date, date('now', '-7 days'))
+        WHERE id = ? AND started_at IS NULL`,
+    ).bind(orgId).run()
+  } catch (e) {
+    console.warn('markOrgStarted failed:', e instanceof Error ? e.message : String(e))
+  }
+}
+
+// The org's "accept invoices from" date, or null for no limit. Fail-soft for
+// the same reason: before 0058 is applied this must read as "no limit", not
+// break invoice reading for every customer.
+async function invoiceStartDate(db: D1Database, orgId: string | null): Promise<string | null> {
+  if (!orgId) return null
+  try {
+    const row = await db.prepare('SELECT invoice_start_date FROM organizations WHERE id = ?')
+      .bind(orgId).first<{ invoice_start_date: string | null }>()
+    const d = row?.invoice_start_date || ''
+    return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null
+  } catch (_) {
+    return null
+  }
+}
+
 function publicUser(u: SessionUser) {
   return {
     id: u.id, email: u.email, name: u.name, role: u.role,
@@ -1119,7 +1159,7 @@ app.post('/api/auth/login', async (c) => {
 
   const row = await c.env.DB.prepare(
     `SELECT u.id, u.email, u.name, u.password_hash, u.password_salt, u.password_iter, u.role,
-            o.archived_at AS org_archived_at
+            u.org_id, o.archived_at AS org_archived_at
        FROM users u
        LEFT JOIN organizations o ON o.id = u.org_id
       WHERE u.email = ? AND u.archived_at IS NULL`,
@@ -1155,6 +1195,9 @@ app.post('/api/auth/login', async (c) => {
 
   // A good password ends the streak: "5 wrong in a row" must mean in a row.
   await c.env.DB.prepare(`UPDATE users SET last_login_at = datetime('now'), failed_logins = 0 WHERE id = ?`).bind(row.id).run()
+  // Legacy accounts are created with a ready-made password, so their first
+  // login is the first sign-in. A no-op for every account already started.
+  if (row.org_id) await markOrgStarted(c.env.DB, row.org_id)
 
   c.header('Set-Cookie', sessionCookieHeader(token, c.req.url, SESSION_TTL_SECONDS))
 
@@ -1455,6 +1498,9 @@ app.get('/api/account/plan', async (c) => {
     },
     // What upgrading would add. Empty on Pro, so the card has nothing to sell.
     pro_features: plan === 'pro' ? [] : [...PRO_FEATURES],
+    // Earliest invoice date AI reading accepts (migration 0058), or null for
+    // no limit. The upload page shows it so nobody pays a read to find out.
+    invoice_start_date: await invoiceStartDate(c.env.DB, org),
   })
 })
 
@@ -1676,6 +1722,9 @@ app.post('/api/auth/accept-invite', async (c) => {
     ).bind(userId, invite.org_id, email, hash, salt, PBKDF2_ITERATIONS, name),
     c.env.DB.prepare(`UPDATE invites SET accepted_at = datetime('now') WHERE id = ?`).bind(invite.id),
   ])
+  // Accepting the owner invite signs them straight in (below), so this is the
+  // account's first sign-in. A teammate joining later is a no-op.
+  await markOrgStarted(c.env.DB, invite.org_id)
 
   // Sign the caller in immediately — same shape as /api/auth/login — so a new
   // teammate lands in the app rather than at a login screen right after
@@ -1739,6 +1788,8 @@ async function requireSuperAdmin(c: any): Promise<SessionUser | null> {
 // from the screen. `to` is inclusive of the whole day.
 app.get('/api/admin/organizations', async (c) => {
   if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)
+  // The 48-hour release, for every account, before counting what's waiting.
+  await releaseOverdueInvoices(c, undefined)
 
   // Blank/absent = all time. Anything not shaped like a date is ignored rather
   // than rejected: a half-typed date in the picker shouldn't error the page.
@@ -1751,6 +1802,7 @@ app.get('/api/admin/organizations', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT o.id, o.name, o.account_type, o.created_at, o.archived_at,
             o.suspended_at, o.suspend_reason, o.plan, o.invoice_cap,
+            o.started_at, o.invoice_start_date, o.review_mode,
             (SELECT COUNT(*) FROM users u WHERE u.org_id = o.id AND u.archived_at IS NULL) AS user_count,
             (SELECT email FROM users u WHERE u.org_id = o.id AND u.role = 'owner'
               ORDER BY u.created_at LIMIT 1) AS owner_email,
@@ -1788,7 +1840,7 @@ app.get('/api/admin/organizations', async (c) => {
             -- Self-serve spot-check queue. Deliberately NOT scoped by the
             -- from/to range above — a backlog must never vanish because of a
             -- date picker. 'Action Required' is a real AI-parsed draft
-            -- awaiting review; 'In Processing' is a separate, orphaned stub
+            -- awaiting review; 'Manual Entry' is a separate, orphaned stub
             -- state (see ensure-invoice) that no code ever advances, so it is
             -- counted apart rather than inflating a number Simone is meant to
             -- be able to clear to zero. Archived organizations are excluded
@@ -1804,7 +1856,7 @@ app.get('/api/admin/organizations', async (c) => {
                 AND i.voided_at IS NULL AND i.reviewed_at IS NOT NULL) AS waiting_checked,
             (SELECT COUNT(*) FROM invoices i
               WHERE i.org_id = o.id AND o.archived_at IS NULL
-                AND i.status = 'In Processing'
+                AND i.status = 'Manual Entry'
                 AND i.voided_at IS NULL) AS waiting_stub,
             (SELECT MIN(i.created_at) FROM invoices i
               WHERE i.org_id = o.id AND o.archived_at IS NULL
@@ -1817,7 +1869,20 @@ app.get('/api/admin/organizations', async (c) => {
               WHERE i.org_id = o.id AND o.archived_at IS NULL
                 AND i.status = 'Action Required'
                 AND i.voided_at IS NULL AND i.reviewed_at IS NULL
-              ORDER BY i.created_at LIMIT 1) AS waiting_oldest_id
+              ORDER BY i.created_at LIMIT 1) AS waiting_oldest_id,
+            -- Operator check (migration 0060): invoices the customer can't act
+            -- on until Simone releases them. This is HIS queue — the one that
+            -- holds a customer up — so it is counted first and on its own.
+            (SELECT COUNT(*) FROM invoices i
+              WHERE i.org_id = o.id AND o.archived_at IS NULL
+                AND i.status = 'Processing' AND i.voided_at IS NULL) AS processing_count,
+            (SELECT MIN(i.created_at) FROM invoices i
+              WHERE i.org_id = o.id AND o.archived_at IS NULL
+                AND i.status = 'Processing' AND i.voided_at IS NULL) AS processing_oldest,
+            (SELECT i.id FROM invoices i
+              WHERE i.org_id = o.id AND o.archived_at IS NULL
+                AND i.status = 'Processing' AND i.voided_at IS NULL
+              ORDER BY i.created_at LIMIT 1) AS processing_oldest_id
        FROM organizations o
       ORDER BY o.created_at DESC`,
   ).bind(fromTs, toTs, monthStart()).all()
@@ -1825,7 +1890,11 @@ app.get('/api/admin/organizations', async (c) => {
   // plan_label is resolved here, not in admin.html, so the name a commissary is
   // sold under has exactly one definition. The raw `plan` still goes out beside
   // it — the picker needs the entitlement to decide what it may offer.
-  const rows = (results || []).map((o: any) => ({ ...o, plan_label: planLabel(o.plan, o.account_type) }))
+  // reviewing_now: whether a new upload would go to Processing today — the
+  // same function the upload uses, so the admin screen can't disagree with it.
+  const rows = (results || []).map((o: any) => ({
+    ...o, plan_label: planLabel(o.plan, o.account_type), reviewing_now: reviewsInvoices(o),
+  }))
 
   return c.json({
     data: rows,
@@ -2519,6 +2588,113 @@ app.post('/api/admin/organizations/:id/invoice-cap', async (c) => {
   })
 })
 
+// ── Change an organization's "accept invoices from" date ──────
+// POST /api/admin/organizations/:id/invoice-start-date   Body: { date: 'YYYY-MM-DD' | null }
+//
+// Set automatically at the owner's first sign-in (markOrgStarted, 7 days back).
+// This is the override: move it earlier for a customer who needs older invoices
+// in, or clear it (null) for no limit at all. It does not touch started_at.
+app.post('/api/admin/organizations/:id/invoice-start-date', async (c) => {
+  if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)
+  const id = c.req.param('id')
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+
+  const raw = body.date === null || body.date === undefined ? '' : String(body.date).trim()
+  let date: string | null = null
+  if (raw !== '') {
+    // Shape AND a real calendar day — '2026-02-31' passes the regex alone.
+    const d = new Date(raw + 'T00:00:00Z')
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw) || isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== raw) {
+      return c.json({ error: 'Use a date like 2026-09-24, or leave it blank for no limit.' }, 400)
+    }
+    date = raw
+  }
+
+  const org = await c.env.DB.prepare('SELECT id, name FROM organizations WHERE id = ?')
+    .bind(id).first<{ id: string; name: string }>()
+  if (!org) return c.json({ error: 'Restaurant not found.' }, 404)
+
+  await c.env.DB.prepare('UPDATE organizations SET invoice_start_date = ? WHERE id = ?').bind(date, id).run()
+  return c.json({ ok: true, organization: { id: org.id, name: org.name }, invoice_start_date: date })
+})
+
+// ── Choose whether an organization's invoices are checked first ──
+// POST /api/admin/organizations/:id/review-mode   Body: { mode: 'auto'|'processing'|'direct' }
+//   auto       → Processing for the first month after the owner's first sign-in
+//   processing → always Processing (keep checking)
+//   direct     → straight to Action Required
+// Applies to invoices uploaded from now on; one already in Processing stays
+// there until released (or the 48-hour release).
+app.post('/api/admin/organizations/:id/review-mode', async (c) => {
+  if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)
+  const id = c.req.param('id')
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const mode = String(body.mode || '')
+  if (!REVIEW_MODES.includes(mode)) return c.json({ error: 'Mode must be auto, processing or direct.' }, 400)
+
+  const org = await c.env.DB.prepare('SELECT id, name, started_at FROM organizations WHERE id = ?')
+    .bind(id).first<{ id: string; name: string; started_at: string | null }>()
+  if (!org) return c.json({ error: 'Restaurant not found.' }, 404)
+
+  // 'auto' is stored as NULL, so "never touched" and "set back to auto" are the same.
+  const stored = mode === 'auto' ? null : mode
+  await c.env.DB.prepare('UPDATE organizations SET review_mode = ? WHERE id = ?').bind(stored, id).run()
+  return c.json({
+    ok: true, organization: { id: org.id, name: org.name }, review_mode: stored,
+    reviewing_now: reviewsInvoices({ review_mode: stored, started_at: org.started_at }),
+  })
+})
+
+// ── Release a checked invoice to the customer ─────────────────
+// POST /api/admin/invoices/:id/release   Body: { parsed_data?: string (JSON) }
+// Processing → Action Required. Carries the operator's corrections (the review
+// screen's working copy) into parsed_data, copies the headline fields onto the
+// row so the list shows them, and marks it checked (reviewed_by/at — the same
+// marker as a spot-check, so it leaves the "not checked" queue).
+// Super-admin only; the actor comes from the session. Scoped by the row's own
+// org, like the spot-check route — a super-admin acts across organizations.
+app.post('/api/admin/invoices/:id/release', async (c) => {
+  const me = await requireSuperAdmin(c)
+  if (!me) return c.json({ error: 'Not authorized.' }, 403)
+  const id = c.req.param('id')
+  const body = await c.req.json().catch(() => ({})) as { parsed_data?: unknown }
+
+  const row = await c.env.DB.prepare(
+    'SELECT id, org_id, status, voided_at, parsed_data FROM invoices WHERE id = ?',
+  ).bind(id).first<{ id: string; org_id: string | null; status: string; voided_at: string | null; parsed_data: string | null }>()
+  if (!row) return c.json({ error: 'Not found.' }, 404)
+  if (row.status !== 'Processing' || row.voided_at) {
+    return c.json({ error: 'Only an invoice in Processing can be released.' }, 409)
+  }
+
+  let parsedText = row.parsed_data || ''
+  if (body.parsed_data !== undefined && body.parsed_data !== null && body.parsed_data !== '') {
+    if (typeof body.parsed_data !== 'string') return c.json({ error: 'parsed_data must be a JSON string.' }, 400)
+    try { JSON.parse(body.parsed_data) } catch (_) { return c.json({ error: 'parsed_data is not valid JSON.' }, 400) }
+    parsedText = body.parsed_data
+  }
+  let p: any = {}
+  try { p = JSON.parse(parsedText || '{}') || {} } catch (_) { p = {} }
+
+  const reviewedAt = new Date().toISOString().slice(0, 19).replace('T', ' ')
+  await c.env.DB.prepare(
+    `UPDATE invoices
+        SET status = 'Action Required', parsed_data = ?, reviewed_by = ?, reviewed_at = ?,
+            vendor = COALESCE(NULLIF(?, ''), vendor),
+            invoice_number = COALESCE(NULLIF(?, ''), invoice_number),
+            invoice_date = COALESCE(NULLIF(?, ''), invoice_date),
+            total = CASE WHEN ? > 0 THEN ? ELSE total END
+      WHERE id = ? AND org_id IS ? AND status = 'Processing'`,
+  ).bind(
+    parsedText, me.email, reviewedAt,
+    String(p.vendor || ''), String(p.invoice_number || ''), String(p.invoice_date || ''),
+    Number(p.total) || 0, Number(p.total) || 0,
+    id, row.org_id,
+  ).run()
+
+  return c.json({ id, status: 'Action Required', reviewed_by: me.email, reviewed_at: reviewedAt })
+})
+
 app.post('/api/admin/organizations/:id/suspend', async (c) => {
   if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)
   const id = c.req.param('id')
@@ -2741,6 +2917,7 @@ const ALLOWED_TABLES = [
 app.get('/api/tables/:table', async (c) => {
   const table = c.req.param('table')
   if (!ALLOWED_TABLES.includes(table)) return c.json({ error: 'Unknown table' }, 400)
+  if (table === 'invoices') await releaseOverdueInvoices(c, orgOf(c))
 
   const { page, limit, ...filters } = c.req.query()
   const p = Math.max(1, parseInt(page || '1'))
@@ -2776,6 +2953,7 @@ app.get('/api/tables/:table', async (c) => {
 app.get('/api/tables/:table/:id', async (c) => {
   const { table, id } = c.req.param()
   if (!ALLOWED_TABLES.includes(table)) return c.json({ error: 'Unknown table' }, 400)
+  if (table === 'invoices') await releaseOverdueInvoices(c, orgOf(c))
   // Another org's row reports 404, not 403 — a different status would confirm
   // the id exists, which is itself a leak.
   const row = await c.env.DB.prepare(
@@ -2788,11 +2966,143 @@ app.get('/api/tables/:table/:id', async (c) => {
 // Tables that use INTEGER PRIMARY KEY AUTOINCREMENT — don't inject a UUID id
 const INTEGER_PK_TABLES = ['units', 'categories']
 
+// ─── Operator check: "Processing" (migration 0060) ─────────────
+// A new account's invoices go to 'Processing' first: the customer can see the
+// invoice but not change or approve it while the operator (super-admin) checks
+// the AI's reading, then releases it to 'Action Required'. Per account,
+// organizations.review_mode:
+//   NULL / 'auto'  → Processing during the first FIRST_MONTH_DAYS after the
+//                    owner's first sign-in (started_at, migration 0058), then
+//                    straight to Action Required. Not signed in yet counts as
+//                    the first month (only the operator can upload then).
+//   'processing'   → always Processing (keep checking past the first month)
+//   'direct'       → never — straight to Action Required
+// A Processing invoice nobody released is released on its own after
+// AUTO_RELEASE_HOURS (releaseOverdueInvoices), marked auto_released_at and
+// left unchecked (reviewed_at NULL) so it stays in the operator's queue.
+const FIRST_MONTH_DAYS = 30
+const AUTO_RELEASE_HOURS = 48
+const REVIEW_MODES = ['auto', 'processing', 'direct']
+
+// Pure: does an org with this row send new invoices to Processing right now?
+function reviewsInvoices(row: { review_mode?: string | null; started_at?: string | null }, now = Date.now()): boolean {
+  const mode = row.review_mode || 'auto'
+  if (mode === 'direct') return false
+  if (mode === 'processing') return true
+  if (!row.started_at) return true
+  const started = Date.parse(String(row.started_at).replace(' ', 'T') + 'Z')
+  if (isNaN(started)) return false
+  return now < started + FIRST_MONTH_DAYS * 86400000
+}
+
+// The status a new invoice for this org starts in. Fail-soft: before 0060 is
+// applied (or with no org — the super-admin's own data) it is today's
+// behaviour, Action Required, so a missing column can never block uploads.
+async function newInvoiceStatus(db: D1Database, orgId: string | null): Promise<string> {
+  if (!orgId) return 'Action Required'
+  try {
+    const row = await db.prepare('SELECT review_mode, started_at FROM organizations WHERE id = ?')
+      .bind(orgId).first<{ review_mode: string | null; started_at: string | null }>()
+    return row && reviewsInvoices(row) ? 'Processing' : 'Action Required'
+  } catch (_) {
+    return 'Action Required'
+  }
+}
+
+// The 48-hour safety net. Pages has no scheduled jobs, so this runs whenever
+// someone could see the result: the customer's invoice list/detail (their org)
+// and the operator's admin screen (every org). To anyone looking it is
+// indistinguishable from a timer. Fail-soft — it must never break a page load.
+async function releaseOverdueInvoices(c: any, orgId: string | null | undefined): Promise<void> {
+  try {
+    if (orgId === undefined) {
+      await c.env.DB.prepare(
+        `UPDATE invoices SET status = 'Action Required', auto_released_at = datetime('now')
+          WHERE status = 'Processing' AND voided_at IS NULL
+            AND created_at <= datetime('now', '-${AUTO_RELEASE_HOURS} hours') /* all orgs: operator screen */`,
+      ).run()
+    } else {
+      await c.env.DB.prepare(
+        `UPDATE invoices SET status = 'Action Required', auto_released_at = datetime('now')
+          WHERE status = 'Processing' AND voided_at IS NULL AND org_id IS ?
+            AND created_at <= datetime('now', '-${AUTO_RELEASE_HOURS} hours')`,
+      ).bind(orgId).run()
+    }
+  } catch (e) {
+    console.warn('releaseOverdueInvoices failed:', e instanceof Error ? e.message : String(e))
+  }
+}
+
+// ─── Invoice lifecycle — the server owns invoices.status ──────
+// Invoices are written through the generic table routes, which take any column
+// the browser sends. Without this, a status was whatever the client said: a
+// Closed invoice could be reopened, a draft closed with no review, and the
+// upcoming "Processing" state (operator checks first) would be one PATCH away
+// from being skipped. The statuses:
+//   'Action Required'  a parsed invoice waiting for the customer to approve
+//   'Closed'           approved — counted in the P&L
+//   'Processing'       the operator checks it first (migration 0060) — the
+//                      customer can see and delete it, nothing else; only
+//                      POST /api/admin/invoices/:id/release (or the 48-hour
+//                      release) moves it on, to Action Required
+//   'Manual Entry'     the file record /api/ensure-invoice makes when a product
+//                      entry is added by hand with an invoice attached (was
+//                      'In Processing' until migration 0059). Its own end state.
+// The rules:
+//   create  → 'Processing' or 'Action Required' by the org's review mode
+//             (newInvoiceStatus), whatever was sent
+//   update  → status may only go Action Required → Closed (approving); sending
+//             the status it already has is fine (Save Changes on a posted invoice)
+//   delete  → never a Closed invoice — void it (POST /api/invoices/:id/void)
+//   voided_at / void_reason → only through the void and restore routes, which
+//             also flag the invoice's product_entries; a bare PATCH would not.
+// Returns a refusal Response, or null to let the generic route carry on. It
+// edits `body` in place.
+async function guardInvoiceWrite(
+  c: any, method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', id: string | null, body: Record<string, unknown> | null,
+): Promise<Response | null> {
+  if (body) { delete body.voided_at; delete body.void_reason }
+  if (method === 'POST') {
+    body!.status = await newInvoiceStatus(c.env.DB, orgOf(c))
+    return null
+  }
+  const row = await c.env.DB.prepare('SELECT status, voided_at FROM invoices WHERE id = ? AND org_id IS ?')
+    .bind(id, orgOf(c)).first() as { status: string | null; voided_at: string | null } | null
+  if (!row) return c.json({ error: 'Invoice not found.' }, 404)
+  if (method === 'DELETE') {
+    if (row.status === 'Closed') {
+      return c.json({ error: "A saved invoice can't be deleted. Void it instead, so it can be restored." }, 409)
+    }
+    return null
+  }
+  // Processing: the customer may look (and delete, above) but not change it —
+  // except turning a sideways photo, which is display only. The operator
+  // (super-admin, viewing as) can edit it: adding a page, fixing the reading.
+  const me = c.get('user') as SessionUser | undefined
+  if (row.status === 'Processing' && me?.role !== 'super_admin' && body) {
+    const keys = Object.keys(body).filter(k => k !== 'page_rotations')
+    if (keys.length) {
+      return c.json({ error: "Our team is still checking this invoice. You'll be able to review and approve it once it's ready." }, 409)
+    }
+  }
+  if (body && 'status' in body && body.status !== row.status) {
+    const approving = row.status === 'Action Required' && body.status === 'Closed' && !row.voided_at
+    if (!approving) {
+      return c.json({ error: `An invoice can't be moved from "${row.status || 'none'}" to "${String(body.status)}".` }, 409)
+    }
+  }
+  return null
+}
+
 // ── Insert
 app.post('/api/tables/:table', async (c) => {
   const table = c.req.param('table')
   if (!ALLOWED_TABLES.includes(table)) return c.json({ error: 'Unknown table' }, 400)
   const body = stripServerOwned(await c.req.json() as Record<string, unknown>)
+  if (table === 'invoices') {
+    const refused = await guardInvoiceWrite(c, 'POST', null, body)
+    if (refused) return refused
+  }
   if (!body.id && !INTEGER_PK_TABLES.includes(table)) body.id = uid()
   // Stamped from the session, after stripping any client-supplied value.
   body.org_id = orgOf(c)
@@ -2810,6 +3120,10 @@ app.put('/api/tables/:table/:id', async (c) => {
   const { table, id } = c.req.param()
   if (!ALLOWED_TABLES.includes(table)) return c.json({ error: 'Unknown table' }, 400)
   const body = stripServerOwned(await c.req.json() as Record<string, unknown>)
+  if (table === 'invoices') {
+    const refused = await guardInvoiceWrite(c, 'PUT', id, body)
+    if (refused) return refused
+  }
   body.id = id
   const keys = Object.keys(body)
   const vals = Object.values(body)
@@ -2826,6 +3140,10 @@ app.patch('/api/tables/:table/:id', async (c) => {
   const { table, id } = c.req.param()
   if (!ALLOWED_TABLES.includes(table)) return c.json({ error: 'Unknown table' }, 400)
   const body = stripServerOwned(await c.req.json() as Record<string, unknown>)
+  if (table === 'invoices') {
+    const refused = await guardInvoiceWrite(c, 'PATCH', id, body)
+    if (refused) return refused
+  }
   const keys = Object.keys(body)
   if (!keys.length) return c.json({ error: 'No fields to update' }, 400)
   const setCols = keys.map(k => `${k} = ?`).join(', ')
@@ -2954,6 +3272,10 @@ app.put('/api/generic_products/:id', async (c) => {
 app.delete('/api/tables/:table/:id', async (c) => {
   const { table, id } = c.req.param()
   if (!ALLOWED_TABLES.includes(table)) return c.json({ error: 'Unknown table' }, 400)
+  if (table === 'invoices') {
+    const refused = await guardInvoiceWrite(c, 'DELETE', id, null)
+    if (refused) return refused
+  }
   await c.env.DB.prepare(
     `DELETE FROM ${table} WHERE id = ? AND org_id IS ?`,
   ).bind(id, orgOf(c)).run()
@@ -4036,7 +4358,8 @@ app.post('/api/vendor-fee-template', async (c) => {
 // Body: { file_key, file_name, vendor?, invoice_number?, invoice_date?, total?,
 //         tax_gst?, tax_pst?, delivery?, credit?, other_cost?, other_desc? }
 // If an invoice with this file_key already exists, returns it.
-// Otherwise creates a new "In Processing" invoice record.
+// Otherwise creates a new "Manual Entry" invoice record (migration 0059 renamed
+// it from "In Processing", so that word is free for the operator-check state).
 app.post('/api/ensure-invoice', async (c) => {
   const body = await c.req.json() as {
     file_key: string; file_name?: string
@@ -4066,7 +4389,7 @@ app.post('/api/ensure-invoice', async (c) => {
        status, payment_account, file_name, file_key, file_url, notes,
        tax_gst, tax_pst, delivery, fuel_surcharge, deposit, credit, other_cost, other_desc,
        org_id)
-     VALUES (?, ?, ?, ?, ?, ?, 'In Processing', 'A/P', ?, ?, ?, '',
+     VALUES (?, ?, ?, ?, ?, ?, 'Manual Entry', 'A/P', ?, ?, ?, '',
              ?, ?, ?, 0, ?, ?, ?, ?, ?)`
   ).bind(
     invoiceId,
@@ -5829,6 +6152,40 @@ ${rules}`
       .trim()
 
     const parsed = JSON.parse(cleaned)
+
+    // ── Account start date (migration 0058) ──────────────────────
+    // A new account only takes invoices dated on or after its start line (7
+    // days before the owner first signed in). Only the AI knows the date, so
+    // this runs after the read — the call is already logged above and counts
+    // toward the cap, exactly like any other read. Nothing is saved: the
+    // upload page saves only after a successful parse.
+    //
+    // Not checked: undated invoices (accepted by decision — an unreadable date
+    // is not evidence of an old invoice), a page added to an invoice that
+    // already exists in this org (it was accepted when first uploaded), and a
+    // super-admin, who is exempt from customer gates as everywhere else.
+    const invDate = String(parsed?.invoice_date || '').trim()
+    const me = c.get('user') as SessionUser | undefined
+    if (/^\d{4}-\d{2}-\d{2}$/.test(invDate) && me?.role !== 'super_admin') {
+      const startDate = await invoiceStartDate(c.env.DB, parseOrg)
+      if (startDate && invDate < startDate) {
+        const addingTo = String(formData.get('invoice_id') || '')
+        const existing = addingTo
+          ? await c.env.DB.prepare('SELECT id FROM invoices WHERE id = ? AND org_id IS ?')
+              .bind(addingTo, parseOrg).first()
+          : null
+        if (!existing) {
+          return c.json({
+            error: `This invoice is dated ${invDate}, before your account's start date (${startDate}). `
+                 + `Foodnance tracks invoices from ${startDate} onward, so it was not saved. `
+                 + `If the date was read wrongly, or you need older invoices added, contact us.`,
+            before_start_date: true,
+            invoice_date: invDate,
+            start_date: startDate,
+          }, 422)
+        }
+      }
+    }
 
     return c.json({
       success: true,

@@ -28,6 +28,9 @@
     "test:reset": "node tests/integration/password-reset.test.mjs",
     "test:purge": "node tests/integration/org-purge.test.mjs",
     "test:invite-email": "node tests/integration/team-invite-email.test.mjs",
+    "test:start-date": "node tests/integration/invoice-start-date.test.mjs",
+    "test:invoice-status": "node tests/integration/invoice-status.test.mjs",
+    "test:processing": "node tests/integration/invoice-processing.test.mjs",
     "test:line-product": "node tests/integration/invoice-line-product.test.mjs"
   },
   "dependencies": {

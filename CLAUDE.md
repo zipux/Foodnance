@@ -321,6 +321,69 @@ column fails the save); applied and deployed on staging and production 2026-09-2
 `tests/invoice-rotation.test.mjs`. Side note: the upload page's pre-existing auto-deskew
 (`image-preproc.js`) can tilt a clean page a few degrees — seen on a synthetic test image.
 
+### Account start date — "accept invoices from" (added 2026-10-03, migration `0058`)
+
+A new account only takes invoices dated **on or after 7 days before its owner first
+signed in**. A fixed line, not a rolling window: an account started Oct 1 accepts a
+Sep 24 invoice on Oct 15, never a Sep 20 one. `markOrgStarted()` stamps
+`organizations.started_at` once (invite accept, or first login on a legacy password
+account) and sets `invoice_start_date` to 7 days earlier unless the operator already set
+one. `/api/ai/parse-invoice` refuses older invoices with 422 `{ before_start_date }`
+**after** the AI read (only the AI knows the date), so a refusal still counts toward the
+cap; nothing is saved, and the upload page shows a panel with the date it read.
+**Not checked:** undated invoices (accepted by decision), a page added to an invoice
+already in the org (`invoice_id` form field, verified against the org), super-admins.
+The upload page shows the date up front (`/api/account/plan` → `invoice_start_date`);
+the admin screen's **Invoices from** column changes or clears it
+(`POST /api/admin/organizations/:id/invoice-start-date`). Accounts that already had a
+user were backfilled `started_at = created_at` with **no** date limit. Known quirk:
+clearing the date *before* the owner's first sign-in doesn't stick — the first sign-in
+fills it. `started_at` is also where the planned "first month of operator checking"
+will count from. **Apply `0058` before deploying** (by file, never `db:migrate:prod`).
+`npm run test:start-date` (needs the sandbox; `TEST_AI=1` adds 3 real reads to prove
+the refusal).
+
+### The server owns invoice status (added 2026-10-03, migration `0059`)
+
+Invoices are written through the generic table routes, so until now `status` was
+whatever the browser sent. `guardInvoiceWrite()` (called from the generic
+POST/PUT/PATCH/DELETE when `table === 'invoices'`) now enforces: **create** is always
+`'Action Required'`; the only status **move** is Action Required → Closed (approving,
+not on a voided invoice), and resending the current status is fine; a **Closed** invoice
+can't be deleted (void it); `voided_at`/`void_reason` are stripped, so only
+`/api/invoices/:id/void|restore` touch them. The invoice screen's status dropdown is gone
+(a read-only badge now), and Save Changes no longer sends a status. The
+`/api/ensure-invoice` stub is now **`'Manual Entry'`** (was `'In Processing'`, which
+nothing ever advanced; production had none). This is the foundation for the planned
+operator-check **Processing** state: the server can now decide a new invoice's status
+and refuse the customer moving it. Tests that need a Closed invoice must create it and
+then PATCH it to Closed, like Confirm & Save. **Apply `0059` before deploying.**
+`npm run test:invoice-status` (needs the sandbox).
+
+### Operator check — the "Processing" status (added 2026-10-03, migration `0060`)
+
+A new account's uploads go to **`'Processing'`** first. The customer sees them (blue "Our
+team is checking your invoice" banner, headline + photo only), can delete one or turn its
+photo, and nothing else; the server refuses any other change (`guardInvoiceWrite`). The
+operator opens it while **viewing as** and gets the normal review screen with **Release to
+customer** in place of Confirm & Save: `POST /api/admin/invoices/:id/release` writes the
+working copy back into `parsed_data` (`workingCopyToParsed()`), copies vendor / number / date /
+total onto the row, marks it checked (`reviewed_by/at`) and moves it to Action Required. The
+customer then approves it as before. **Who gets it:** `organizations.review_mode`, set from the
+admin **Check first** column (`POST /api/admin/organizations/:id/review-mode`): NULL/`auto` =
+the `FIRST_MONTH_DAYS` (30) after the owner's first sign-in (`started_at`, 0058; not signed in
+yet counts as the first month), `processing` = always, `direct` = never. `reviewsInvoices()`
+decides for both the upload and the admin screen's `reviewing_now`, so they can't disagree.
+**48-hour release:** Pages has no cron, so `releaseOverdueInvoices()` runs on every invoice
+list/detail read (that org) and on the admin screen (all orgs, the one allowlisted unscoped
+statement in `tests/org-scoping.test.mjs`): overdue Processing → Action Required with
+`auto_released_at`, `reviewed_at` left NULL so it stays in the "not checked" queue. Admin
+Waiting column shows **"N to release · auto in Nh"** on top. **No customer emails** by
+decision; they look at the Invoices page. Everything fails soft to the old behaviour
+(Action Required) if `0060` isn't applied, except the admin list, which selects
+`review_mode` — **apply `0060` before deploying**. Tests that create accounts and need
+ordinary invoices set them to `direct` first. `npm run test:processing` (needs the sandbox).
+
 ### Tests
 
 ```bash
@@ -332,6 +395,9 @@ npm run test:merge     # product merge/group — needs the sandbox
 npm run test:reset     # forgotten-password flow — needs the sandbox
 npm run test:invite-email # emailed invite caps — needs the sandbox (and `db:migrate:local` for 0052)
 npm run test:purge     # account purge: leaves nothing behind, touches no other customer — needs the sandbox
+npm run test:start-date # account start date / invoice date line — needs the sandbox (TEST_AI=1 for the refusal)
+npm run test:invoice-status # server-owned invoice status — needs the sandbox
+npm run test:processing     # operator check / Processing / release / 48h — needs the sandbox
 ```
 
 **The account purge** (`DELETE /api/admin/organizations/:id`, admin-screen button) is
@@ -445,7 +511,7 @@ until utils.js adds `.has-chip`, and nav-gate.js sets that width from `localStor
 Fallbacks are 240px desktop / 107px phone (first visit only).
 
 **The account chip is drawn from memory too, so it doesn't pop in late.** It used to be built
-only after `/me` answered — the right-hand end of the bar (business name, gear, key, Sign
+only after `/me` answered — the right-hand end of the bar (business name, gear, Sign
 out) flashed in on every page. utils.js now calls `drawSessionChipFromMemory()` the moment it
 loads (the nav is already parsed), from `localStorage['dm_chip_id']` = `{label, sa}` — the
 business name (or "Admin") only, **never the email**, and nothing at all for someone whose

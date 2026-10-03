@@ -163,6 +163,7 @@
       background: none; border: none; padding: 0; cursor: pointer; text-align: right;
     }
     .waiting-btn:hover .amt { text-decoration: underline; }
+    .waiting-btn.proc { color: #1d4ed8; display: block; margin-left: auto; }
 
     /* Date-range filter above the table. */
     .rangebar {
@@ -529,7 +530,8 @@
               <th>Name</th><th>Owner</th><th>Type</th><th>Plan</th><th>Status</th>
               <th>People</th><th style="text-align:right">AI cost (USD)</th>
               <th style="text-align:right">Cap</th><th style="text-align:right">Waiting</th>
-              <th>Added</th><th></th>
+              <th title="Whether new invoices come to you first (Processing) before the customer can approve them">Check first</th>
+              <th>Added</th><th title="Earliest invoice date AI reading accepts. Blank = no limit.">Invoices from</th><th></th>
             </tr></thead>
             <tbody>${rows.map(o => `
               <tr${o.archived_at ? ' style="opacity:.55"' : ''}>
@@ -542,7 +544,9 @@
                 ${aiCostCell(o)}
                 ${capCell(o, planCaps)}
                 ${waitingCell(o)}
+                ${reviewCell(o)}
                 <td>${esc((o.created_at || '').split(' ')[0])}</td>
+                ${startDateCell(o)}
                 <td class="actions">
                   <button class="btn btn-ghost" data-act="view"
                           data-id="${esc(o.id)}" data-name="${esc(o.name)}"
@@ -617,6 +621,22 @@
             separate so it can't make the count look permanently stuck.
             Restaurants in their first 30 days are flagged <strong>NEW</strong> —
             that's when their catalogue is emptiest and the AI matches worst.
+            <br>
+            <strong>to release</strong> (top of Waiting) is invoices in
+            <em>Processing</em>: the customer can see them but can't change or
+            approve them until you open one and press <strong>Release to
+            customer</strong>. Anything not released within 48 hours releases
+            itself, unchecked, and shows up under Waiting like any other.
+            <strong>Check first</strong> decides which accounts' uploads go to
+            Processing: <em>First month</em> (the 30 days after the owner first
+            signs in), <em>Always check</em>, or <em>Don't check</em>.
+            <br>
+            <strong>Invoices from</strong> is the earliest invoice date AI reading
+            accepts — set automatically to 7 days before the owner first signs in,
+            so a new account starts from recent invoices. Older ones are refused
+            and not saved (the read still counts toward the cap). Undated invoices
+            are always accepted. Change the date to let older invoices in, or clear
+            it for no limit; accounts from before this rule have none.
           </div>`;
 
         // Listeners rather than inline onclick="…('${name}')". esc() turns an
@@ -642,6 +662,14 @@
 
         box.querySelectorAll('select[data-plan-for]').forEach(sel => {
           sel.addEventListener('change', () => setPlan(sel, sel.dataset.planFor, sel.dataset.name));
+        });
+
+        box.querySelectorAll('select[data-review-for]').forEach(sel => {
+          sel.addEventListener('change', () => setReviewMode(sel, sel.dataset.reviewFor, sel.dataset.name));
+        });
+
+        box.querySelectorAll('input[data-start-for]').forEach(input => {
+          input.addEventListener('change', () => setStartDate(input, input.dataset.startFor, input.dataset.name));
         });
 
         box.querySelectorAll('input[data-cap-for]').forEach(input => {
@@ -784,17 +812,36 @@
     // an invoice the moment the AI has read it — this column exists so Simone
     // can see what's piling up and reach it, not to gate anything.
     //
-    // "Action Required" is the real, actionable backlog. "In Processing" is a
+    // "Action Required" is the real, actionable backlog. "Manual Entry" is a
     // separate orphaned-stub state (see ensure-invoice server-side) that no
     // code ever advances, so it is shown apart as "stub" rather than folded
     // into the headline count — a number that can never reach zero trains you
     // to stop looking at the column.
+    //
+    // "to release" (migration 0060) sits on top: invoices in Processing, which
+    // the customer can't act on until you release them — the only part of this
+    // column that holds a customer up. "auto in Nh" is when the oldest one
+    // releases itself unchecked.
     function waitingCell(o) {
       const unchecked = Number(o.waiting_unchecked) || 0;
       const checked   = Number(o.waiting_checked) || 0;
       const stub      = Number(o.waiting_stub) || 0;
-      if (!unchecked && !checked && !stub) {
+      const processing = Number(o.processing_count) || 0;
+      if (!unchecked && !checked && !stub && !processing) {
         return '<td class="cost waiting zero"><span class="amt">—</span></td>';
+      }
+
+      let procHtml = '';
+      if (processing) {
+        const procHours = o.processing_oldest ? (Date.now() - new Date(o.processing_oldest.replace(' ', 'T') + 'Z').getTime()) / 3600000 : 0;
+        const left = Math.max(0, Math.ceil(48 - procHours));
+        procHtml = `<button type="button" class="waiting-btn proc" data-act="queue" data-id="${esc(o.id)}"
+                  data-name="${esc(o.name)}" data-open="${esc(o.processing_oldest_id || '')}"
+                  title="In Processing — the customer can't approve these until you release them">
+            <span class="amt">${processing}</span> to release
+          </button>
+          <span class="sub ${left <= 12 ? 'over' : ''}">oldest ${ageLabel(o.processing_oldest)} · auto in ${left}h</span>`;
+        if (!unchecked && !checked && !stub) return `<td class="cost waiting">${procHtml}</td>`;
       }
 
       const age = ageLabel(o.waiting_oldest);
@@ -812,7 +859,7 @@
       if (stub)    bits.push(`${stub} stub`);
       const subText = [age ? `oldest ${age}` : '', ...bits].filter(Boolean).join(' · ');
 
-      return `<td class="cost waiting">
+      return `<td class="cost waiting">${procHtml}
         <button type="button" class="waiting-btn" data-act="queue" data-id="${esc(o.id)}"
                 data-name="${esc(o.name)}" data-open="${esc(o.waiting_oldest_id || '')}">
           <span class="amt">${unchecked || '—'}</span>${newPill}
@@ -887,6 +934,101 @@
                    : Number(raw) === 0 ? 'unlimited' : `${raw} invoices/month`;
         msg(`${name}: AI cap set ${what}.`, 'ok');
         loadOrgs();
+      } catch (_) {
+        input.value = before;
+        msg('Could not reach the server.', 'bad');
+      } finally {
+        input.disabled = false;
+      }
+    }
+
+    // Check first (migration 0060): whether this account's new invoices come to
+    // you in Processing before the customer can approve them.
+    //   First month — automatic: the 30 days after the owner first signs in
+    //   Always check — keep checking past the first month
+    //   Don't check  — straight to the customer
+    // The line under it is what happens to an upload today (reviewing_now, the
+    // same function the server uses on upload).
+    function reviewCell(o) {
+      const mode = o.review_mode || 'auto';
+      let sub;
+      if (mode === 'auto') {
+        if (!o.started_at) sub = 'on — owner not signed in yet';
+        else {
+          const end = new Date(new Date(o.started_at.replace(' ', 'T') + 'Z').getTime() + 30 * 86400000);
+          sub = o.reviewing_now ? `on until ${end.toISOString().slice(0, 10)}` : 'first month over — off';
+        }
+      } else {
+        sub = o.reviewing_now ? 'on' : 'off';
+      }
+      const opt = (v, label) => `<option value="${v}"${mode === v ? ' selected' : ''}>${label}</option>`;
+      return `<td class="waiting"><select class="planpick ${o.reviewing_now ? 'pro' : ''}" data-review-for="${esc(o.id)}"
+                 data-name="${esc(o.name)}" data-current="${esc(mode)}">
+          ${opt('auto', 'First month')}${opt('processing', 'Always check')}${opt('direct', "Don't check")}
+        </select><span class="sub">${esc(sub)}</span></td>`;
+    }
+
+    async function setReviewMode(sel, orgId, name) {
+      const mode = sel.value;
+      const before = sel.dataset.current || 'auto';
+      if (mode === before) return;
+      sel.disabled = true;
+      try {
+        const r = await fetch(`/api/admin/organizations/${orgId}/review-mode`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ mode }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          sel.value = before;
+          msg(data.error || `Could not change checking for ${name}.`, 'bad');
+          return;
+        }
+        msg(`${name}: new invoices ${data.reviewing_now ? 'come to you first' : 'go straight to the customer'}.`, 'ok');
+        loadOrgs();
+      } catch (_) {
+        sel.value = before;
+        msg('Could not reach the server.', 'bad');
+      } finally {
+        sel.disabled = false;
+      }
+    }
+
+    // "Accept invoices from" (migration 0058). Set automatically to 7 days before
+    // the owner's first sign-in; AI reading refuses invoices dated earlier. Blank
+    // means no limit — every account that existed before the rule. Change it to
+    // let a customer bring older invoices in.
+    function startDateCell(o) {
+      const v = o.invoice_start_date || '';
+      const started = (o.started_at || '').split(' ')[0];
+      const title = started
+        ? `Owner first signed in ${started}. Invoices dated before this are refused. Blank = no limit.`
+        : 'Owner has not signed in yet — set automatically at first sign-in. Blank = no limit.';
+      return `<td><input type="date" class="cappick" style="width:auto;text-align:left"
+               value="${esc(v)}" data-start-for="${esc(o.id)}" data-name="${esc(o.name)}"
+               data-current="${esc(v)}" title="${esc(title)}"></td>`;
+    }
+
+    async function setStartDate(input, orgId, name) {
+      const raw = input.value.trim();
+      const before = input.dataset.current || '';
+      if (raw === before) return;
+      input.disabled = true;
+      try {
+        const r = await fetch(`/api/admin/organizations/${orgId}/invoice-start-date`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ date: raw === '' ? null : raw }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          input.value = before;
+          msg(data.error || `Could not change the start date for ${name}.`, 'bad');
+          return;
+        }
+        input.dataset.current = raw;
+        msg(raw === '' ? `${name}: no invoice date limit.` : `${name}: invoices accepted from ${raw}.`, 'ok');
       } catch (_) {
         input.value = before;
         msg('Could not reach the server.', 'bad');

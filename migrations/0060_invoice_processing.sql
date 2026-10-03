@@ -1,0 +1,21 @@
+-- ============================================================
+-- Operator check: the 'Processing' invoice status
+-- ============================================================
+-- A new account's invoices go to 'Processing' first. The customer sees them
+-- but can't change or approve them while the operator checks the AI's
+-- reading, then releases them to 'Action Required'
+-- (POST /api/admin/invoices/:id/release). See reviewsInvoices() in src/index.ts.
+--
+-- organizations.review_mode  NULL ('auto') = Processing for the first 30 days
+--                            after the owner's first sign-in (started_at, 0058);
+--                            'processing' = always; 'direct' = never.
+-- invoices.auto_released_at  set when an invoice nobody released moved on by
+--                            itself after 48 hours. reviewed_at stays NULL, so
+--                            it remains in the operator's "not checked" queue.
+--
+-- Existing accounts: review_mode stays NULL ('auto'), so an account whose
+-- first sign-in was more than 30 days ago is unaffected. On production at the
+-- time of writing (2026-10-03) only "Pizza test" (created 2026-09-21) is
+-- inside its first month.
+ALTER TABLE organizations ADD COLUMN review_mode TEXT DEFAULT NULL;
+ALTER TABLE invoices ADD COLUMN auto_released_at TEXT DEFAULT NULL;

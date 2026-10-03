@@ -40,6 +40,12 @@ const TENANT_TABLES = new Set([
 // Keyed by a distinctive fragment of the statement. Every entry needs a reason.
 const ALLOWLIST = [
   // (populated as the audit proceeds — each entry is a deliberate decision)
+  {
+    fragment: '/* all orgs: operator screen */',
+    reason: 'releaseOverdueInvoices(c, undefined): the 48-hour release run for every account '
+          + 'from the super-admin screen. It only moves overdue Processing invoices to Action '
+          + 'Required; each row keeps its own org_id. The per-customer variant is scoped.',
+  },
 ];
 
 // Read the string literal starting at src[j] (backtick, single or double

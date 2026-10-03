@@ -176,6 +176,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('closeInvDetailBtn').addEventListener('click',   () => { _cleanInvImgZoom(); closeModal('invDetailModal'); });
   document.getElementById('saveInvDetailBtn').addEventListener('click',    saveInvDetail);
   document.getElementById('confirmInvSaveBtn').addEventListener('click',   confirmAndSaveInvoice);
+  document.getElementById('releaseInvBtn').addEventListener('click',       releaseInvoice);
   document.getElementById('deleteInvBtn').addEventListener('click',        deleteInvoice);
   document.getElementById('voidInvBtn').addEventListener('click',         voidInvoice);
   document.getElementById('restoreInvBtn').addEventListener('click',      restoreInvoice);
@@ -292,12 +293,13 @@ function renderInvoices() {
 
 function statusBadge(status) {
   const map = {
-    'In Processing':  'badge-processing',
+    'Processing':     'badge-processing',
+    'Manual Entry':   'badge-manual',
     'Action Required':'badge-action',
     'Closed':         'badge-closed',
   };
-  const cls = map[status] || 'badge-processing';
-  return `<span class="status-badge ${cls}">${esc(status || 'In Processing')}</span>`;
+  const cls = map[status] || 'badge-manual';
+  return `<span class="status-badge ${cls}">${esc(status || 'Manual Entry')}</span>`;
 }
 
 function renderPagination(pages) {
@@ -316,13 +318,13 @@ function goInvPage(p) { currentInvPage = p; renderInvoices(); }
 function renderInvStats() {
   const total    = filteredInvs.length;
   const sumTotal = filteredInvs.reduce((s, i) => s + (parseFloat(i.total) || 0), 0);
-  const processing = filteredInvs.filter(i => i.status === 'In Processing').length;
+  const processing = filteredInvs.filter(i => i.status === 'Processing').length;
   const action     = filteredInvs.filter(i => i.status === 'Action Required').length;
 
   document.getElementById('invStats').innerHTML = `
     <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">Total Invoices</div></div>
     <div class="stat-card"><div class="stat-value">$${sumTotal.toFixed(2)}</div><div class="stat-label">Total Value</div></div>
-    <div class="stat-card"><div class="stat-value">${processing}</div><div class="stat-label">In Processing</div></div>
+    <div class="stat-card"><div class="stat-value">${processing}</div><div class="stat-label">Processing</div></div>
     <div class="stat-card"><div class="stat-value" style="color:#b45309">${action}</div><div class="stat-label">Action Required</div></div>
   `;
 }
@@ -354,8 +356,15 @@ async function openInvDetail(id) {
   const inv = allInvoices.find(i => i.id === id);
   if (!inv) return;
 
-  isActionRequired  = inv.status === 'Action Required';
-  currentParsedData = isActionRequired ? tryParseParsedData(inv.parsed_data) : null;
+  // Processing (migration 0060): our team checks the AI's reading before the
+  // customer can act. The operator (super-admin, viewing as) gets the full
+  // review screen with "Release to customer" in place of Confirm & Save; the
+  // customer gets a read-only "being checked" view (see the end of this
+  // function). The server enforces the same split — this is presentation.
+  const isProcessing   = inv.status === 'Processing';
+  const isOperatorView = isProcessing && window.__isSuperAdmin === true;
+  isActionRequired  = inv.status === 'Action Required' || isOperatorView;
+  currentParsedData = (isActionRequired || isProcessing) ? tryParseParsedData(inv.parsed_data) : null;
 
   // Resize modal and line items height for Action Required only
   document.querySelector('#invDetailModal .modal').classList.toggle('modal--action-required', isActionRequired);
@@ -370,10 +379,25 @@ async function openInvDetail(id) {
   const banner          = document.getElementById('actionRequiredBanner');
   const saveChangesBtn  = document.getElementById('saveInvDetailBtn');
   const confirmBtn      = document.getElementById('confirmInvSaveBtn');
+  const releaseBtn = document.getElementById('releaseInvBtn');
+  releaseBtn.classList.toggle('hidden', !isOperatorView);
+  document.getElementById('processingBanner').classList.toggle('hidden', !isProcessing || isOperatorView);
+  document.getElementById('expenseBillBox').classList.remove('hidden');
+  document.getElementById('detailNotes').closest('.form-group')?.classList.remove('hidden');
+  if (isOperatorView) {
+    document.getElementById('arBannerTitle').innerHTML =
+      '<i class="fas fa-user-check"></i> Processing — check it before the customer can';
+    document.getElementById('arBannerText').innerHTML =
+      "The customer can see this invoice but can't change or approve it yet. Fix anything the AI got wrong, then click <strong>Release to customer</strong>.";
+  } else {
+    document.getElementById('arBannerTitle').innerHTML = '<i class="fas fa-clipboard-check"></i> Ready for you';
+    document.getElementById('arBannerText').innerHTML =
+      'Check the details and approve if everything looks right. Nothing is added to your products until you click <strong>Confirm &amp; Save</strong>.';
+  }
   if (isActionRequired) {
     banner.classList.remove('hidden');
     saveChangesBtn.classList.add('hidden');
-    confirmBtn.classList.remove('hidden');
+    confirmBtn.classList.toggle('hidden', isOperatorView);
     renderParsedWarnings(currentParsedData?.warnings || []);
     updateAddPageUI();
   } else {
@@ -470,10 +494,10 @@ async function openInvDetail(id) {
   const reviewedBlock = document.getElementById('detailReviewedBlock');
   if (reviewedBlock) {
     reviewedBlock.style.display =
-      (window.__isSuperAdmin === true && inv.status !== 'Closed' && !inv.voided_at) ? '' : 'none';
+      (window.__isSuperAdmin === true && inv.status !== 'Closed' && !isProcessing && !inv.voided_at) ? '' : 'none';
   }
   renderReviewedStatus(inv);
-  document.getElementById('detailStatus').value        = inv.status          || 'In Processing';
+  document.getElementById('detailStatus').innerHTML    = statusBadge(inv.status);
   document.getElementById('detailNotes').value         = inv.notes           || '';
 
   // Expense-bill classification (utilities/rent/etc.). Only editable while
@@ -630,6 +654,17 @@ async function openInvDetail(id) {
     activeBox.classList.remove('hidden');
   }
 
+  // Customer view of a Processing invoice: the photo and the headline only —
+  // nothing to edit, approve or save until our team releases it. Delete stays
+  // (a wrong file or a duplicate). Runs last, after toggleExpenseMode and the
+  // line render have set these sections for an ordinary invoice.
+  if (isProcessing && !isOperatorView) {
+    ['goodsLineItems', 'goodsAdditionalCosts', 'expenseBillBox', 'saveInvDetailBtn']
+      .forEach(elId => document.getElementById(elId)?.classList.add('hidden'));
+    // Notes too: there is no Save here, so a typed note would silently vanish.
+    document.getElementById('detailNotes').closest('.form-group')?.classList.add('hidden');
+  }
+
   openModal('invDetailModal');
 
   // Measure the actual rendered header height and apply it as sticky top offset
@@ -716,6 +751,9 @@ async function loadAndRenderLines(invoiceId) {
         line_total:   parseFloat(it.cost)       || 0,
         _original_ocr: it.original_ocr || '',
         _auto_mapped:  !!it.auto_mapped,
+        // A product link the operator accepted before releasing (see
+        // workingCopyToParsed) — the same fields the manual link flow sets.
+        ...(it.link_product_id ? { _link_product_id: it.link_product_id, _link_product_name: it.link_product_name || '' } : {}),
       };
     });
   } else {
@@ -932,6 +970,9 @@ async function handleAddPageFile(e) {
     // 2. Parse the new page with Claude
     const fd = new FormData();
     fd.append('file', pageFile);
+    // Tells the server this page belongs to an invoice already in the account,
+    // so the start-date rule (checked on new uploads) doesn't refuse it.
+    fd.append('invoice_id', id);
     const resp = await fetch('/api/ai/parse-invoice', { method: 'POST', body: fd });
     const data = await resp.json();
     if (!resp.ok || data.error) throw new Error(data.error || `Server error ${resp.status}`);
@@ -1458,7 +1499,10 @@ function renderCostSummary({ autoFill = false } = {}) {
 
 async function saveInvDetail() {
   const id     = document.getElementById('detailInvId').value;
-  const status = document.getElementById('detailStatus').value;
+  const current = allInvoices.find(i => i.id === id);
+  // Status is not editable here — the server owns it (guardInvoiceWrite) — so
+  // Save Changes keeps whatever the invoice already is and never sends one.
+  const status = current?.status || '';
   const notes  = document.getElementById('detailNotes').value.trim();
   const btn    = document.getElementById('saveInvDetailBtn');
 
@@ -1490,9 +1534,9 @@ async function saveInvDetail() {
     const typedTotal = parseFloat(document.getElementById('detailTotalInput').value) || 0;
     const savedTotal = typedTotal > 0 ? typedTotal : newTotal;
 
-    // 1. Patch status, notes, extra cost fields AND recalculated total on invoice
+    // 1. Patch notes, extra cost fields AND recalculated total on invoice
     await apiPatch(`tables/${INV_LIST_TABLE}/${id}`, {
-      status, notes,
+      notes,
       tax_pst:        taxPst,
       tax_gst:        taxGst,
       delivery:       delivery,
@@ -1537,7 +1581,6 @@ async function saveInvDetail() {
     // 3. Update local cache
     const inv = allInvoices.find(i => i.id === id);
     if (inv) {
-      inv.status         = status;
       inv.notes          = notes;
       inv.total          = savedTotal;
       inv.tax_pst        = taxPst;
@@ -1968,6 +2011,70 @@ async function confirmExpenseInvoice(id, inv) {
   } finally {
     btn.disabled = false;
     btn.innerHTML = '<i class="fas fa-check-circle"></i> Confirm & Save';
+  }
+}
+
+// ── Release to customer (operator, Processing → Action Required) ──
+// The review screen's working copy goes back into parsed_data — the same shape
+// the upload page writes and loadAndRenderLines reads — so the customer opens
+// exactly what the operator corrected. The server marks it checked and moves
+// the status; nothing is written to products, lines or the P&L until the
+// customer's own Confirm & Save.
+function workingCopyToParsed() {
+  const num = (elId) => parseFloat(document.getElementById(elId).value) || 0;
+  const out = { ...(currentParsedData || {}) };
+  out.vendor         = document.getElementById('detailVendorInput').value.trim();
+  out.invoice_number = document.getElementById('detailNumberInput').value.trim();
+  out.invoice_date   = document.getElementById('detailDateInput').value.trim();
+  out.total          = num('detailTotalInput');
+  out.tax_pst        = num('detailTaxPst');
+  out.tax_gst        = num('detailTaxGst');
+  out.delivery       = num('detailDelivery');
+  out.fuel_surcharge = 0;   // folded into delivery on screen, as at Confirm & Save
+  out.deposit        = num('detailDeposit');
+  out.credit         = num('detailCredit');
+  out.other_cost     = num('detailOtherCost');
+  out.other_desc     = document.getElementById('detailOtherDesc').value.trim();
+  out.items = currentLines.map(l => {
+    const price = parseFloat(l.price) || 0;
+    const qty   = parseFloat(l.qty)   || 0;
+    const packQty  = (l.pack_qty || '').toString().trim();
+    const packUnit = (l.pack_unit || '').trim();
+    return {
+      name:         l.product_name || '',
+      original_ocr: l._original_ocr || l.vendor_item || '',
+      brand:        l.category  || '',
+      sku:          l.item_code || '',
+      pack_size:    [packQty, packUnit].filter(Boolean).join(' '),
+      qty,
+      unit_price:   price,
+      cost:         price * qty,
+      auto_mapped:  !!l._auto_mapped,
+      ...(l._link_product_id ? { link_product_id: l._link_product_id, link_product_name: l._link_product_name || '' } : {}),
+    };
+  });
+  return out;
+}
+
+async function releaseInvoice() {
+  const id  = document.getElementById('detailInvId').value;
+  const inv = allInvoices.find(i => i.id === id);
+  if (!id || !inv || inv.status !== 'Processing') return;
+  const btn = document.getElementById('releaseInvBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Releasing…';
+  try {
+    const parsed = workingCopyToParsed();
+    await apiPost(`admin/invoices/${id}/release`, { parsed_data: JSON.stringify(parsed) });
+    showToast('Released — the customer can now review and approve it.', 'success');
+    _cleanInvImgZoom();
+    closeModal('invDetailModal');
+    await loadInvoices();
+  } catch (e) {
+    showToast('Release failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-paper-plane"></i> Release to customer';
   }
 }
 

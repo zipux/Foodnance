@@ -1,0 +1,13 @@
+-- ============================================================
+-- Rename the 'In Processing' invoice stub to 'Manual Entry'
+-- ============================================================
+-- /api/ensure-invoice creates an invoice record when a product entry is added
+-- by hand with an invoice file attached. It was given status 'In Processing',
+-- which nothing ever moves on — so it read as "we're working on it" forever.
+-- It is its own end state, now named for what it is, and the word
+-- "Processing" is free for the planned operator-check state.
+--
+-- Data: production held no 'In Processing' rows when this was written
+-- (2026-10-03: 20 Closed, 3 Action Required), so this is expected to change
+-- nothing there. Safe to run more than once.
+UPDATE invoices SET status = 'Manual Entry' WHERE status = 'In Processing';

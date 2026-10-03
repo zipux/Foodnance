@@ -84,6 +84,7 @@
 
     /* Table badge */
     .badge-processing  { background:#dbeafe; color:#1d4ed8; }
+    .badge-manual      { background:#f1f5f9; color:#475569; }
     .badge-action      { background:#fef3c7; color:#b45309; }
     .badge-closed      { background:#d1fae5; color:#065f46; }
     .status-badge {
@@ -111,7 +112,6 @@
     }
     .inv-detail-label { font-size: .75rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; margin-bottom: .15rem; }
     .inv-detail-value { font-size: .92rem; color: var(--text-primary); }
-    .inv-status-select { width: 100%; padding: .4rem; border-radius: 8px; border: 1px solid var(--border); font-size: .9rem; }
 
     .page-header-row {
       display: flex;
@@ -122,6 +122,7 @@
       margin-bottom: 1.5rem;
     }
     .page-header-row h1 { margin: 0; }
+    .page-header-row h1 i { color: var(--primary); margin-right: .5rem; }
     .header-btn-group { display: flex; gap: .5rem; }
   </style>
   <script src="/static/nav-gate.js?v=20260921-3"></script>
@@ -181,7 +182,8 @@
           <!-- Status tabs -->
           <div class="status-tabs">
             <button class="status-tab active" data-status="all">All</button>
-            <button class="status-tab" data-status="In Processing">Processing</button>
+            <button class="status-tab" data-status="Processing">Processing</button>
+            <button class="status-tab" data-status="Manual Entry">Manual Entry</button>
             <button class="status-tab" data-status="Action Required">Action Required</button>
             <button class="status-tab" data-status="Closed">Closed</button>
             <button class="status-tab" data-status="voided">Voided</button>
@@ -240,13 +242,25 @@
           <div id="voidedBannerReason" style="margin-top:.35rem;font-size:.85rem;color:#7f1d1d"></div>
         </div>
 
+        <!-- ── Processing banner (customer view while our team checks it, migration 0060) ── -->
+        <div id="processingBanner" class="hidden" style="margin-bottom:1rem;padding:.85rem 1rem;background:#eff6ff;border:2px solid #3b82f6;border-radius:10px">
+          <div style="display:flex;align-items:center;gap:.5rem;font-weight:700;color:#1d4ed8;margin-bottom:.35rem">
+            <i class="fas fa-hourglass-half"></i> Our team is checking your invoice
+          </div>
+          <p style="margin:0;font-size:.86rem;color:#1e3a8a;line-height:1.5">
+            Once it's checked it moves to <strong>Action Required</strong>, and you can review and approve it here.
+          </p>
+        </div>
+
         <!-- ── Action Required banner (shown only when status = Action Required) ── -->
         <div id="actionRequiredBanner" class="hidden" style="margin-bottom:1rem;padding:.85rem 1rem;background:#fffbeb;border:2px solid #f59e0b;border-radius:10px">
-          <div style="display:flex;align-items:center;gap:.5rem;font-weight:700;color:#92400e;margin-bottom:.35rem">
-            <i class="fas fa-clipboard-check"></i> Review &amp; Confirm
+          <!-- Text is set by openInvDetail: the customer's "Ready for you", or the
+               operator's Processing check (same editing tools, different action). -->
+          <div id="arBannerTitle" style="display:flex;align-items:center;gap:.5rem;font-weight:700;color:#92400e;margin-bottom:.35rem">
+            <i class="fas fa-clipboard-check"></i> Ready for you
           </div>
-          <p style="margin:0;font-size:.86rem;color:#78350f;line-height:1.5">
-            This invoice was uploaded but <strong>not yet saved</strong> to your products database. Review the parsed data below, then click <strong>Confirm &amp; Save</strong> to add the products, supplier, and line items.
+          <p id="arBannerText" style="margin:0;font-size:.86rem;color:#78350f;line-height:1.5">
+            Check the details and approve if everything looks right. Nothing is added to your products until you click <strong>Confirm &amp; Save</strong>.
           </p>
           <div id="parsedWarnings" style="margin-top:.65rem;display:flex;flex-direction:column;gap:.4rem"></div>
           <!-- Shown only when a page is detected missing -->
@@ -323,7 +337,7 @@
         </div>
 
         <!-- ── Expense-bill toggle (utilities/rent/etc. — not goods) ── -->
-        <div style="margin-bottom:1rem;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:.7rem .9rem">
+        <div id="expenseBillBox" style="margin-bottom:1rem;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:.7rem .9rem">
           <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;font-size:.9rem;font-weight:600;color:#92400e">
             <input type="checkbox" id="detailIsExpense" onchange="toggleExpenseMode()" />
             This is an expense bill (utilities, rent, insurance…) — not goods for resale
@@ -432,11 +446,9 @@
         <div class="inv-detail-grid">
           <div>
             <div class="inv-detail-label">Status</div>
-            <select class="inv-status-select" id="detailStatus">
-              <option value="In Processing">In Processing</option>
-              <option value="Action Required">Action Required</option>
-              <option value="Closed">Closed</option>
-            </select>
+            <!-- Read-only: the server owns status. It moves only by approving
+                 (Confirm & Save) and voiding — never by picking it here. -->
+            <div id="detailStatus" style="padding:.3rem 0"></div>
           </div>
         </div>
         <div class="form-group">
@@ -451,6 +463,7 @@
         <button class="btn btn-secondary" id="closeInvDetailBtn">Cancel</button>
         <button class="btn btn-primary" id="saveInvDetailBtn"><i class="fas fa-save"></i> Save Changes</button>
         <button class="btn btn-success hidden" id="confirmInvSaveBtn"><i class="fas fa-check-circle"></i> Confirm &amp; Save</button>
+        <button class="btn btn-success hidden" id="releaseInvBtn" title="Send it to the customer to approve"><i class="fas fa-paper-plane"></i> Release to customer</button>
       </div>
     </div>
   </div>
@@ -541,6 +554,6 @@
   <script src="/static/utils.js?v=20260922-1"></script>
   <script src="/static/image-preproc.js?v=20260806-1"></script>
   <script src="/static/inventory.js?v=20260922-1"></script>
-  <script src="/static/invoices.js?v=20260923-2"></script>
+  <script src="/static/invoices.js?v=20261003-4"></script>
 </body>
 </html>

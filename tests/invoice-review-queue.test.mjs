@@ -8,7 +8,7 @@
 // otherwise PATCH their own invoice with a forged reviewed_by/reviewed_at and
 // vanish from the admin queue while signing the operator's name to it. This
 // file pins that, plus the two other decisions that are easy to quietly
-// regress: 'In Processing' stubs must never inflate the actionable count, and
+// regress: 'Manual Entry' stubs must never inflate the actionable count, and
 // admin.html's header/row cell counts must stay in lockstep.
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -64,17 +64,17 @@ t.check('the actor comes from the session (me.email), never the request body',
 t.check('it refuses to mark a Closed or voided invoice',
   !!reviewedRoute && /'Closed'/.test(reviewedRoute[0]) && /voided_at/.test(reviewedRoute[0]));
 
-t.section("'In Processing' stubs never inflate the actionable queue count");
+t.section("'Manual Entry' stubs never inflate the actionable queue count");
 // The four/five queue subqueries in GET /api/admin/organizations must key the
 // headline counts off 'Action Required' specifically, and count
-// 'In Processing' into a visibly separate field.
+// 'Manual Entry' (was 'In Processing' before migration 0059) into a visibly separate field.
 const orgsRoute = src.match(/app\.get\('\/api\/admin\/organizations'[\s\S]*?\n\}\)/);
 t.check('GET /api/admin/organizations exists', !!orgsRoute);
 t.check("waiting_unchecked is scoped to status = 'Action Required'",
   !!orgsRoute && /waiting_unchecked/.test(orgsRoute[0]) &&
   /status = 'Action Required'[\s\S]{0,80}AS waiting_unchecked/.test(orgsRoute[0]));
-t.check("'In Processing' rows are counted separately, as waiting_stub",
-  !!orgsRoute && /status = 'In Processing'[\s\S]{0,150}AS waiting_stub/.test(orgsRoute[0]));
+t.check("'Manual Entry' rows are counted separately, as waiting_stub",
+  !!orgsRoute && /status = 'Manual Entry'[\s\S]{0,150}AS waiting_stub/.test(orgsRoute[0]));
 t.check('the queue subqueries exclude voided invoices',
   !!orgsRoute && /waiting_unchecked[\s\S]{0,10}voided_at IS NULL|voided_at IS NULL[\s\S]{0,80}waiting_unchecked/.test(orgsRoute[0]));
 t.check('archived organizations are excluded from the queue',
