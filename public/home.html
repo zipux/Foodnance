@@ -92,9 +92,10 @@
       border-color: var(--primary);
       box-shadow: 0 0 0 2px rgba(3,105,161,.2);
     }
-    .pm-row.up   { background: #fef2f2; border-color: #fecaca; }
-    .pm-row.down { background: #f0fdf4; border-color: #bbf7d0; }
-    .pm-row.flat { background: #f8fafc; }
+    /* Rows stay white: the only colour in the column is the percentage, which
+       is the one thing the list is scanned for. Filling each row red, green,
+       blue or grey said the same thing three times (fill, border, number) and
+       left blue meaning both "switched vendor" and "selected". */
     .pm-name { font-weight: 600; font-size: .9rem; color: var(--text); }
     .pm-meta { font-size: .75rem; color: var(--text-muted); margin-top: .15rem; }
     .pm-change {
@@ -109,11 +110,10 @@
     /* A supplier switch / substituted item is a comparison between two
        different purchases, not one vendor changing price — styled neutrally so
        it doesn't read as a red-alert price rise. */
-    .pm-row.switch    { background: #f0f9ff; border-color: #bae6fd; }
-    .pm-change.switch { color: #075985; }
+    .pm-change.switch { color: var(--text-muted); }
     .pm-switch {
       font-size: .72rem;
-      color: #075985;
+      color: var(--text-muted);
       margin-top: .2rem;
       display: flex;
       align-items: center;
