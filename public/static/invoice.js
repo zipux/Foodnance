@@ -352,7 +352,7 @@ function renderStagedList() {
         <div style="margin-top:.3rem;font-size:.78rem;color:#92400e;line-height:1.45">
           <i class="fas fa-triangle-exclamation" style="color:#f59e0b"></i>
           ${esc(sf.qualityIssue)}
-          <span style="color:#a16207"> You can still upload it — Claude may read it fine.</span>
+          <span style="color:#a16207"> You can still upload it — it may still read fine.</span>
         </div>` : ''}
       </div>
       <span class="page-label">${pageLabel}</span>
@@ -670,7 +670,7 @@ async function processPDFBatch() {
 
   if (!_aiConfigured) {
     hideProgress();
-    showParseBlocker('Claude is not configured on this server. Please add ANTHROPIC_API_KEY to the server environment.');
+    showParseBlocker(AI_UNAVAILABLE_MSG);
     return;
   }
 
@@ -688,7 +688,7 @@ async function processPDFBatch() {
     pageInvoiceNumbers.push(invNumMatch ? invNumMatch[1].trim() : '');
   }
 
-  showProgress(72, 'Reading invoice with Claude…');
+  showProgress(72, 'Reading your invoice…');
 
   let aiResult = null;
   try {
@@ -706,7 +706,7 @@ async function processPDFBatch() {
     if (aiErr.paused) showPausedBlocker();
     else if (aiErr.capBlocked) showCapBlocker(aiErr.message);
     else if (aiErr.beforeStart) showBeforeStartBlocker(aiErr.message);
-    else showToast('Claude parsing failed: ' + aiErr.message, 'error');
+    else showToast(aiErr.message, 'error');
     resetSubmitButton();
     return;
   }
@@ -733,7 +733,7 @@ async function processImageBatch() {
 
   if (!_aiConfigured) {
     hideProgress();
-    showParseBlocker('Claude is not configured on this server. Please add ANTHROPIC_API_KEY to the server environment.');
+    showParseBlocker(AI_UNAVAILABLE_MSG);
     return;
   }
 
@@ -741,7 +741,7 @@ async function processImageBatch() {
   // Hard-stop if any page fails — don't parse/save an invoice with no image.
   if (!(await uploadAllPages(files))) { hideProgress(); showUploadBlocker(); return; }
 
-  showProgress(70, 'Reading invoice with Claude…');
+  showProgress(70, 'Reading your invoice…');
 
   let aiResult = null;
   try {
@@ -760,7 +760,7 @@ async function processImageBatch() {
     if (aiErr.paused) showPausedBlocker();
     else if (aiErr.capBlocked) showCapBlocker(aiErr.message);
     else if (aiErr.beforeStart) showBeforeStartBlocker(aiErr.message);
-    else showToast('Claude parsing failed: ' + aiErr.message, 'error');
+    else showToast(aiErr.message, 'error');
     resetSubmitButton();
     return;
   }
@@ -1030,7 +1030,7 @@ async function checkAiStatus() {
     el.innerHTML = '<i class="fas fa-check-circle" style="color:#16a34a"></i> AI ready';
     el.style.color = '#16a34a';
   } else {
-    el.innerHTML = '<i class="fas fa-exclamation-circle" style="color:#d97706"></i> No Claude key on server';
+    el.innerHTML = '<i class="fas fa-exclamation-circle" style="color:#d97706"></i> Invoice reading unavailable';
     el.style.color = '#d97706';
   }
 }
@@ -1180,12 +1180,18 @@ function showUploadBlocker() {
 // ══════════════════════════════════════════════════════════════
 // CLAUDE CALL — send the raw document(s) for direct reading
 // ══════════════════════════════════════════════════════════════
+// Shown when invoice reading is unavailable and the server could not say why itself.
+const AI_UNAVAILABLE_MSG = "We couldn't read this invoice right now. Please try again in a few minutes. " +
+  'If it keeps happening, email hello@foodnance.com.';
+
 async function callClaudeParse(files) {
-  if (!_aiConfigured) throw new Error('Claude API key is not configured on the server.');
+  if (!_aiConfigured) throw new Error(AI_UNAVAILABLE_MSG);
   const formData = new FormData();
   for (const file of files) formData.append('file', file);
   const response = await fetch('/api/ai/parse-invoice', { method: 'POST', body: formData });
-  const data = await response.json();
+  // A reply that isn't JSON is a gateway's own error page, not ours — say something
+  // useful instead of "Unexpected token <".
+  const data = await response.json().catch(() => ({ error: AI_UNAVAILABLE_MSG }));
   if (!response.ok || data.error) {
     const err = new Error(data.error || `Server error ${response.status}`);
     // Account paused — not a parsing failure either. The server refuses this

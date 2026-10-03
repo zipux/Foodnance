@@ -129,7 +129,11 @@ deploy you just shipped. A rotated `SESSION_SECRET` makes the switchover obvious
 existing cookies start returning "Not signed in".
 
 **`ANTHROPIC_API_KEY` has been revoked three times** (2026-07-19, 08-07, 08-08),
-twice mid-session, each surfacing as "API key is invalid" on invoice upload.
+twice mid-session, each surfacing as "API key is invalid" on invoice upload. Since
+2026-10-04 the customer no longer sees Anthropic's text: `aiUnavailable()` answers 503 with
+plain words and a reference (**AI-401** = key rejected, AI-429/529 = busy, **AI-0** = no key
+on that deployment); the real message goes to the worker log only. Never return 502 from a
+route: on foodnance.com Cloudflare replaces it with its own "Bad gateway" page.
 `.dev.vars` is gitignored and untracked, so the leak is not git. Diagnose with a
 raw `curl` to `api.anthropic.com/v1/messages/count_tokens`, outside the app, to
 separate a dead key from a code bug. `/api/ai/status` only checks the key

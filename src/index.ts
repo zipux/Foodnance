@@ -5950,6 +5950,21 @@ function bufToBase64(buf: ArrayBuffer): string {
   return btoa(binary)
 }
 
+// What a customer is told when the AI service itself fails (dead key, overload,
+// outage). Anthropic's own error text and our configuration names stay in the
+// worker log; the customer gets plain words and a short reference they can quote
+// (AI-401 = key rejected, AI-429/529 = busy, AI-0 = no key on this deployment).
+// Sent as 503, never 502: on foodnance.com Cloudflare swaps a 502 for its own
+// "Bad gateway" page and the message never arrives.
+function aiUnavailable(c: any, what: 'invoice' | 'recipe', status: number, detail?: string) {
+  console.error(`AI ${what} read failed: status ${status}`, detail || '')
+  return c.json({
+    error: `We couldn't read this ${what} right now. Please try again in a few minutes. ` +
+           `If it keeps happening, email hello@foodnance.com. (Reference: AI-${status})`,
+    ai_unavailable: true,
+  }, 503)
+}
+
 // ─── AI: Parse invoice via Claude ────────────────────────────
 // POST /api/ai/parse-invoice
 // Accepts multipart/form-data with one or more "file" fields (PDF or image).
@@ -5958,7 +5973,7 @@ function bufToBase64(buf: ArrayBuffer): string {
 app.post('/api/ai/parse-invoice', async (c) => {
   const apiKey = c.env.ANTHROPIC_API_KEY
   if (!apiKey) {
-    return c.json({ error: 'Claude API key is not configured on the server. Add ANTHROPIC_API_KEY and try again.' }, 400)
+    return aiUnavailable(c, 'invoice', 0, 'ANTHROPIC_API_KEY is not set on this deployment')
   }
 
   // ── Monthly parse cap ────────────────────────────────────────
@@ -6122,7 +6137,7 @@ ${rules}`
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({})) as { error?: { message?: string } }
-      return c.json({ error: err?.error?.message || `Claude API error ${response.status}` }, 502)
+      return aiUnavailable(c, 'invoice', response.status, err?.error?.message)
     }
 
     const data = await response.json() as {
@@ -6161,17 +6176,16 @@ ${rules}`
                'Try uploading it a page at a time.',
         truncated: true,
         output_tokens: outputTokens,
-      }, 502)
+      }, 422)
     }
     if (data.stop_reason === 'refusal') {
       // The model declined the request. Vanishingly unlikely for an invoice,
       // but it arrives as a 200 with empty content, so without this it reads
       // as a parser bug rather than a refusal.
       return c.json({
-        error: 'Claude declined to read this document. If it is a genuine invoice, please get in touch.',
+        error: "We couldn't read this document. If it is a genuine invoice, email hello@foodnance.com and we'll look into it.",
         refused: true,
-        category: data.stop_details?.category || null,
-      }, 502)
+      }, 422)
     }
 
     // Strip markdown code fences if present
@@ -6236,7 +6250,7 @@ ${rules}`
 app.post('/api/ai/parse-recipe', async (c) => {
   const apiKey = c.env.ANTHROPIC_API_KEY
   if (!apiKey) {
-    return c.json({ error: 'Claude API key is not configured on the server. Add ANTHROPIC_API_KEY and try again.' }, 400)
+    return aiUnavailable(c, 'recipe', 0, 'ANTHROPIC_API_KEY is not set on this deployment')
   }
 
   const body = await c.req.json().catch(() => null) as
@@ -6308,7 +6322,7 @@ Return ONLY a JSON object of this exact shape (no markdown, no commentary, no co
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({})) as { error?: { message?: string } }
-      return c.json({ error: err?.error?.message || `Claude API error ${response.status}` }, 502)
+      return aiUnavailable(c, 'recipe', response.status, err?.error?.message)
     }
 
     const data = await response.json() as {
@@ -6323,10 +6337,10 @@ Return ONLY a JSON object of this exact shape (no markdown, no commentary, no co
         error: 'That recipe was too long to read in one go — the response was cut off partway through. ' +
                'Try splitting it into two.',
         truncated: true,
-      }, 502)
+      }, 422)
     }
     if (data.stop_reason === 'refusal') {
-      return c.json({ error: 'Claude declined to read that text.', refused: true }, 502)
+      return c.json({ error: "We couldn't read that text. If it is a genuine recipe, email hello@foodnance.com and we'll look into it.", refused: true }, 422)
     }
     const raw = (data.content || []).find(b => b.type === 'text')?.text || ''
     const cleaned = raw
