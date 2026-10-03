@@ -64,6 +64,8 @@ body {
   flex-shrink: 0;
 }
 .nav-brand i { opacity: .95; }
+.nav-logo { display: block; height: 24px; width: auto; }
+@media (max-width: 700px) { .nav-logo { height: 30px; } }
 .nav-links {
   display: flex;
   gap: .1rem;
