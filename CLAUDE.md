@@ -384,6 +384,17 @@ decision; they look at the Invoices page. Everything fails soft to the old behav
 `review_mode` — **apply `0060` before deploying**. Tests that create accounts and need
 ordinary invoices set them to `direct` first. `npm run test:processing` (needs the sandbox).
 
+### Duplicate-invoice block: number + supplier (2026-10-03)
+
+The upload page blocks a duplicate via `POST /api/invoices/duplicate-check`: same
+invoice number (exact, voided invoices count, own org only — as before) **and** the same
+supplier, where "same" is `classifyNameMatch`'s `'auto'` tier only (Sysco / SYSCO, Sysco
+Foods / Sysco Food — *not* the looser "Did you mean" tier, so two different suppliers are
+never confused). A blank supplier name on either side still blocks. Before this, the
+number alone blocked, so two suppliers both numbering from #1001 collided. Still
+browser-side only (the server doesn't re-check on save), unchanged by decision.
+`npm run test:duplicate`.
+
 ### Tests
 
 ```bash
@@ -398,6 +409,7 @@ npm run test:purge     # account purge: leaves nothing behind, touches no other 
 npm run test:start-date # account start date / invoice date line — needs the sandbox (TEST_AI=1 for the refusal)
 npm run test:invoice-status # server-owned invoice status — needs the sandbox
 npm run test:processing     # operator check / Processing / release / 48h — needs the sandbox
+npm run test:duplicate      # duplicate-invoice block (number + supplier) — needs the sandbox
 ```
 
 **The account purge** (`DELETE /api/admin/organizations/:id`, admin-screen button) is

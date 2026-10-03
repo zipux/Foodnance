@@ -4086,6 +4086,36 @@ app.delete('/api/pos-imports/:id', async (c) => {
   return c.body(null, 204)
 })
 
+// POST /api/invoices/duplicate-check   Body: { invoice_number, vendor }
+// → { duplicate: boolean, match: { id, vendor, invoice_number } | null }
+// The upload page's duplicate block (invoice.js checkDuplicateInvoiceNumber).
+// It used to block on the invoice number alone, so two suppliers who both
+// number from #1001 collided and the second invoice could never be uploaded.
+// Now a duplicate is the same number (exact, as before — voided invoices still
+// count) AND the same supplier, where "same" is classifyNameMatch's 'auto' tier:
+// near-identical names (Sysco / SYSCO, Chefs' Warehouse / Chefs Warehouse) and
+// nothing looser — decided 2026-10-03, so two different suppliers are never
+// confused. A blank supplier name on either side still blocks: without a name
+// there's no telling them apart, and approving the same invoice twice doubles
+// the spend.
+app.post('/api/invoices/duplicate-check', async (c) => {
+  const body = await c.req.json().catch(() => ({})) as { invoice_number?: string; vendor?: string }
+  const number = String(body.invoice_number || '')
+  const vendor = String(body.vendor || '').trim()
+  if (!number.trim()) return c.json({ duplicate: false, match: null })
+
+  const { results } = await c.env.DB.prepare(
+    'SELECT id, vendor, invoice_number FROM invoices WHERE invoice_number = ? AND org_id IS ?',
+  ).bind(number, orgOf(c)).all<{ id: string; vendor: string | null; invoice_number: string }>()
+
+  const match = (results || []).find(r => {
+    const theirs = String(r.vendor || '').trim()
+    if (!vendor || !theirs) return true
+    return classifyNameMatch(vendor, [{ id: r.id, name: theirs }]).decision === 'auto'
+  })
+  return c.json({ duplicate: !!match, match: match || null })
+})
+
 // POST /api/invoices/:id/void
 // Soft-void a posted invoice: it's kept and restorable, but drops out of the
 // active list and is excluded from P&L/spending. Standard for a financial doc —

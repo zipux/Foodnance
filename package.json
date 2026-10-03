@@ -31,6 +31,7 @@
     "test:start-date": "node tests/integration/invoice-start-date.test.mjs",
     "test:invoice-status": "node tests/integration/invoice-status.test.mjs",
     "test:processing": "node tests/integration/invoice-processing.test.mjs",
+    "test:duplicate": "node tests/integration/invoice-duplicate.test.mjs",
     "test:line-product": "node tests/integration/invoice-line-product.test.mjs"
   },
   "dependencies": {

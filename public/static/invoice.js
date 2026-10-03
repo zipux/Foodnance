@@ -826,13 +826,17 @@ async function checkDuplicateInvoiceNumber(proceedFn) {
     return;
   }
 
-  // Check DB for duplicates — block if found
+  // Check DB for duplicates — block if found. Same number AND same supplier
+  // (decided server-side, where the supplier matcher lives): two suppliers who
+  // both use #1001 are not duplicates of each other.
   try {
-    const data = await apiGet(`tables/invoices?invoice_number=${encodeURIComponent(invoiceNumber)}`);
-    if (data.data && data.data.length > 0) {
+    const data = await apiPost('invoices/duplicate-check',
+      { invoice_number: invoiceNumber, vendor: currentVendor || '' });
+    if (data.duplicate) {
       hideProgress();
+      const from = data.match?.vendor ? ` from ${data.match.vendor}` : '';
       document.getElementById('dupInvNumMsg').textContent =
-        `Invoice #${invoiceNumber} already exists in the system. Upload cancelled.`;
+        `Invoice #${invoiceNumber}${from} already exists in the system. Upload cancelled.`;
       openModal('dupInvNumModal');
       resetSubmitButton();
       return;
