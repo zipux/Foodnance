@@ -33,6 +33,7 @@
     "test:processing": "node tests/integration/invoice-processing.test.mjs",
     "test:duplicate": "node tests/integration/invoice-duplicate.test.mjs",
     "test:prep": "node tests/integration/stock-take-prep.test.mjs",
+    "test:terms": "node tests/integration/terms-acceptance.test.mjs",
     "test:line-product": "node tests/integration/invoice-line-product.test.mjs"
   },
   "dependencies": {

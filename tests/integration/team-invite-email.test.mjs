@@ -119,7 +119,7 @@ t.check('once revoked, the address can be invited again', (await invite(A, dupTo
 
 const mateEmail = `mate-${STAMP}@test.local`;
 const mateInvite = await invite(A, mateEmail);
-const accepted = await post('/api/auth/accept-invite', { token: mateInvite.data.token, name: 'Mate', email: mateEmail, password: 'teammate-pw-123' });
+const accepted = await post('/api/auth/accept-invite', { token: mateInvite.data.token, name: 'Mate', email: mateEmail, password: 'teammate-pw-123', agree: true });
 t.check('setup: a teammate accepts their invite', accepted.status === 200 || accepted.status === 201, JSON.stringify(accepted.data));
 t.check('inviting an active teammate → "already on your team"', /already on your team/.test((await invite(A, mateEmail)).data.error));
 const mateId = sql(`SELECT id FROM users WHERE lower(email) = '${mateEmail}'`)[0].id;

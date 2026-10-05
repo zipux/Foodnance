@@ -63,6 +63,7 @@ const SUSPEND_EXEMPT = new Set([
   '/api/auth/logout',
   '/api/auth/me',
   '/api/auth/change-password',
+  '/api/auth/accept-terms',   // or a paused account could never get past the one-time panel to its own data
 ])
 
 app.use('/api/*', async (c, next) => {
@@ -1085,6 +1086,29 @@ async function invoiceStartDate(db: D1Database, orgId: string | null): Promise<s
   }
 }
 
+// The version of the Terms a person is recorded as agreeing to: the "Last
+// updated" date on public/terms.html, as YYYY-MM-DD. Change the two together
+// (tests/terms-acceptance.test.mjs fails if they drift). Bumping it does NOT
+// ask anyone again — Terms §17 covers changes by notice — it only means later
+// sign-ups are recorded against the new date.
+const TERMS_VERSION = '2026-10-04'
+const TERMS_REQUIRED = 'Please tick the box to agree to the Terms of Service and Privacy Policy.'
+
+// Has this person still to agree (migration 0061)? Asked by /api/auth/me only,
+// in its own query rather than in SESSION_USER_COLUMNS, so a database without
+// the columns can never break sign-in: unreadable = don't ask. Super-admins are
+// the operator, not a customer.
+async function termsDue(db: D1Database, u: SessionUser): Promise<boolean> {
+  if (u.role === 'super_admin') return false
+  try {
+    const row = await db.prepare('SELECT terms_accepted_at FROM users WHERE id = ?')
+      .bind(u.id).first<{ terms_accepted_at: string | null }>()
+    return !!row && !row.terms_accepted_at
+  } catch (_) {
+    return false
+  }
+}
+
 function publicUser(u: SessionUser) {
   return {
     id: u.id, email: u.email, name: u.name, role: u.role,
@@ -1391,7 +1415,9 @@ app.get('/api/auth/me', async (c) => {
       if (o) viewing_as = o
     }
   }
-  return c.json({ user: publicUser(me), viewing_as })
+  // Drives the one-time "please agree to our Terms" panel (utils.js).
+  const terms_due = await termsDue(c.env.DB, me)
+  return c.json({ user: { ...publicUser(me), terms_due }, viewing_as })
 })
 
 // ── Super-admin: view a customer's data without their password ──
@@ -1427,6 +1453,22 @@ app.post('/api/admin/view-as', async (c) => {
 // ── Change your own password ──────────────────────────────────
 // Requires the current one, so a borrowed unlocked laptop can't be used to
 // lock the real owner out. No email involved: there is no reset link to send.
+// POST /api/auth/accept-terms  { agree: true } — the one-time panel shown to
+// someone whose account predates the acceptance record. Keeps the FIRST
+// record: pressing it again never moves the date.
+app.post('/api/auth/accept-terms', async (c) => {
+  const me = await currentUser(c)
+  if (!me) return c.json({ error: 'Not signed in.' }, 401)
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  if (body.agree !== true) return c.json({ error: TERMS_REQUIRED }, 400)
+
+  await c.env.DB.prepare(
+    `UPDATE users SET terms_version = ?, terms_accepted_at = datetime('now')
+      WHERE id = ? AND terms_accepted_at IS NULL`,
+  ).bind(TERMS_VERSION, me.id).run()
+  return c.json({ ok: true })
+})
+
 app.post('/api/auth/change-password', async (c) => {
   const me = await currentUser(c)
   if (!me) return c.json({ error: 'Not signed in.' }, 401)
@@ -1705,6 +1747,9 @@ app.post('/api/auth/accept-invite', async (c) => {
   if (password.length < MIN_PASSWORD_LEN) {
     return c.json({ error: `Password must be at least ${MIN_PASSWORD_LEN} characters.` }, 400)
   }
+  // No account without the agreement: the tick box is checked here, not only
+  // in the page, so the record below can't be skipped.
+  if (body.agree !== true) return c.json({ error: TERMS_REQUIRED }, 400)
   // Global unique index on users.email — must be re-checked at redemption
   // time, not just when the invite was created, since two people could
   // accept different invites with the same email in the meantime.
@@ -1717,9 +1762,10 @@ app.post('/api/auth/accept-invite', async (c) => {
 
   await c.env.DB.batch([
     c.env.DB.prepare(
-      `INSERT INTO users (id, org_id, email, password_hash, password_salt, password_iter, role, name)
-       VALUES (?, ?, ?, ?, ?, ?, 'owner', ?)`,
-    ).bind(userId, invite.org_id, email, hash, salt, PBKDF2_ITERATIONS, name),
+      `INSERT INTO users (id, org_id, email, password_hash, password_salt, password_iter, role, name,
+                          terms_version, terms_accepted_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'owner', ?, ?, datetime('now'))`,
+    ).bind(userId, invite.org_id, email, hash, salt, PBKDF2_ITERATIONS, name, TERMS_VERSION),
     c.env.DB.prepare(`UPDATE invites SET accepted_at = datetime('now') WHERE id = ?`).bind(invite.id),
   ])
   // Accepting the owner invite signs them straight in (below), so this is the
@@ -1806,6 +1852,9 @@ app.get('/api/admin/organizations', async (c) => {
             (SELECT COUNT(*) FROM users u WHERE u.org_id = o.id AND u.archived_at IS NULL) AS user_count,
             (SELECT email FROM users u WHERE u.org_id = o.id AND u.role = 'owner'
               ORDER BY u.created_at LIMIT 1) AS owner_email,
+            -- When that owner agreed to the Terms (0061); NULL = not yet.
+            (SELECT terms_accepted_at FROM users u WHERE u.org_id = o.id AND u.role = 'owner'
+              ORDER BY u.created_at LIMIT 1) AS owner_terms_accepted_at,
             -- An owner who was emailed a link but hasn't chosen a password yet has
             -- no users row, so without these the account would show no owner at
             -- all. Latest unaccepted invite; "expired" so the row can offer Resend.

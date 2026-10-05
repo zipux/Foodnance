@@ -388,6 +388,26 @@ decision; they look at the Invoices page. Everything fails soft to the old behav
 `review_mode` — **apply `0060` before deploying**. Tests that create accounts and need
 ordinary invoices set them to `direct` first. `npm run test:processing` (needs the sandbox).
 
+### Terms acceptance record (added 2026-10-06, migration `0061`)
+
+Who agreed to the Terms and Privacy Policy, which version, and when:
+`users.terms_version` + `users.terms_accepted_at`, per person (owner and every teammate).
+**New accounts:** `accept-invite.html` has a required tick box and
+`POST /api/auth/accept-invite` refuses without `agree: true` (400) before anything is
+written — tests that accept an invite must send it. **Accounts from before:** `/api/auth/me`
+adds `terms_due`, and `renderTermsGate()` in `utils.js` covers the app with a one-time
+"I agree" panel; `POST /api/auth/accept-terms` records it, keeps the first record, and is in
+`SUSPEND_EXEMPT` so a paused account isn't stuck behind the panel. Asked **once**: `TERMS_VERSION`
+(`src/index.ts`) must equal the "Last updated" date on `terms.html`
+(`tests/terms-acceptance.test.mjs` fails if they drift), but bumping it does not ask anyone
+again — Terms §17 covers changes by notice. Super-admins are never asked, so neither is an
+operator viewing as a customer. The panel is presentation only (like plan gating): the API
+keeps answering behind it; what is guaranteed is the record. `terms_due` is read in its own
+fail-soft query, **not** in `SESSION_USER_COLUMNS`, so a database without the columns can't
+break sign-in — but sign-up and the admin list (the Owner cell shows "Terms agreed <date>")
+do need them: **apply `0061` before deploying**. Times are UTC. `npm run test:terms` (needs
+the sandbox).
+
 ### Duplicate-invoice block: number + supplier (2026-10-03)
 
 The upload page blocks a duplicate via `POST /api/invoices/duplicate-check`: same
@@ -414,6 +434,7 @@ npm run test:start-date # account start date / invoice date line — needs the s
 npm run test:invoice-status # server-owned invoice status — needs the sandbox
 npm run test:processing     # operator check / Processing / release / 48h — needs the sandbox
 npm run test:duplicate      # duplicate-invoice block (number + supplier) — needs the sandbox
+npm run test:terms          # Terms acceptance record — needs the sandbox (0061 applied locally)
 ```
 
 **The account purge** (`DELETE /api/admin/organizations/:id`, admin-screen button) is

@@ -97,6 +97,9 @@
     .back { display: block; text-align: center; margin-top: 1rem; font-size: .85rem; color: var(--text-muted); text-decoration: none; }
     .back:hover { color: var(--text); }
 
+    .agree { display: flex; align-items: flex-start; gap: 10px; margin: 4px 0 18px; font-size: 14px; font-weight: 400; line-height: 1.45; cursor: pointer; }
+    .agree input { width: 18px; height: 18px; margin-top: 1px; flex: none; }
+    .agree a { color: inherit; font-weight: 600; text-decoration: underline; }
     .hidden { display: none !important; }
   </style>
 </head>
@@ -143,6 +146,12 @@
             <label for="confirm">Confirm password</label>
             <input type="password" id="confirm" autocomplete="new-password" required placeholder="type it again" />
           </div>
+
+          <label class="agree" for="agree">
+            <input type="checkbox" id="agree" required />
+            <span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms of Service</a>
+              and the <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a></span>
+          </label>
 
           <button type="submit" class="submit">
             <i class="fas fa-arrow-right-to-bracket"></i> Join
@@ -212,6 +221,8 @@
       const confirm  = document.getElementById('confirm').value;
       if (password !== confirm) return showError('The two passwords do not match.');
       if (password.length < 8)  return showError('Password must be at least 8 characters.');
+      const agree = document.getElementById('agree').checked;
+      if (!agree) return showError('Please tick the box to agree to the Terms of Service and Privacy Policy.');
 
       const btn = form.querySelector('button.submit');
       const btnHtml = btn.innerHTML;
@@ -227,6 +238,7 @@
             name:     document.getElementById('name').value.trim(),
             email:    document.getElementById('email').value.trim(),
             password,
+            agree,
           }),
         });
         const data = await resp.json().catch(() => ({}));

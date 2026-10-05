@@ -81,7 +81,7 @@ const pre = await post(`/api/admin/organizations/${inviteOrgId}/invoice-start-da
 t.check('operator can set a date before first sign-in', pre.status === 200 && pre.data.invoice_start_date === '2026-01-15');
 const token = sql(`SELECT token FROM invites WHERE org_id = '${inviteOrgId}'`)[0]?.token;
 const ownerJar = jar();
-const acc = await post('/api/auth/accept-invite', { token, name: 'Invitee', email: INV.email, password: INV.password }, ownerJar);
+const acc = await post('/api/auth/accept-invite', { token, name: 'Invitee', email: INV.email, password: INV.password, agree: true }, ownerJar);
 t.check('invite accepted', acc.status === 200, JSON.stringify(acc.data));
 const inv = orgRow(inviteOrgId);
 t.check('accepting stamps started_at', !!inv.started_at);

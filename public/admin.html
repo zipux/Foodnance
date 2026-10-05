@@ -781,8 +781,15 @@
     function isPendingOwner(o) {
       return !o.owner_email && !o.user_count && !!o.pending_invite_email;
     }
+    // Did the owner agree to the Terms, and when (users.terms_accepted_at, 0061).
+    function termsNote(o) {
+      const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+      const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(o.owner_terms_accepted_at || '');
+      const text = m ? `Terms agreed ${+m[3]} ${months[+m[2] - 1]} ${m[1]}` : 'Terms not agreed yet';
+      return `<br><small style="color:${m ? 'var(--text-muted)' : '#b45309'}">${text}</small>`;
+    }
     function ownerCell(o) {
-      if (o.owner_email) return esc(o.owner_email);
+      if (o.owner_email) return esc(o.owner_email) + termsNote(o);
       if (o.pending_invite_email) return esc(o.pending_invite_email) + ' <small style="color:var(--text-muted)">(not signed up yet)</small>';
       return '—';
     }

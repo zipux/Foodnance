@@ -418,6 +418,10 @@ async function renderSessionChip() {
   // operator could edit a customer's numbers believing they were their own.
   if (viewingAs) renderViewingAsBar(viewingAs);
 
+  // Someone whose account predates the Terms acceptance record: ask once.
+  // Never true for a super-admin, so an operator viewing a customer is not asked.
+  if (me.terms_due) renderTermsGate();
+
   // Paused for non-payment: the app still reads, but every save will be
   // refused. Say so up front rather than letting them fill in a stock take and
   // lose it at the last step.
@@ -603,6 +607,73 @@ function renderSuspendedBar(reason) {
 }
 
 // Amber bar pinned to the top while a super-admin is viewing a customer's data.
+// One-time "please agree to our Terms" panel, over the whole app, for a person
+// with no acceptance on record (users.terms_accepted_at, migration 0061). New
+// accounts tick the box on the invite page and never see this. Presentation
+// only, like plan gating: what it guarantees is the record, written by
+// POST /api/auth/accept-terms when they press the button.
+function renderTermsGate() {
+  if (document.getElementById('termsGate')) return;
+  const gate = document.createElement('div');
+  gate.id = 'termsGate';
+  gate.setAttribute('role', 'dialog');
+  gate.setAttribute('aria-modal', 'true');
+  gate.style.cssText =
+    'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;' +
+    'padding:16px;background:rgba(15,23,42,.72)';
+  gate.innerHTML = `
+    <div style="background:#fff;color:#0f172a;border-radius:12px;max-width:440px;width:100%;
+                padding:28px 26px;box-shadow:0 20px 50px rgba(0,0,0,.3);font-size:.95rem;line-height:1.55">
+      <h2 style="font-size:1.2rem;font-weight:700;margin:0 0 10px">Please read and agree to our Terms</h2>
+      <p style="margin:0 0 18px">To keep using Foodnance, please read our
+        <a href="/terms" target="_blank" rel="noopener" style="color:inherit;font-weight:600;text-decoration:underline">Terms of Service</a> and
+        <a href="/privacy" target="_blank" rel="noopener" style="color:inherit;font-weight:600;text-decoration:underline">Privacy Policy</a>.
+        We only ask once.</p>
+      <p class="terms-gate-error" style="display:none;margin:0 0 12px;color:#b91c1c;font-size:.85rem"></p>
+      <button type="button" class="terms-gate-agree"
+              style="width:100%;font-family:inherit;font-size:.95rem;font-weight:600;cursor:pointer;
+                     background:#0f172a;color:#fff;border:none;border-radius:8px;padding:.7rem 1rem">
+        I agree
+      </button>
+      <p style="margin:14px 0 0;text-align:center;font-size:.85rem">
+        <a href="#" class="terms-gate-signout" style="color:#64748b;text-decoration:underline">Sign out</a></p>
+    </div>`;
+  document.body.appendChild(gate);
+
+  const btn = gate.querySelector('.terms-gate-agree');
+  const err = gate.querySelector('.terms-gate-error');
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    err.style.display = 'none';
+    try {
+      const r = await fetch('/api/auth/accept-terms', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agree: true }),
+      });
+      if (!r.ok) throw new Error('refused');
+      gate.remove();
+    } catch (_) {
+      // Stay up: closing without the record would be an agreement nobody can show.
+      err.textContent = 'Could not save that. Check your connection and try again.';
+      err.style.display = 'block';
+      btn.disabled = false;
+    }
+  });
+  gate.querySelector('.terms-gate-signout').addEventListener('click', async (e) => {
+    e.preventDefault();
+    try {
+      const r = await fetch('/api/auth/logout', { method: 'POST' });
+      if (!r.ok) throw new Error('logout failed');
+      if (typeof dmNavForget === 'function') dmNavForget();
+      location.href = '/login';
+    } catch (_) {
+      err.textContent = 'Could not sign out. Check your connection and try again.';
+      err.style.display = 'block';
+    }
+  });
+}
+
 function renderViewingAsBar(org) {
   if (document.getElementById('viewingAsBar')) return;
   const bar = document.createElement('div');
