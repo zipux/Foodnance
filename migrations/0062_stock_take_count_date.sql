@@ -1,0 +1,15 @@
+-- ============================================================
+-- A stock count's date, on the restaurant's own clock
+-- ============================================================
+-- submitted_at is a UTC timestamp, and the P&L bracketed a period by
+-- date(submitted_at). A kitchen in Vancouver that counts on 30 September at
+-- 9 pm has already crossed into 1 October in UTC, so that count was treated as
+-- an October count: October then had no opening count and true COGS either
+-- did not show or used the wrong take.
+--
+-- count_date  YYYY-MM-DD as the browser's clock read it at submit
+--             (POST /api/stock-take/:id/submit). /api/pnl uses
+--             COALESCE(count_date, date(submitted_at)).
+--
+-- Existing takes stay NULL and keep the UTC date they always had.
+ALTER TABLE stock_takes ADD COLUMN count_date TEXT DEFAULT NULL;

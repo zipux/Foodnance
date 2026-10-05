@@ -117,6 +117,18 @@ app.use('/api/*', async (c, next) => {
   await next()
 })
 
+// Is a till sale a drink? Decides only which P&L sales line it lands on; the
+// total is the same either way. A till category that IS one of the account's
+// own categories takes that category's type, drink or not. Otherwise the name
+// is read: tills call it "Drinks", "Beer" or "Wine", never "Non-Alcoholic
+// Beverages", and before this every such sale counted as food. Whole words
+// only, so "Steak" is not "tea".
+const DRINK_WORDS = /\b(drinks?|beverages?|beers?|wines?|cocktails?|spirits?|coffees?|teas?|juices?|sodas?)\b/i
+function isDrinkSale(categoryType: unknown, posCategory: unknown): boolean {
+  if (categoryType) return categoryType === 'beverage'
+  return DRINK_WORDS.test(String(posCategory || ''))
+}
+
 // ─── Helper: generate uid ─────────────────────────────────────
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
@@ -5916,6 +5928,20 @@ app.post('/api/stock-take/start', async (c) => {
 //   - Update stock_take_items row (counted_qty, variance, reason, counted_at)
 // For each item with counted_qty == null: leave stock_take_items.counted_qty NULL.
 // Finally mark the stock_takes row submitted.
+// The date a count was made, on the restaurant's own clock (migration 0062).
+// The browser sends it; it is believed only when it is a real date within a day
+// of the server's own, which is as far as any timezone can put it. Anything
+// else (a wrong clock, a hand-made request) is dropped, and the P&L falls back
+// to the UTC date of submitted_at as it always did.
+function localCountDate(sent: unknown, nowIso: string): string | null {
+  const s = String(sent || '')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null
+  const t = Date.parse(`${s}T00:00:00Z`)
+  if (Number.isNaN(t) || new Date(t).toISOString().slice(0, 10) !== s) return null
+  const today = Date.parse(`${nowIso.slice(0, 10)}T00:00:00Z`)
+  return Math.abs(t - today) <= 86400000 ? s : null
+}
+
 app.post('/api/stock-take/:id/submit', async (c) => {
   const stockTakeId = c.req.param('id')
   const body = await c.req.json() as {
@@ -5923,6 +5949,7 @@ app.post('/api/stock-take/:id/submit', async (c) => {
       stock_take_item_id: string; counted_qty: number | null
       reason?: string; reason_code?: string
     }>
+    count_date?: string
   }
 
   const org = orgOf(c)
@@ -6057,8 +6084,8 @@ app.post('/api/stock-take/:id/submit', async (c) => {
   // 4. Mark the stock take submitted
   statements.push(
     c.env.DB.prepare(
-      `UPDATE stock_takes SET status = 'submitted', submitted_at = ?, counted_items = ? WHERE id = ? AND org_id IS ?`
-    ).bind(now, countedCount, stockTakeId, org)
+      `UPDATE stock_takes SET status = 'submitted', submitted_at = ?, count_date = ?, counted_items = ? WHERE id = ? AND org_id IS ?`
+    ).bind(now, localCountDate(body.count_date, now), countedCount, stockTakeId, org)
   )
 
   if (statements.length) await c.env.DB.batch(statements)
@@ -7019,18 +7046,21 @@ app.get('/api/pnl', async (c) => {
   const [ty, tm] = to.split('-').map(Number)
   const periodEnd = `${to}-${String(new Date(Date.UTC(ty, tm, 0)).getUTCDate()).padStart(2, '0')}`  // last day of last month
 
+  // A count belongs to the day on the restaurant's own clock (count_date, 0062),
+  // not the UTC day of submitted_at: an evening count on the 30th in Vancouver
+  // is already the 1st in UTC. Counts from before 0062 have only the UTC day.
   const closingTake = await c.env.DB.prepare(`
-    SELECT id, date(submitted_at) AS d FROM stock_takes
-    WHERE status = 'submitted' AND submitted_at IS NOT NULL AND date(submitted_at) <= ?
+    SELECT id, COALESCE(count_date, date(submitted_at)) AS d FROM stock_takes
+    WHERE status = 'submitted' AND submitted_at IS NOT NULL AND COALESCE(count_date, date(submitted_at)) <= ?
       AND org_id IS ?
-    ORDER BY submitted_at DESC LIMIT 1
+    ORDER BY d DESC, submitted_at DESC LIMIT 1
   `).bind(periodEnd, org).first<{ id: string; d: string }>()
 
   const openingTake = await c.env.DB.prepare(`
-    SELECT id, date(submitted_at) AS d FROM stock_takes
-    WHERE status = 'submitted' AND submitted_at IS NOT NULL AND date(submitted_at) < ?
+    SELECT id, COALESCE(count_date, date(submitted_at)) AS d FROM stock_takes
+    WHERE status = 'submitted' AND submitted_at IS NOT NULL AND COALESCE(count_date, date(submitted_at)) < ?
       AND org_id IS ?
-    ORDER BY submitted_at DESC LIMIT 1
+    ORDER BY d DESC, submitted_at DESC LIMIT 1
   `).bind(periodStart, org).first<{ id: string; d: string }>()
 
   // Everything needed to price a count, fetched once per request and shared by
@@ -7221,8 +7251,8 @@ app.get('/api/pnl', async (c) => {
     SELECT substr(l.sold_date, 1, 7) AS period,
            SUM(l.net_sales)          AS net,
            SUM(l.gross_sales)        AS gross,
-           SUM(CASE WHEN COALESCE(cat.type, 'food') = 'beverage' THEN l.net_sales ELSE 0 END) AS beverage,
-           SUM(CASE WHEN COALESCE(cat.type, 'food') = 'beverage' THEN 0 ELSE l.net_sales END) AS food,
+           l.pos_category            AS pos_category,
+           cat.type                  AS cat_type,
            COUNT(*)                  AS lines
       FROM pos_sale_lines l
       JOIN pos_imports i ON i.id = l.import_id
@@ -7235,20 +7265,24 @@ app.get('/api/pnl', async (c) => {
        AND substr(l.sold_date, 1, 7) BETWEEN ? AND ?
        AND l.org_id IS ?
        AND i.org_id IS ?
-     GROUP BY period
+     GROUP BY period, l.pos_category, cat.type
   `).bind(org, from, to, org, org).all()
 
   const salesByMonth: Record<string, any> = {}
   let importedTotal = 0
   for (const r of (impRows.results ?? []) as any[]) {
-    salesByMonth[r.period] = {
-      imported_net:   round2(r.net ?? 0),
-      imported_gross: round2(r.gross ?? 0),
-      food:           round2(r.food ?? 0),
-      beverage:       round2(r.beverage ?? 0),
-      lines:          r.lines ?? 0,
-    }
-    importedTotal += Number(r.net) || 0
+    // One row per till category now, so add up rather than assign.
+    const m = (salesByMonth[r.period] ??= { imported_net: 0, imported_gross: 0, food: 0, beverage: 0, lines: 0 })
+    const net = Number(r.net) || 0
+    m.imported_net   += net
+    m.imported_gross += Number(r.gross) || 0
+    m.lines          += Number(r.lines) || 0
+    if (isDrinkSale(r.cat_type, r.pos_category)) m.beverage += net
+    else m.food += net
+    importedTotal += net
+  }
+  for (const m of Object.values(salesByMonth)) {
+    for (const k of ['imported_net', 'imported_gross', 'food', 'beverage']) m[k] = round2(m[k])
   }
 
   return c.json({

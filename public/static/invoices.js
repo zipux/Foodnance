@@ -638,6 +638,7 @@ async function openInvDetail(id) {
 
   // Review mode: full-width image at top; saved mode: compact card at bottom
   const activeBox    = isActionRequired ? fileBoxTop : fileBox;
+  fileBoxTop.classList.remove('no-file');   // set again below if this invoice has no file
   const inactiveBox  = isActionRequired ? fileBox    : fileBoxTop;
   inactiveBox.innerHTML = '';
   inactiveBox.classList.add('hidden');
@@ -702,6 +703,9 @@ async function openInvDetail(id) {
     if (isImage) _showInvImagePage();
   } else {
     activeBox.innerHTML = `<span style="color:var(--text-muted);font-size:.85rem"><i class="fas fa-paperclip"></i> No file attached</span>`;
+    // The review screen's photo pane is half the window tall. With no photo that
+    // is a large blank block above the invoice, so let it shrink to the one line.
+    activeBox.classList.add('no-file');
     activeBox.classList.remove('hidden');
   }
 

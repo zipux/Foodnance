@@ -650,7 +650,7 @@ function render() {
     basisNote = `<div class="pnl-basis-note"><i class="fas fa-scale-balanced"></i>
       <span>True cost of what you <strong>used</strong>: purchases adjusted by your stock counts from
       <strong>${esc(niceDate(cogsData.opening_date))}</strong> to <strong>${esc(niceDate(cogsData.closing_date))}</strong>.
-      Raw-material inventory only.</span></div>`;
+      Counts the ingredients and the prep you had on hand.</span></div>`;
   } else if (cogsAvail) {
     basisNote = `<div class="pnl-basis-note"><i class="fas fa-circle-info"></i>
       <span>Showing what you <strong>bought</strong> this period. Switch to True COGS to adjust for stock you had on hand.</span></div>`;

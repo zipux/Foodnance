@@ -1054,6 +1054,10 @@ async function confirmSubmit() {
 
 async function performSubmit() {
   const payload = {
+    // The day on THIS device's clock. The server's own timestamp is UTC, where
+    // an evening count in Vancouver already belongs to tomorrow — and the P&L
+    // decides which month a count opens or closes by its day.
+    count_date: todayYMD().replace(/\//g, '-'),
     items: snapshotItems.map(it => {
       const state = inputState.get(it.id) || { counted: '', reason: '' };
       const c = (state.counted || '').trim();

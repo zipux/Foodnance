@@ -191,7 +191,7 @@ from 0024 on — org scoping, plans, suspension, the invoice cap, POS sales impo
 — was applied **by hand and never recorded**, so the command would try to replay
 0024 onward.
 
-**`migrations/` now runs to `0061_terms_acceptance.sql`** (0061 applied to production by `--command` on 2026-10-06, unrecorded; 0058–0060 applied to production by `--command` on 2026-10-03, not recorded in `d1_migrations`; pre-change bookmark `000005b6-00000000-000050f9-0d0604a1c3a13f5c20f25018fe83498b`). Earlier it ran to `0052_invite_emails.sql` (0047–0051 landed after this note was written; 0052 is not on prod yet). It first ran to `0046_recurring_expense_dates.sql`: 0044–0046
+**`migrations/` now runs to `0062_stock_take_count_date.sql`** (0061 applied to production by `--command` on 2026-10-06, unrecorded; 0058–0060 applied to production by `--command` on 2026-10-03, not recorded in `d1_migrations`; pre-change bookmark `000005b6-00000000-000050f9-0d0604a1c3a13f5c20f25018fe83498b`). Earlier it ran to `0052_invite_emails.sql` (0047–0051 landed after this note was written; 0052 is not on prod yet). It first ran to `0046_recurring_expense_dates.sql`: 0044–0046
 landed after that audit: 0044 is recorded as applied on 2026-08-04, 0045 and 0046
 are unconfirmed either way. Re-verify against live D1 — do not read the 0043
 figure as current.
@@ -436,6 +436,7 @@ npm run test:processing     # operator check / Processing / release / 48h — ne
 npm run test:duplicate      # duplicate-invoice block (number + supplier) — needs the sandbox
 npm run test:terms          # Terms acceptance record — needs the sandbox (0061 applied locally)
 npm run test:sub-unit-stock # case/can/weight stock: stock-take value + sales import — needs the sandbox
+npm run test:count-date     # stock count's local day + drinks sales split — needs the sandbox (0062 applied locally)
 ```
 
 **The account purge** (`DELETE /api/admin/organizations/:id`, admin-screen button) is
@@ -762,6 +763,23 @@ couldn't convert stopped it *after* the ingredients above it had left the shelf.
 left alone: the rule assumes one pack = `sub_unit_qty` pieces, which costing only
 agrees with when the purchase's `pack_qty` is 1. `npm run test:sub-unit-stock` (needs the
 sandbox). `npm run test:integration` has skipped since sign-in was added (it never logs in).
+
+### A stock count's day, and which till sales are drinks (added 2026-10-06, migration `0062`)
+
+Both found running a full October on Pro Test Account. **Count day:** `/api/pnl` chose the
+opening and closing takes by `date(submitted_at)`, a UTC day — so a count made in Vancouver
+on the 30th at 9 pm (already the 1st in UTC) opened no month, and true COGS either vanished
+or used the wrong take. The Stock Take page now sends `count_date`, the day on the device's
+own clock; `localCountDate()` keeps it only if it is a real date within one day of the
+server's (a wrong clock or a hand-made request is dropped), and the P&L uses
+`COALESCE(count_date, date(submitted_at))`. Takes from before `0062` have only the UTC day.
+**Apply `0062` before deploying** — the submit `UPDATE` and the P&L queries name the column. (Applied to staging and production 2026-10-06 by `--command`, unrecorded; pre-change production bookmark `000005e8-00000000-000050fb-e7d657780aba4abe8c781de9e71804b9`.)
+**Drinks:** imported sales split food/drinks by joining the till's category to the account's
+own category names, so "Drinks", "Beer" and "Wine" all counted as food. `isDrinkSale()` now
+keeps that match when there is one (the category's own type wins, drink or not) and otherwise
+reads the name for a whole drink word (`DRINK_WORDS`; the list is the user's, a guess by
+design). It moves money between the two sales lines only; the total cannot change.
+`tests/count-date-and-drinks.test.mjs` + `npm run test:count-date` (needs the sandbox).
 
 ### Stock-take valuation (true COGS)
 `valueTake()` inside `/api/pnl` prices a submitted stock take. Two things about it
