@@ -191,7 +191,7 @@ from 0024 on — org scoping, plans, suspension, the invoice cap, POS sales impo
 — was applied **by hand and never recorded**, so the command would try to replay
 0024 onward.
 
-**`migrations/` now runs to `0060_invoice_processing.sql`** (0058–0060 applied to production by `--command` on 2026-10-03, not recorded in `d1_migrations`; pre-change bookmark `000005b6-00000000-000050f9-0d0604a1c3a13f5c20f25018fe83498b`). Earlier it ran to `0052_invite_emails.sql` (0047–0051 landed after this note was written; 0052 is not on prod yet). It first ran to `0046_recurring_expense_dates.sql`: 0044–0046
+**`migrations/` now runs to `0061_terms_acceptance.sql`** (0061 applied to production by `--command` on 2026-10-06, unrecorded; 0058–0060 applied to production by `--command` on 2026-10-03, not recorded in `d1_migrations`; pre-change bookmark `000005b6-00000000-000050f9-0d0604a1c3a13f5c20f25018fe83498b`). Earlier it ran to `0052_invite_emails.sql` (0047–0051 landed after this note was written; 0052 is not on prod yet). It first ran to `0046_recurring_expense_dates.sql`: 0044–0046
 landed after that audit: 0044 is recorded as applied on 2026-08-04, 0045 and 0046
 are unconfirmed either way. Re-verify against live D1 — do not read the 0043
 figure as current.
@@ -405,7 +405,7 @@ operator viewing as a customer. The panel is presentation only (like plan gating
 keeps answering behind it; what is guaranteed is the record. `terms_due` is read in its own
 fail-soft query, **not** in `SESSION_USER_COLUMNS`, so a database without the columns can't
 break sign-in — but sign-up and the admin list (the Owner cell shows "Terms agreed <date>")
-do need them: **apply `0061` before deploying**. Times are UTC. `npm run test:terms` (needs
+do need them: **apply `0061` before deploying** (applied to staging and production 2026-10-06 by `--command`, not recorded in `d1_migrations`; pre-change production bookmark `000005e0-00000000-000050fb-926265df95b6de1ab06a88092e1ac12b`). Times are UTC. `npm run test:terms` (needs
 the sandbox).
 
 ### Duplicate-invoice block: number + supplier (2026-10-03)
@@ -435,6 +435,7 @@ npm run test:invoice-status # server-owned invoice status — needs the sandbox
 npm run test:processing     # operator check / Processing / release / 48h — needs the sandbox
 npm run test:duplicate      # duplicate-invoice block (number + supplier) — needs the sandbox
 npm run test:terms          # Terms acceptance record — needs the sandbox (0061 applied locally)
+npm run test:sub-unit-stock # case/can/weight stock: stock-take value + sales import — needs the sandbox
 ```
 
 **The account purge** (`DELETE /api/admin/organizations/:id`, admin-screen button) is
@@ -731,6 +732,36 @@ the **line total**, so unit price is `cost ÷ (pack_qty × qty_ordered)`;
 `cost_per_unit` is stored and wins when present. A line whose units can't be
 bridged is **uncostable (null)**, never `0` — a silent zero reads as a free
 ingredient and understates every margin above it.
+
+### Stock for a product bought by the pack (added 2026-10-06, no migration)
+
+A case of 6 cans, 0.8 kg a can. Costing has bridged this since `subUnitWeightRate()`;
+**stock** did not, and each path failed differently: Produce Batch stopped, the sales import
+skipped the ingredient, the stock take valued 12 cans as 12 cases, and Pack Run took the bare
+number (20 cans left the shelf as 20 cases, silently). Now `invSubUnitFactor()` (`utils.js`)
+and its twin `subUnitFactor()` (`src/index.ts`, **keep in sync** —
+`tests/sub-unit-stock.test.mjs` compares them pair by pair) bridge three kinds of unit for a
+product with `sub_unit_name` + `sub_unit_qty`: the sub-unit; a **weight**, through
+`avg_weight_per_unit` read as the weight of ONE sub-unit; and a **pack**, which is *any*
+unit that is not a measure, not "each" and not the sub-unit — case, box and carton all mean
+"units per pack" pieces (the user's decision; wrong only if two suppliers' packs differ).
+Volume stays out. It is the **last** branch of `invConvertQty` / `invConvertUnitCost` /
+`convertQty` / `convertUnitCost` and runs only when the caller passes the product's sub-unit
+(`invSubOf(product)` / `subUnitOf(row)`), so nothing that converted before changes and
+recipe costing (`liveProductLineCost`) is untouched. Callers that pass it: `upsertInventory`
+(every browser stock movement), `_reconcileInventoryUnit` (so the stocking unit can be
+changed case → can and the quantity follows), the FIFO layer (`opts.sub`), the Inventory
+page's bin value, `planPosDepletion`, and `valueTake`'s `priceInto`. A weight with no can
+weight is refused with "add the weight of one can". **Pack Run** now computes every line
+through `prLineDeduction()` (preview and run share it) and writes nothing if any line can't
+be converted — the old `?? 1` fallback is gone. **Produce Batch** does the same: it builds
+one list of movements (ingredients out, batch in), runs `invHelpers.planInventoryMove()` on
+all of them — the no-write first half of `upsertInventory`, so the check and the write can't
+disagree — and only then marks the recipe made-ahead and writes; before, a line that
+couldn't convert stopped it *after* the ingredients above it had left the shelf. Known and
+left alone: the rule assumes one pack = `sub_unit_qty` pieces, which costing only
+agrees with when the purchase's `pack_qty` is 1. `npm run test:sub-unit-stock` (needs the
+sandbox). `npm run test:integration` has skipped since sign-in was added (it never logs in).
 
 ### Stock-take valuation (true COGS)
 `valueTake()` inside `/api/pnl` prices a submitted stock take. Two things about it

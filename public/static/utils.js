@@ -1478,7 +1478,7 @@ function pkConvWeight(qty, from, to) {
 
 // Quantity one purchase brought into stock, expressed in `toUnit`.
 // null when it can't be converted (caller skips it rather than guessing).
-function fifoEntryQtyIn(entry, toUnit, avgWeightKg) {
+function fifoEntryQtyIn(entry, toUnit, avgWeightKg, sub) {
   let pQty = (entry.pack_qty != null && entry.pack_qty !== '')
     ? parseFloat(entry.pack_qty)
     : parseFloat((String(entry.pack_size || '').match(/^([\d.]+)/) || [])[1]);
@@ -1492,7 +1492,7 @@ function fifoEntryQtyIn(entry, toUnit, avgWeightKg) {
 
   // No unit on either side — nothing to reconcile, use the raw figure.
   if (!toUnit || !fromUnit) return raw;
-  const conv = invConvertQty(raw, fromUnit, toUnit, avgWeightKg);
+  const conv = invConvertQty(raw, fromUnit, toUnit, avgWeightKg, sub);
   return conv.error ? null : conv.qty;
 }
 
@@ -1547,7 +1547,7 @@ function fifoActiveEntryWithBasis(sortedEntries, invQty, toUnit, avgWeightKg, op
 
   const usable = [];
   for (const e of sortedEntries) {
-    const q = fifoEntryQtyIn(e, toUnit, avgWeightKg);
+    const q = fifoEntryQtyIn(e, toUnit, avgWeightKg, opts && opts.sub);
     if (q != null) usable.push({ entry: e, qty: q });
   }
   // Nothing could be placed on a common axis — newest is the only honest answer.
@@ -1795,7 +1795,7 @@ function buildLiveCostIndex({
     const inv    = inventory.find(r => r.item_id === g.id && r.item_type === 'raw_material');
     const picked = fifoActiveEntryWithBasis(
       mine, parseFloat(inv?.quantity) || 0,
-      String(inv?.unit || g.base_unit || '').trim(), avgW, { alwaysLatest });
+      String(inv?.unit || g.base_unit || '').trim(), avgW, { alwaysLatest, sub: invSubOf(g) });
     const facts = entryPackFacts(picked.entry);
     product.set(g.id, {
       ...base,
@@ -1917,7 +1917,7 @@ function invIsEachUnit(u) {
 // Convert a PER-UNIT COST between units ($1.50/lb → $3.31/kg) — the reciprocal
 // of invConvertQty. Returns { cost } or { error }. Mirrors convertUnitCost() in
 // src/index.ts, which the worker needs its own copy of.
-function invConvertUnitCost(cost, fromUnit, toUnit, avgWeightPerUnit) {
+function invConvertUnitCost(cost, fromUnit, toUnit, avgWeightPerUnit, sub) {
   if (invSameUnit(fromUnit, toUnit)) return { cost };
 
   const from = invUnitInfo(fromUnit);
@@ -1938,13 +1938,64 @@ function invConvertUnitCost(cost, fromUnit, toUnit, avgWeightPerUnit) {
   if (from && to && from.dim === to.dim) {
     return { cost: cost * (to.factor / from.factor) };
   }
+  const viaSub = invSubUnitFactor(fromUnit, toUnit, avgWeightPerUnit, sub);
+  if (viaSub) return viaSub.error ? { error: viaSub.error } : { cost: cost / viaSub.factor };
   return { error: `Cannot convert ${fromUnit} to ${toUnit}` };
+}
+
+// A product's sub-unit facts, in the shape the converters take: the name of
+// the piece inside a pack ("can") and how many a pack holds. null when the
+// product doesn't have both.
+function invSubOf(product) {
+  const name = String(product?.sub_unit_name || '').trim();
+  const qty  = parseFloat(product?.sub_unit_qty) || 0;
+  return name && qty > 0 ? { name, qty } : null;
+}
+
+// Pack ↔ piece ↔ weight, for a product bought by a pack the unit table can't
+// measure (a case of 6 cans). Three kinds of unit can be bridged:
+//   · the sub-unit itself ("can"),
+//   · a weight, through the weight of ONE sub-unit (the product's Average
+//     Weight box — the same reading subUnitWeightRate() gives it for costing),
+//   · a pack: ANY unit that is not a measure, not "each" and not the sub-unit.
+//     Case, box and carton all mean "units per pack" pieces, by decision
+//     (2026-10-06) — suppliers use the words loosely.
+// Returns { factor } where qty_to = qty_from × factor, { error } when the
+// bridge exists but the weight is missing, or null when this rule does not
+// apply (no sub-unit, volume, each). Only ever reached after the ordinary
+// conversions have refused, so it changes nothing that converted before.
+// KEEP IN SYNC with subUnitFactor() in src/index.ts.
+function invSubUnitFactor(fromUnit, toUnit, avgWeightKg, sub) {
+  const n    = parseFloat(sub?.qty) || 0;
+  const name = String(sub?.name || '').trim().toLowerCase();
+  if (!name || n <= 0) return null;
+  const w = parseFloat(avgWeightKg) || 0;
+  let needsWeight = false;
+  // How many sub-units one of `u` is.
+  const inSubs = (u) => {
+    const key = String(u || '').trim().toLowerCase();
+    if (!key) return null;
+    if (key === name) return 1;
+    const info = invUnitInfo(key);
+    if (info) {
+      if (info.dim !== 'weight') return null;
+      needsWeight = true;
+      return w > 0 ? info.factor / w : 0;
+    }
+    return invIsEachUnit(key) ? null : n;
+  };
+  const a = inSubs(fromUnit), b = inSubs(toUnit);
+  if (a === null || b === null) return null;
+  if (needsWeight && !(w > 0)) {
+    return { error: `Add the weight of one ${sub.name} on the product to enable this conversion` };
+  }
+  return { factor: a / b };
 }
 
 // KEEP IN SYNC with convertQty() in src/index.ts — the POS sales backflush
 // converts server-side and must reach the same number this does, or a preview
 // and the deduction it previewed would disagree.
-function invConvertQty(qty, fromUnit, toUnit, avgWeightPerUnit) {
+function invConvertQty(qty, fromUnit, toUnit, avgWeightPerUnit, sub) {
   if (invSameUnit(fromUnit, toUnit)) return { qty };
 
   const from = invUnitInfo(fromUnit);
@@ -1969,6 +2020,10 @@ function invConvertQty(qty, fromUnit, toUnit, avgWeightPerUnit) {
   if (from && to && from.dim === to.dim) {
     return { qty: qty * (from.factor / to.factor) };
   }
+
+  // A case of cans: pack ↔ piece ↔ weight, when the product has a sub-unit.
+  const viaSub = invSubUnitFactor(fromUnit, toUnit, avgWeightPerUnit, sub);
+  if (viaSub) return viaSub.error ? { error: viaSub.error } : { qty: qty * viaSub.factor };
 
   return { error: `Cannot convert ${fromUnit} to ${toUnit}` };
 }

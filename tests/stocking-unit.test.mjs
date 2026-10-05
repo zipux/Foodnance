@@ -52,6 +52,7 @@ const { convertUnitCost, normalizeUnit, UNIT_FACTORS } = new Function([
   extractFn('unitInfo'),
   extractFn('sameUnitName'),
   extractFn('isEachUnit'),
+  extractFn('subUnitFactor'),
   extractFn('convertUnitCost'),
   extractFn('normalizeUnit'),
   'return { convertUnitCost, normalizeUnit, UNIT_FACTORS };',

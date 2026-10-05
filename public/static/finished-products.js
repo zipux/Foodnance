@@ -214,7 +214,7 @@ async function loadFpCatalogues() {
       // into the unit the stock is counted in first — see fifoActiveEntryIn().
       const stockUnit = String(invRow?.unit || g.base_unit || '').trim();
       const avgWKg    = g.avg_weight_per_unit != null ? parseFloat(g.avg_weight_per_unit) : null;
-      const activeEntry = fp_fifoActiveEntry(myEntries, invQty, stockUnit, avgWKg);
+      const activeEntry = fp_fifoActiveEntry(myEntries, invQty, stockUnit, avgWKg, invSubOf(g));
 
       // Pack shape and unit price come from the shared helper in utils.js — this
       // page used to parse a `pack_size` string that product_entries does not
@@ -255,8 +255,8 @@ async function loadFpCatalogues() {
  * converts each purchase into the stocking unit before summing — this file used
  * to carry its own copy and had drifted from the others.
  */
-function fp_fifoActiveEntry(sortedEntries, invQty, toUnit, avgWeightKg) {
-  return fifoActiveEntryIn(sortedEntries, invQty, toUnit || '', avgWeightKg ?? null);
+function fp_fifoActiveEntry(sortedEntries, invQty, toUnit, avgWeightKg, sub) {
+  return fifoActiveEntryIn(sortedEntries, invQty, toUnit || '', avgWeightKg ?? null, { sub });
 }
 
 // ── Units (same DB-managed set as the product & recipe pages) ───
@@ -1368,6 +1368,35 @@ async function openPackRunModal(fpId) {
   openModal('packRunModal');
 }
 
+// What one line of the finished product takes off the shelf for `units` packed,
+// in the unit its bin is counted in. Shared by the preview and the run itself,
+// so the list a person reads is the list that is written.
+// { it, itemType, category, invUnit, deductQty } or { it, error }.
+function prLineDeduction(it, units) {
+  const lineQty = (parseFloat(it.quantity) || 0) * units;   // total in the line's unit
+  const isRecipe = it.item_type === 'recipe';
+  // The bin's own unit is the unit of record — a batch may have been produced
+  // in a different unit than the recipe's yield_unit (g vs kg).
+  const invRow = allInventory_fp.find(r => r.item_id === it.ref_id
+    && r.item_type === (isRecipe ? 'batch' : 'raw_material'));
+  const prod   = isRecipe ? null : allProducts_fp.find(p => p.id === it.ref_id);
+  const invUnit = isRecipe
+    ? (invRow?.unit || allRecipes_fp.find(r => r.id === it.ref_id)?.yield_unit || 'kg')
+    : (invRow?.unit || (prod ? (prod._packUnit || fp_packUnit(prod)) : (it.unit || 'Each')));
+  const lineUnit = it.unit || invUnit;
+  const avgW = prod?.avg_weight_per_unit != null ? parseFloat(prod.avg_weight_per_unit) : null;
+
+  const conv = invConvertQty(lineQty, lineUnit, invUnit, avgW, invSubOf(prod));
+  if (conv.error) {
+    return { it, error: `${it.ref_name} is stocked in ${invUnit}, but this line is in ${lineUnit}. ${conv.error}.` };
+  }
+  return {
+    it, invUnit, deductQty: Math.round(conv.qty * 1e6) / 1e6,   // bins are kept to six decimals
+    itemType: isRecipe ? 'batch' : 'raw_material',
+    category: isRecipe ? 'Batch' : (prod?.category || 'Primary Packaging'),
+  };
+}
+
 function updatePrPreview() {
   const container = document.getElementById('prDeductionPreview');
   const units     = parseInt(document.getElementById('prUnits').value) || 0;
@@ -1381,28 +1410,14 @@ function updatePrPreview() {
   html += '<div class="pb-deduction-list">';
 
   prFpItems.forEach(it => {
-    const lineQty  = (parseFloat(it.quantity) || 0) * units;
-    let deductQty  = lineQty;
-    let displayUnit = it.unit || 'unit';
-
-    if (it.item_type === 'recipe') {
-      // Use the actual inventory row's unit — the batch may have been produced in a
-      // different unit than the recipe's yield_unit (e.g. produced in 'g' vs yield 'kg').
-      const invRow  = allInventory_fp.find(r => r.item_id === it.ref_id && r.item_type === 'batch');
-      const invUnit = invRow?.unit || allRecipes_fp.find(r => r.id === it.ref_id)?.yield_unit || 'kg';
-      const factor  = fp_conversionFactor(invUnit, it.unit || invUnit) ?? 1;   // keep prior behaviour for incompatible units
-      deductQty     = lineQty * factor;
-      displayUnit   = invUnit;
-    } else {
-      // Use actual inventory row's unit for raw materials as well.
-      const invRow  = allInventory_fp.find(r => r.item_id === it.ref_id && r.item_type === 'raw_material');
-      const prod    = allProducts_fp.find(p => p.id === it.ref_id);
-      const invUnit = invRow?.unit || (prod ? (prod._packUnit || fp_packUnit(prod)) : (it.unit || 'Each'));
-      const avgW    = prod?.avg_weight_per_unit != null ? parseFloat(prod.avg_weight_per_unit) : null;
-      const factor  = fp_conversionFactor(invUnit, it.unit || invUnit, avgW) ?? 1;   // avg-weight aware; prior behaviour for incompatible units
-      deductQty     = lineQty * factor;
-      displayUnit   = invUnit;
+    const line = prLineDeduction(it, units);
+    if (line.error) {
+      html += `<div class="pb-deduction-row" style="color:#b91c1c">
+        <span><i class="fas fa-triangle-exclamation"></i> ${esc(line.error)}</span></div>`;
+      return;
     }
+    const deductQty   = line.deductQty;
+    const displayUnit = line.invUnit;
 
     const display   = deductQty % 1 === 0 ? deductQty : deductQty.toFixed(3).replace(/\.?0+$/, '');
     const typeLabel = it.item_type === 'recipe' ? '🫙 Batch' : '📦 Product';
@@ -1431,49 +1446,25 @@ async function confirmPackRun() {
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing…';
 
   try {
-    for (const it of prFpItems) {
-      const lineQty = (parseFloat(it.quantity) || 0) * units; // total in the line's unit
-      if (lineQty <= 0) continue;
+    // Work out every deduction BEFORE touching stock. A line that can't be
+    // converted stops the whole run: a guessed quantity (it used to fall back
+    // to the bare number, so 20 cans left the shelf as 20 cases) is worse
+    // than no pack run, and stopping half-way would leave the shelf wrong too.
+    const lines = prFpItems.map(it => prLineDeduction(it, units));
+    const bad = lines.find(l => l.error);
+    if (bad) { showToast(`Pack run not recorded. ${bad.error}`, 'error'); return; }
 
-      if (it.item_type === 'recipe') {
-        // Use the actual inventory row's unit — the batch may have been produced in a
-        // different unit than recipe.yield_unit (e.g. produced in 'g' vs yield 'kg').
-        const invRow    = allInventory_fp.find(r => r.item_id === it.ref_id && r.item_type === 'batch');
-        const recipe    = allRecipes_fp.find(r => r.id === it.ref_id);
-        const invUnit   = invRow?.unit || recipe?.yield_unit || 'kg';
-        const lineUnit  = it.unit || invUnit;
-        const factor    = fp_conversionFactor(invUnit, lineUnit) ?? 1;   // keep prior behaviour for incompatible units
-        const deductQty = lineQty * factor;
-
-        await window.invHelpers.upsertInventory({
-          itemId:   it.ref_id,
-          itemType: 'batch',
-          itemName: it.ref_name,
-          category: 'Batch',
-          unit:     invUnit,
-          change:   -deductQty,
-          reason,
-        });
-      } else {
-        // Use actual inventory row's unit for raw materials.
-        const invRow   = allInventory_fp.find(r => r.item_id === it.ref_id && r.item_type === 'raw_material');
-        const prod     = allProducts_fp.find(p => p.id === it.ref_id);
-        const invUnit  = invRow?.unit || (prod ? (prod._packUnit || fp_packUnit(prod)) : (it.unit || 'Each'));
-        const lineUnit = it.unit || invUnit;
-        const avgW     = prod?.avg_weight_per_unit != null ? parseFloat(prod.avg_weight_per_unit) : null;
-        const factor   = fp_conversionFactor(invUnit, lineUnit, avgW) ?? 1;   // avg-weight aware; prior behaviour for incompatible units
-        const deductQty = lineQty * factor;
-
-        await window.invHelpers.upsertInventory({
-          itemId:   it.ref_id,
-          itemType: 'raw_material',
-          itemName: it.ref_name,
-          category: prod?.category || 'Primary Packaging',
-          unit:     invUnit,
-          change:   -deductQty,
-          reason,
-        });
-      }
+    for (const line of lines) {
+      if (line.deductQty <= 0) continue;
+      await window.invHelpers.upsertInventory({
+        itemId:   line.it.ref_id,
+        itemType: line.itemType,
+        itemName: line.it.ref_name,
+        category: line.category,
+        unit:     line.invUnit,
+        change:   -line.deductQty,
+        reason,
+      });
     }
 
     // Add to Finished Product inventory

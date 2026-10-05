@@ -3663,7 +3663,8 @@ async function planPosDepletion(
   // Raw-material defaults for bins that do not exist yet, plus the average
   // weight that any each↔weight conversion depends on.
   const prodRows = await db.prepare(
-    `SELECT id, name, base_unit, avg_weight_per_unit, category FROM generic_products WHERE org_id IS ?`
+    `SELECT id, name, base_unit, avg_weight_per_unit, sub_unit_name, sub_unit_qty, category
+       FROM generic_products WHERE org_id IS ?`
   ).bind(org).all()
   const products = new Map<string, any>()
   for (const p of (prodRows.results || []) as any[]) products.set(p.id, p)
@@ -3685,7 +3686,7 @@ async function planPosDepletion(
       || 'kg'
 
     const avgW = prod && prod.avg_weight_per_unit ? Number(prod.avg_weight_per_unit) : null
-    const conv = convertQty(a.qty, a.unit || binUnit, binUnit, avgW)
+    const conv = convertQty(a.qty, a.unit || binUnit, binUnit, avgW, subUnitOf(prod))
     if (conv.error) {
       // Drop THIS deduction only. The revenue side is unambiguous and useful on
       // its own, and refusing a whole shift because one product is missing an
@@ -4931,7 +4932,7 @@ function isEachUnit(u: string) {
 // Returns null when the units aren't comparable — callers must then skip the
 // comparison rather than treating the raw numbers as equivalent.
 function convertUnitCost(
-  cost: number, fromUnit: string, toUnit: string, avgWeightKg: number | null
+  cost: number, fromUnit: string, toUnit: string, avgWeightKg: number | null, sub: SubUnit | null = null
 ): number | null {
   if (!(cost > 0)) return null
   if (sameUnitName(fromUnit, toUnit)) return cost
@@ -4953,7 +4954,59 @@ function convertUnitCost(
   if (from && to && from.dim === to.dim) {
     return cost * (to.factor / from.factor)
   }
+  const viaSub = subUnitFactor(fromUnit, toUnit, avgWeightKg, sub)
+  if (viaSub && viaSub.factor !== undefined) return cost / viaSub.factor
   return null
+}
+
+// A product's sub-unit facts: the piece inside a pack ("can") and how many a
+// pack holds. null when the product doesn't have both.
+type SubUnit = { name: string; qty: number }
+type SubUnitBridge = { factor: number; error?: undefined } | { factor?: undefined; error: string }
+function subUnitOf(p: { sub_unit_name?: unknown; sub_unit_qty?: unknown } | null | undefined): SubUnit | null {
+  const name = String(p?.sub_unit_name || '').trim()
+  const qty  = Number(p?.sub_unit_qty) || 0
+  return name && qty > 0 ? { name, qty } : null
+}
+
+// Pack ↔ piece ↔ weight, for a product bought by a pack the unit table can't
+// measure (a case of 6 cans). The server-side twin of invSubUnitFactor() in
+// public/static/utils.js — KEEP THE TWO IN SYNC, for the reason given on
+// convertQty below. Three kinds of unit can be bridged: the sub-unit itself; a
+// weight, through the weight of ONE sub-unit (avg_weight_per_unit, read the way
+// costing reads it for these products); and a pack, which is ANY unit that is
+// not a measure, not "each" and not the sub-unit — case, box and carton all
+// mean "units per pack" pieces, by decision (2026-10-06).
+// { factor } where qty_to = qty_from × factor; { error } when the bridge exists
+// but the weight is missing; null when the rule does not apply. Only reached
+// after the ordinary conversions have refused, so nothing that converted
+// before changes.
+function subUnitFactor(
+  fromUnit: string, toUnit: string, avgWeightKg: number | null, sub: SubUnit | null = null
+): SubUnitBridge | null {
+  const n    = Number(sub?.qty) || 0
+  const name = String(sub?.name || '').trim().toLowerCase()
+  if (!sub || !name || n <= 0) return null
+  const w = Number(avgWeightKg) || 0
+  let needsWeight = false
+  // How many sub-units one of each unit is; null = not a unit this rule covers.
+  const [a, b] = [fromUnit, toUnit].map((u) => {
+    const key = String(u || '').trim().toLowerCase()
+    if (!key) return null
+    if (key === name) return 1
+    const info = unitInfo(key)
+    if (info) {
+      if (info.dim !== 'weight') return null
+      needsWeight = true
+      return w > 0 ? info.factor / w : 0
+    }
+    return isEachUnit(key) ? null : n
+  })
+  if (a === null || b === null) return null
+  if (needsWeight && !(w > 0)) {
+    return { error: `stocked in ${toUnit} but this movement is in ${fromUnit} — add the weight of one ${sub.name} on the product` }
+  }
+  return { factor: a / b }
 }
 
 // Convert a QUANTITY between units — the reciprocal of convertUnitCost above,
@@ -4966,7 +5019,7 @@ function convertUnitCost(
 // error, because silently treating 250 g as 250 kg would wreck a stock figure
 // in a way nobody would spot until a stock take months later.
 function convertQty(
-  qty: number, fromUnit: string, toUnit: string, avgWeightKg: number | null
+  qty: number, fromUnit: string, toUnit: string, avgWeightKg: number | null, sub: SubUnit | null = null
 ): { qty: number; error?: undefined } | { qty?: undefined; error: string } {
   if (sameUnitName(fromUnit, toUnit)) return { qty }
 
@@ -4991,6 +5044,9 @@ function convertQty(
   if (from && to && from.dim === to.dim) {
     return { qty: qty * (from.factor / to.factor) }
   }
+  // A case of cans: pack ↔ piece ↔ weight, when the product has a sub-unit.
+  const viaSub = subUnitFactor(fromUnit, toUnit, avgWeightKg, sub)
+  if (viaSub) return viaSub.factor !== undefined ? { qty: qty * viaSub.factor } : { error: viaSub.error }
   // Weight↔volume is deliberately not bridged: it needs a density this app does
   // not hold, and a wrong density is worse than a refusal.
   return { error: `cannot convert ${fromUnit} to ${toUnit}` }
@@ -6984,6 +7040,7 @@ app.get('/api/pnl', async (c) => {
     catType: Map<string, string>
     entries: Map<string, { cost_per_unit: number; pack_unit: string; purchase_date: string; created_at: string }[]>
     avgWeight: Map<string, number | null>
+    subUnit: Map<string, SubUnit | null>
     prodCat: Map<string, string>
   }> | null = null
   const pricingCtx = () => (_pricing ??= (async () => {
@@ -6994,8 +7051,8 @@ app.get('/api/pnl', async (c) => {
            FROM product_entries WHERE org_id IS ? AND voided_at IS NULL
           ORDER BY rowid DESC`
       ).bind(org).all<{ generic_product_id: string; cost_per_unit: number; pack_unit: string; purchase_date: string; created_at: string }>(),
-      c.env.DB.prepare(`SELECT id, avg_weight_per_unit, category FROM generic_products WHERE org_id IS ?`)
-        .bind(org).all<{ id: string; avg_weight_per_unit: number | null; category: string | null }>(),
+      c.env.DB.prepare(`SELECT id, avg_weight_per_unit, sub_unit_name, sub_unit_qty, category FROM generic_products WHERE org_id IS ?`)
+        .bind(org).all<{ id: string; avg_weight_per_unit: number | null; sub_unit_name: string | null; sub_unit_qty: number | null; category: string | null }>(),
     ])
 
     const catType = new Map<string, string>()
@@ -7014,15 +7071,17 @@ app.get('/api/pnl', async (c) => {
     }
 
     const avgWeight = new Map<string, number | null>()
+    const subUnit = new Map<string, SubUnit | null>()
     // Raw materials reached by exploding a batch or a packed product arrive with
     // no category of their own — a stock_take_items row carries one, a recipe
     // line does not — so food/beverage has to come from the product itself.
     const prodCat = new Map<string, string>()
     for (const p of (prodRows.results ?? [])) {
       avgWeight.set(p.id, p.avg_weight_per_unit != null ? Number(p.avg_weight_per_unit) : null)
+      subUnit.set(p.id, subUnitOf(p))
       prodCat.set(p.id, String(p.category || ''))
     }
-    return { catType, entries, avgWeight, prodCat }
+    return { catType, entries, avgWeight, subUnit, prodCat }
   })())
 
   // Recipes and finished-product BOMs, for valuing counted prep. Lazy and
@@ -7042,7 +7101,7 @@ app.get('/api/pnl', async (c) => {
   // Inventory page has always converted here (invConvertUnitCost); this valuation
   // did not, so the two disagreed about the same shelf.
   const valueTake = async (takeId: string, asOfDate: string) => {
-    const { catType, entries, avgWeight, prodCat } = await pricingCtx()
+    const { catType, entries, avgWeight, subUnit, prodCat } = await pricingCtx()
 
     const rows = await c.env.DB.prepare(
       `SELECT item_id, item_type, category, unit, counted_qty
@@ -7074,7 +7133,7 @@ app.get('/api/pnl', async (c) => {
       // the unconverted figure rather than dropping to zero — no worse than
       // before, and zeroing it would understate closing stock and overstate COGS.
       const converted = (binUnit && packUnit)
-        ? convertUnitCost(rate, packUnit, binUnit, avgWeight.get(productId) ?? null)
+        ? convertUnitCost(rate, packUnit, binUnit, avgWeight.get(productId) ?? null, subUnit.get(productId) ?? null)
         : null
       const val = qty * (converted ?? rate)
 

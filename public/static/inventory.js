@@ -164,11 +164,11 @@ function buildPriceMap(inventory, generics, entries, recipes, finishedProducts, 
     // $/lb price with a quantity counted in kg overstates the value by ~2.2×.
     const binUnit = String(r.unit || g.base_unit || '').trim();
     const avgWKg  = g.avg_weight_per_unit != null ? parseFloat(g.avg_weight_per_unit) : null;
-    const active  = invFifoActiveEntry(myEntries, invQty, binUnit, avgWKg);
+    const active  = invFifoActiveEntry(myEntries, invQty, binUnit, avgWKg, invSubOf(g));
     const rawCpu  = parseFloat(active.cost_per_unit) || 0;
     const pUnit   = active.pack_unit || 'unit';
 
-    const conv    = invConvertUnitCost(rawCpu, pUnit, binUnit || pUnit, avgWKg);
+    const conv    = invConvertUnitCost(rawCpu, pUnit, binUnit || pUnit, avgWKg, invSubOf(g));
     // Unconvertible → keep the price in the unit it was invoiced in and label it
     // as such, rather than silently valuing the bin with a mismatched rate.
     const cpu     = conv.error ? rawCpu : conv.cost;
@@ -212,8 +212,8 @@ function buildPriceMap(inventory, generics, entries, recipes, finishedProducts, 
  * This file previously carried its own copy which had drifted: it ignored
  * qty_ordered, so a 3 × 5 kg purchase counted as 5 kg rather than 15 kg.
  */
-function invFifoActiveEntry(sortedEntries, invQty, toUnit, avgWeightKg) {
-  return fifoActiveEntryIn(sortedEntries, invQty, toUnit || '', avgWeightKg ?? null);
+function invFifoActiveEntry(sortedEntries, invQty, toUnit, avgWeightKg, sub) {
+  return fifoActiveEntryIn(sortedEntries, invQty, toUnit || '', avgWeightKg ?? null, { sub });
 }
 
 // Cost-group type of a category name (falls back to the built-in map, then food).
@@ -921,13 +921,14 @@ async function findInvRow(itemId, itemType) {
 }
 
 /**
- * Upsert an inventory row: create if not exists, patch quantity if exists.
- * change: positive = add, negative = deduct.
- * Returns the updated inventory row.
+ * Work out what a movement would do, WITHOUT writing anything: the bin it lands
+ * in, that bin's unit, and the change expressed in it. Throws when the units
+ * can't be bridged. upsertInventory() runs it first, and a caller that makes
+ * several movements in a row (Produce Batch) can run it for all of them before
+ * the first write, so one bad line stops the lot instead of half of it.
  */
-async function upsertInventory({ itemId, itemType, itemName, category, unit, change, reason, lotNumber = '' }) {
-  let row = await findInvRow(itemId, itemType);
-  const now = new Date().toISOString();
+async function planInventoryMove({ itemId, itemType, itemName, unit, change }) {
+  const row = await findInvRow(itemId, itemType);
 
   // ── Resolve the bin's unit of record ──────────────────────────
   // A supplier may invoice in a different unit than the item is stocked in
@@ -952,7 +953,8 @@ async function upsertInventory({ itemId, itemType, itemName, category, unit, cha
   if (incomingUnit && binUnit && !invSameUnit(incomingUnit, binUnit)) {
     if (!product && itemType === 'raw_material') product = await _fetchGenericProduct(itemId);
     const avgW = parseFloat(product?.avg_weight_per_unit) || null;
-    const conv = invConvertQty(change, incomingUnit, binUnit, avgW);
+    // invSubOf: a case of cans moved by the can or by weight (see invSubUnitFactor).
+    const conv = invConvertQty(change, incomingUnit, binUnit, avgW, invSubOf(product));
     if (conv.error) {
       // Hard stop — never guess. Silently adding mismatched units is the bug
       // this whole path exists to prevent.
@@ -962,6 +964,17 @@ async function upsertInventory({ itemId, itemType, itemName, category, unit, cha
     }
     delta = Math.round(conv.qty * 1e6) / 1e6;
   }
+  return { row, binUnit, delta };
+}
+
+/**
+ * Upsert an inventory row: create if not exists, patch quantity if exists.
+ * change: positive = add, negative = deduct.
+ * Returns the updated inventory row.
+ */
+async function upsertInventory({ itemId, itemType, itemName, category, unit, change, reason, lotNumber = '' }) {
+  let { row, binUnit, delta } = await planInventoryMove({ itemId, itemType, itemName, unit, change });
+  const now = new Date().toISOString();
 
   if (row) {
     const newQty = (parseFloat(row.quantity) || 0) + delta;
@@ -1018,4 +1031,4 @@ async function logStockMove({ inventory_id, item_id, item_type, item_name, chang
 }
 
 // Expose helpers globally so other JS files can call them
-window.invHelpers = { upsertInventory, findInvRow, logStockMove };
+window.invHelpers = { upsertInventory, planInventoryMove, findInvRow, logStockMove };

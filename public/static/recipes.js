@@ -383,7 +383,7 @@ async function loadProductCatalogue() {
       // — so suppliers billing in kg and lb can be placed on one axis.
       const stockUnit = String(invRow?.unit || g.base_unit || '').trim();
       const avgWKg    = g.avg_weight_per_unit != null ? parseFloat(g.avg_weight_per_unit) : null;
-      const activeEntry = fifoActiveEntry(entries, invQty, stockUnit, avgWKg);
+      const activeEntry = fifoActiveEntry(entries, invQty, stockUnit, avgWKg, invSubOf(g));
 
       // Pack shape and unit price — shared with finished-products.js so the two
       // pages cost a product identically. See entryPackFacts() in utils.js.
@@ -439,8 +439,8 @@ async function loadProductCatalogue() {
  *                                     1 > 1? No. Mar 7 cumulative=2 > 1? Yes → active = Mar 7 ($10) ✓
  *   Inventory = 0L → all consumed  → active = newest entry ($10) ✓
  */
-function fifoActiveEntry(sortedEntries, invQty, toUnit, avgWeightKg) {
-  return fifoActiveEntryIn(sortedEntries, invQty, toUnit || '', avgWeightKg ?? null);
+function fifoActiveEntry(sortedEntries, invQty, toUnit, avgWeightKg, sub) {
+  return fifoActiveEntryIn(sortedEntries, invQty, toUnit || '', avgWeightKg ?? null, { sub });
 }
 
 // ── Ingredient Lines ───────────────────────────────────────────
@@ -1612,6 +1612,42 @@ async function confirmProduceBatch() {
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing…';
 
   try {
+    // Every movement this batch will make: each ingredient out, the batch in.
+    const moves = [];
+    for (const it of pbItems) {
+      const prod      = allProducts.find(p => p.id === it.product_id);
+      const deductQty = (parseFloat(it.quantity) || 0) * scaleFactor;
+      if (deductQty <= 0) continue;
+      moves.push({
+        itemId:    it.product_id,
+        itemType:  'raw_material',
+        itemName:  it.product_name,
+        category:  prod?.category || 'Other',
+        unit:      it.unit || 'kg',
+        change:    -deductQty,
+        reason,
+      });
+    }
+    moves.push({
+      itemId:    pbRecipeId,
+      itemType:  'batch',
+      itemName:  pbRecipeData.name,
+      category:  'Batch',
+      unit:      batchUnit,
+      change:    batchQty,
+      reason,
+    });
+
+    // Check all of them BEFORE the first write. They are written one at a time,
+    // so a line whose unit can't be converted used to stop the batch with the
+    // ingredients above it already off the shelf and no batch to show for them.
+    try {
+      for (const m of moves) await window.invHelpers.planInventoryMove(m);
+    } catch (e) {
+      showToast(`Batch not recorded. ${e.message}`, 'error');
+      return;
+    }
+
     // 0. Pressing this button IS the declaration that the recipe is made ahead,
     //    so record it rather than asking. It closes the last way left to
     //    double-count: a recipe on 'on_demand' that gets produced anyway takes
@@ -1629,32 +1665,9 @@ async function confirmProduceBatch() {
       flipped = true;
     }
 
-    // 1. Deduct each ingredient from Raw Materials inventory
-    for (const it of pbItems) {
-      const prod      = allProducts.find(p => p.id === it.product_id);
-      const deductQty = (parseFloat(it.quantity) || 0) * scaleFactor;
-      if (deductQty <= 0) continue;
-      await window.invHelpers.upsertInventory({
-        itemId:    it.product_id,
-        itemType:  'raw_material',
-        itemName:  it.product_name,
-        category:  prod?.category || 'Other',
-        unit:      it.unit || 'kg',
-        change:    -deductQty,
-        reason,
-      });
-    }
-
-    // 2. Add produced batch to Batch inventory
-    await window.invHelpers.upsertInventory({
-      itemId:    pbRecipeId,
-      itemType:  'batch',
-      itemName:  pbRecipeData.name,
-      category:  'Batch',
-      unit:      batchUnit,
-      change:    batchQty,
-      reason,
-    });
+    // 1. Deduct each ingredient from Raw Materials inventory, then
+    // 2. add the produced batch to Batch inventory.
+    for (const m of moves) await window.invHelpers.upsertInventory(m);
 
     // Say it out loud the once. Changing how a recipe is costed without telling
     // anyone would be worse than asking.

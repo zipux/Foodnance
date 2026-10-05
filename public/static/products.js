@@ -1123,8 +1123,8 @@ function _convertUnitCost(cost, fromUnit, toUnit, avgWeightPerUnit) {
 // cost conversion above. Returns { qty } on success, or { error } on failure.
 // Delegates to the shared converter in utils.js so quantity conversion has ONE
 // implementation across pages (see memory: unit-of-measure-cascade).
-function _convertQuantity(qty, fromUnit, toUnit, avgWeightPerUnit) {
-  return invConvertQty(qty, fromUnit, toUnit, avgWeightPerUnit);
+function _convertQuantity(qty, fromUnit, toUnit, avgWeightPerUnit, sub) {
+  return invConvertQty(qty, fromUnit, toUnit, avgWeightPerUnit, sub);
 }
 
 // "+ Manage units" is a menu entry, not a unit — put the previous choice back
@@ -1359,7 +1359,7 @@ async function _reconcileInventoryUnit(genericId, newUnit) {
   const g      = allGeneric.find(x => x.id === genericId);
   const avgW   = parseFloat(g?.avg_weight_per_unit) || null;
   const oldQty = parseFloat(row.quantity) || 0;
-  const conv   = _convertQuantity(oldQty, oldUnit, newUnit, avgW);
+  const conv   = _convertQuantity(oldQty, oldUnit, newUnit, avgW, invSubOf(g));
 
   try {
     if (conv.error) {
@@ -1588,7 +1588,7 @@ async function confirmEntryInventory() {
       showToast(`${qty} ${entered} of ${_pendingEntryInv.itemName} added to inventory!`, 'success');
     } else {
       const g    = allGeneric.find(x => x.id === _pendingEntryInv.genericId);
-      const conv = invConvertQty(qty, entered, binUnit, parseFloat(g?.avg_weight_per_unit) || null);
+      const conv = invConvertQty(qty, entered, binUnit, parseFloat(g?.avg_weight_per_unit) || null, invSubOf(g));
       const shown = conv.error ? qty : Math.round(conv.qty * 1e6) / 1e6;
       showToast(`${qty} ${entered} of ${_pendingEntryInv.itemName} added as ${shown} ${binUnit}.`, 'success');
     }
