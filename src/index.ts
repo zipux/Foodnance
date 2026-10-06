@@ -5844,6 +5844,118 @@ app.get('/api/stock-take/active', async (c) => {
   return c.json({ active: take, items: items.results })
 })
 
+// ── Past counts (read only) ───────────────────────────────────
+// A submitted count set the shelf to what was counted, and everything since —
+// sales, deliveries, the next count, a month's true COGS — builds on those
+// numbers. So a past count can be read and annotated, never re-opened: these
+// routes only read, except the note, which changes no figure. A wrong count is
+// put right by an adjustment on the Inventory page or by the next count.
+
+// A count's day (0062) and how its lines compare with what was expected. A
+// line is "short" or "over" only beyond a millionth, the precision bins hold.
+const STOCK_TAKE_DAY = `COALESCE(count_date, date(submitted_at))`
+// Food and drinks are each rounded to the cent and THEN added, because that is
+// what the P&L prints side by side: adding first can land a cent away from the
+// sum of the two figures a customer sees there.
+const stockTotal = (v: { food: number; beverage: number }) => round2(round2(v.food) + round2(v.beverage))
+
+// GET /api/stock-take/history  →  { data: [{ id, date, counted, short, over, value, note }] }
+// Newest first. `value` is the count's food + drinks stock, by the very code
+// the P&L's true COGS uses (stockValuer), so the two cannot disagree.
+app.get('/api/stock-take/history', async (c) => {
+  const org = orgOf(c)
+  const takes = await c.env.DB.prepare(
+    `SELECT id, ${STOCK_TAKE_DAY} AS d, submitted_at, note FROM stock_takes
+      WHERE status = 'submitted' AND submitted_at IS NOT NULL AND org_id IS ?
+      ORDER BY d DESC, submitted_at DESC LIMIT 60`,
+  ).bind(org).all<{ id: string; d: string; submitted_at: string; note: string | null }>()
+
+  const tallies = await c.env.DB.prepare(
+    `SELECT stock_take_id,
+            SUM(CASE WHEN counted_qty IS NOT NULL THEN 1 ELSE 0 END) AS counted,
+            SUM(CASE WHEN counted_qty IS NOT NULL AND ROUND(counted_qty - expected_qty, 6) < 0 THEN 1 ELSE 0 END) AS short,
+            SUM(CASE WHEN counted_qty IS NOT NULL AND ROUND(counted_qty - expected_qty, 6) > 0 THEN 1 ELSE 0 END) AS over
+       FROM stock_take_items WHERE org_id IS ? GROUP BY stock_take_id`,
+  ).bind(org).all<{ stock_take_id: string; counted: number; short: number; over: number }>()
+  const tally = new Map((tallies.results ?? []).map(r => [r.stock_take_id, r]))
+
+  const valuer = stockValuer(c.env.DB, org)
+  const data = []
+  for (const t of (takes.results ?? [])) {
+    const v = await valuer.valueTake(t.id, t.d)
+    const n = tally.get(t.id)
+    data.push({
+      id: t.id, date: t.d, note: t.note || '',
+      counted: n?.counted ?? 0, short: n?.short ?? 0, over: n?.over ?? 0,
+      value: stockTotal(v),
+    })
+  }
+  return c.json({ data })
+})
+
+// GET /api/stock-take/history/:id  →  one submitted count with every line, its
+// value, and what its differences were worth (short and over, priced by the
+// same rules as the count).
+app.get('/api/stock-take/history/:id', async (c) => {
+  const org = orgOf(c)
+  const take = await c.env.DB.prepare(
+    `SELECT id, ${STOCK_TAKE_DAY} AS d, note FROM stock_takes
+      WHERE id = ? AND status = 'submitted' AND submitted_at IS NOT NULL AND org_id IS ?`,
+  ).bind(c.req.param('id'), org).first<{ id: string; d: string; note: string | null }>()
+  if (!take) return c.json({ error: 'That count was not found.' }, 404)
+
+  const rows = await c.env.DB.prepare(
+    `SELECT id, item_id, item_type, item_name, category, unit, expected_qty, counted_qty, reason, reason_code
+       FROM stock_take_items WHERE stock_take_id = ? AND org_id IS ?
+      ORDER BY item_name COLLATE NOCASE`,
+  ).bind(take.id, org).all<{
+    id: string; item_id: string; item_type: string; item_name: string; category: string; unit: string
+    expected_qty: number; counted_qty: number | null; reason: string | null; reason_code: string | null
+  }>()
+
+  const items = (rows.results ?? []).filter(r => r.counted_qty !== null && r.counted_qty !== undefined).map(r => ({
+    id: r.id, item_type: r.item_type, item_name: r.item_name, category: r.category || '', unit: r.unit || '',
+    expected_qty: Number(r.expected_qty) || 0, counted_qty: Number(r.counted_qty) || 0,
+    difference: Math.round(((Number(r.counted_qty) || 0) - (Number(r.expected_qty) || 0)) * 1e6) / 1e6,
+    reason: r.reason || '',
+    // kept for the valuation below, not sent on
+    item_id: r.item_id,
+  }))
+
+  const valuer = stockValuer(c.env.DB, org)
+  const whole = await valuer.valueTake(take.id, take.d)
+  const priced = async (sign: 1 | -1) => {
+    const v = await valuer.valueRows(
+      items.filter(i => i.difference * sign > 0).map(i => ({
+        item_id: i.item_id, item_type: i.item_type, category: i.category, unit: i.unit,
+        counted_qty: Math.abs(i.difference),
+      })), take.d)
+    return stockTotal(v)
+  }
+
+  return c.json({
+    id: take.id, date: take.d, note: take.note || '',
+    value: stockTotal(whole),
+    short_value: await priced(-1),
+    over_value: await priced(1),
+    items: items.map(({ item_id, ...rest }) => rest),
+  })
+})
+
+// POST /api/stock-take/history/:id/note  { note }
+// The one thing that can be written on a past count. It explains; it changes
+// no quantity, no stock and no value.
+app.post('/api/stock-take/history/:id/note', async (c) => {
+  const org = orgOf(c)
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const note = String(body.note ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, ' ').trim().slice(0, 1000)
+  const res = await c.env.DB.prepare(
+    `UPDATE stock_takes SET note = ? WHERE id = ? AND status = 'submitted' AND org_id IS ?`,
+  ).bind(note, c.req.param('id'), org).run()
+  if (!res.meta.changes) return c.json({ error: 'That count was not found.' }, 404)
+  return c.json({ ok: true, note })
+})
+
 // POST /api/stock-take/start
 // Creates a new in-progress stock take and snapshots every inventory item
 // as a stock_take_items row with counted_qty = NULL.
@@ -6063,8 +6175,8 @@ app.post('/api/stock-take/:id/submit', async (c) => {
     // 3. Log a stock movement (only if variance != 0).
     //    reason_code is what makes a stock-take variance show up in waste
     //    reporting alongside manual adjustments — 'stock_take' is the fallback
-    //    when the user picked nothing (only possible for a zero variance,
-    //    which does not reach here, but kept honest rather than blank).
+    //    when the user picked nothing, which the page allows: a reason is
+    //    optional, so a difference nobody explained is filed as just that.
     if (variance !== 0) {
       statements.push(
         c.env.DB.prepare(
@@ -6871,6 +6983,158 @@ app.get('/api/spending-breakdown', async (c) => {
   })
 })
 
+// ─── Valuing counted stock ────────────────────────────────────
+// What a stock count (or any list of counted quantities) is worth. One
+// implementation for the P&L's true COGS and for the count history on the
+// Stock Take page, so the two can never show different values for the same
+// shelf. Lifted out of /api/pnl unchanged; everything is fetched lazily and
+// once per request.
+type StockQtyRow = { item_id: string; item_type: string; category: string; unit: string; counted_qty: number }
+function stockValuer(db: D1Database, org: string | null) {
+  // Everything needed to price a count, fetched once per request and shared by
+  // the opening and closing takes. Lazy, so a P&L that never reaches the COGS
+  // branch pays nothing for it.
+  let _pricing: Promise<{
+    catType: Map<string, string>
+    entries: Map<string, { cost_per_unit: number; pack_unit: string; purchase_date: string; created_at: string }[]>
+    avgWeight: Map<string, number | null>
+    subUnit: Map<string, SubUnit | null>
+    prodCat: Map<string, string>
+  }> | null = null
+  const pricingCtx = () => (_pricing ??= (async () => {
+    const [catRows, entryRows, prodRows] = await Promise.all([
+      db.prepare(`SELECT name, type FROM categories WHERE org_id IS ?`).bind(org).all<{ name: string; type: string }>(),
+      db.prepare(
+        `SELECT generic_product_id, cost_per_unit, pack_unit, purchase_date, created_at
+           FROM product_entries WHERE org_id IS ? AND voided_at IS NULL
+          ORDER BY rowid DESC`
+      ).bind(org).all<{ generic_product_id: string; cost_per_unit: number; pack_unit: string; purchase_date: string; created_at: string }>(),
+      db.prepare(`SELECT id, avg_weight_per_unit, sub_unit_name, sub_unit_qty, category FROM generic_products WHERE org_id IS ?`)
+        .bind(org).all<{ id: string; avg_weight_per_unit: number | null; sub_unit_name: string | null; sub_unit_qty: number | null; category: string | null }>(),
+    ])
+
+    const catType = new Map<string, string>()
+    for (const r of (catRows.results ?? [])) catType.set(String(r.name || '').trim().toLowerCase(), r.type || 'food')
+
+    // Newest purchase first, so "latest on or before a date" is the first match.
+    const entries = new Map<string, any[]>()
+    for (const e of (entryRows.results ?? [])) {
+      if (!entries.has(e.generic_product_id)) entries.set(e.generic_product_id, [])
+      entries.get(e.generic_product_id)!.push(e)
+    }
+    for (const list of entries.values()) {
+      // Rows arrive most recently entered first and the sort is stable, so two
+      // purchases on the same day stay in that order: entered last = latest.
+      list.sort((a, b) => (b.purchase_date || '').localeCompare(a.purchase_date || ''))
+    }
+
+    const avgWeight = new Map<string, number | null>()
+    const subUnit = new Map<string, SubUnit | null>()
+    // Raw materials reached by exploding a batch or a packed product arrive with
+    // no category of their own — a stock_take_items row carries one, a recipe
+    // line does not — so food/beverage has to come from the product itself.
+    const prodCat = new Map<string, string>()
+    for (const p of (prodRows.results ?? [])) {
+      avgWeight.set(p.id, p.avg_weight_per_unit != null ? Number(p.avg_weight_per_unit) : null)
+      subUnit.set(p.id, subUnitOf(p))
+      prodCat.set(p.id, String(p.category || ''))
+    }
+    return { catType, entries, avgWeight, subUnit, prodCat }
+  })())
+
+  // Recipes and finished-product BOMs, for valuing counted prep. Lazy and
+  // memoized like pricingCtx — a P&L with no prep counted never reads them.
+  let _explode: Promise<ExplodeCtx> | null = null
+  const explodeCtx = () => (_explode ??= buildExplodeCtx(db, org))
+
+  // Value one stock take's raw-material counts, grouped into food/beverage.
+  // asOfDate prices each product at its most recent purchase on/before that date.
+  //
+  // The count and the price are in DIFFERENT UNITS and must be reconciled before
+  // multiplying: counted_qty is in the bin's unit, cost_per_unit is per the
+  // *pack* unit it was invoiced in. Potatoes invoiced at $1.65/lb and counted as
+  // 50 kg in the walk-in are worth $181.50, not the $82.50 a straight multiply
+  // gives — and unlike prepped stock, this error does not cancel between the
+  // opening and closing takes, because it scales with what is on hand. The
+  // Inventory page has always converted here (invConvertUnitCost); this valuation
+  // did not, so the two disagreed about the same shelf.
+  const valueTake = async (takeId: string, asOfDate: string) => {
+    const rows = await db.prepare(
+      `SELECT item_id, item_type, category, unit, counted_qty
+         FROM stock_take_items
+        WHERE stock_take_id = ? AND counted_qty IS NOT NULL AND org_id IS ?`
+    ).bind(takeId, org).all<StockQtyRow>()
+    return valueRows(rows.results ?? [], asOfDate)
+  }
+
+  // The same valuation for any list of quantities, not only a whole count —
+  // the count history uses it to say what a count's differences were worth, by
+  // the rules that value the count itself.
+  const valueRows = async (rowList: StockQtyRow[], asOfDate: string) => {
+    const { catType, entries, avgWeight, subUnit, prodCat } = await pricingCtx()
+
+    let f = 0, b = 0
+
+    // Price one raw-material quantity into the food/beverage totals. Shared by
+    // the counted raw materials and by the raw materials found inside counted
+    // prep, so both are valued by identical rules.
+    const priceInto = (productId: string, qty: number, unit: string, category: string) => {
+      if (!(qty > 0)) return
+
+      const list = entries.get(productId) || []
+      // Same precedence the SQL used: newest purchase on or before the take's
+      // date, else the newest known purchase at all.
+      const dated = list.find(e => e.purchase_date && e.purchase_date <= asOfDate)
+      const entry = dated || list[0]
+      if (!entry) return
+
+      const rate = Number(entry.cost_per_unit) || 0
+      if (!(rate > 0)) return
+
+      const binUnit = String(unit || '').trim()
+      const packUnit = String(entry.pack_unit || '').trim()
+      // A pair that cannot be bridged (a 'case' price against a kg count) keeps
+      // the unconverted figure rather than dropping to zero — no worse than
+      // before, and zeroing it would understate closing stock and overstate COGS.
+      const converted = (binUnit && packUnit)
+        ? convertUnitCost(rate, packUnit, binUnit, avgWeight.get(productId) ?? null, subUnit.get(productId) ?? null)
+        : null
+      const val = qty * (converted ?? rate)
+
+      const type = catType.get(String(category || '').trim().toLowerCase()) || 'food'
+      if (type === 'beverage') b += val
+      else if (type === 'supplies') { /* supplies aren't part of COGS */ }
+      else f += val
+    }
+
+    const counted = rowList.filter(r => (Number(r.counted_qty) || 0) > 0)
+
+    // Prep and packed stock are valued by what went INTO them, because nobody
+    // ever invoiced a tub of sauce. Before this they were counted and then
+    // priced at zero, so every kilo of prep in the walk-in was invisible to
+    // closing stock and inflated COGS by its whole value.
+    const hasPrep = counted.some(r => r.item_type !== 'raw_material')
+    const ctx = hasPrep ? await explodeCtx() : null
+
+    for (const r of counted) {
+      const qty = Number(r.counted_qty) || 0
+
+      if (r.item_type === 'raw_material') {
+        priceInto(r.item_id, qty, r.unit, r.category)
+        continue
+      }
+
+      for (const d of explodeToRawMaterials(r.item_type, r.item_id, qty, r.unit, ctx!)) {
+        priceInto(d.item_id, d.qty, d.unit, prodCat.get(d.item_id) || '')
+      }
+    }
+
+    return { food: f, beverage: b }
+  }
+
+  return { valueTake, valueRows }
+}
+
 // ─── P&L: invoice-derived cost side for a period ──────────────
 // Returns the cost figures the app can compute from data it owns (invoices),
 // split by category TYPE (food / beverage / supplies via the categories table).
@@ -7063,140 +7327,7 @@ app.get('/api/pnl', async (c) => {
     ORDER BY d DESC, submitted_at DESC LIMIT 1
   `).bind(periodStart, org).first<{ id: string; d: string }>()
 
-  // Everything needed to price a count, fetched once per request and shared by
-  // the opening and closing takes. Lazy, so a P&L that never reaches the COGS
-  // branch pays nothing for it.
-  let _pricing: Promise<{
-    catType: Map<string, string>
-    entries: Map<string, { cost_per_unit: number; pack_unit: string; purchase_date: string; created_at: string }[]>
-    avgWeight: Map<string, number | null>
-    subUnit: Map<string, SubUnit | null>
-    prodCat: Map<string, string>
-  }> | null = null
-  const pricingCtx = () => (_pricing ??= (async () => {
-    const [catRows, entryRows, prodRows] = await Promise.all([
-      c.env.DB.prepare(`SELECT name, type FROM categories WHERE org_id IS ?`).bind(org).all<{ name: string; type: string }>(),
-      c.env.DB.prepare(
-        `SELECT generic_product_id, cost_per_unit, pack_unit, purchase_date, created_at
-           FROM product_entries WHERE org_id IS ? AND voided_at IS NULL
-          ORDER BY rowid DESC`
-      ).bind(org).all<{ generic_product_id: string; cost_per_unit: number; pack_unit: string; purchase_date: string; created_at: string }>(),
-      c.env.DB.prepare(`SELECT id, avg_weight_per_unit, sub_unit_name, sub_unit_qty, category FROM generic_products WHERE org_id IS ?`)
-        .bind(org).all<{ id: string; avg_weight_per_unit: number | null; sub_unit_name: string | null; sub_unit_qty: number | null; category: string | null }>(),
-    ])
-
-    const catType = new Map<string, string>()
-    for (const r of (catRows.results ?? [])) catType.set(String(r.name || '').trim().toLowerCase(), r.type || 'food')
-
-    // Newest purchase first, so "latest on or before a date" is the first match.
-    const entries = new Map<string, any[]>()
-    for (const e of (entryRows.results ?? [])) {
-      if (!entries.has(e.generic_product_id)) entries.set(e.generic_product_id, [])
-      entries.get(e.generic_product_id)!.push(e)
-    }
-    for (const list of entries.values()) {
-      // Rows arrive most recently entered first and the sort is stable, so two
-      // purchases on the same day stay in that order: entered last = latest.
-      list.sort((a, b) => (b.purchase_date || '').localeCompare(a.purchase_date || ''))
-    }
-
-    const avgWeight = new Map<string, number | null>()
-    const subUnit = new Map<string, SubUnit | null>()
-    // Raw materials reached by exploding a batch or a packed product arrive with
-    // no category of their own — a stock_take_items row carries one, a recipe
-    // line does not — so food/beverage has to come from the product itself.
-    const prodCat = new Map<string, string>()
-    for (const p of (prodRows.results ?? [])) {
-      avgWeight.set(p.id, p.avg_weight_per_unit != null ? Number(p.avg_weight_per_unit) : null)
-      subUnit.set(p.id, subUnitOf(p))
-      prodCat.set(p.id, String(p.category || ''))
-    }
-    return { catType, entries, avgWeight, subUnit, prodCat }
-  })())
-
-  // Recipes and finished-product BOMs, for valuing counted prep. Lazy and
-  // memoized like pricingCtx — a P&L with no prep counted never reads them.
-  let _explode: Promise<ExplodeCtx> | null = null
-  const explodeCtx = () => (_explode ??= buildExplodeCtx(c.env.DB, org))
-
-  // Value one stock take's raw-material counts, grouped into food/beverage.
-  // asOfDate prices each product at its most recent purchase on/before that date.
-  //
-  // The count and the price are in DIFFERENT UNITS and must be reconciled before
-  // multiplying: counted_qty is in the bin's unit, cost_per_unit is per the
-  // *pack* unit it was invoiced in. Potatoes invoiced at $1.65/lb and counted as
-  // 50 kg in the walk-in are worth $181.50, not the $82.50 a straight multiply
-  // gives — and unlike prepped stock, this error does not cancel between the
-  // opening and closing takes, because it scales with what is on hand. The
-  // Inventory page has always converted here (invConvertUnitCost); this valuation
-  // did not, so the two disagreed about the same shelf.
-  const valueTake = async (takeId: string, asOfDate: string) => {
-    const { catType, entries, avgWeight, subUnit, prodCat } = await pricingCtx()
-
-    const rows = await c.env.DB.prepare(
-      `SELECT item_id, item_type, category, unit, counted_qty
-         FROM stock_take_items
-        WHERE stock_take_id = ? AND counted_qty IS NOT NULL AND org_id IS ?`
-    ).bind(takeId, org).all<{ item_id: string; item_type: string; category: string; unit: string; counted_qty: number }>()
-
-    let f = 0, b = 0
-
-    // Price one raw-material quantity into the food/beverage totals. Shared by
-    // the counted raw materials and by the raw materials found inside counted
-    // prep, so both are valued by identical rules.
-    const priceInto = (productId: string, qty: number, unit: string, category: string) => {
-      if (!(qty > 0)) return
-
-      const list = entries.get(productId) || []
-      // Same precedence the SQL used: newest purchase on or before the take's
-      // date, else the newest known purchase at all.
-      const dated = list.find(e => e.purchase_date && e.purchase_date <= asOfDate)
-      const entry = dated || list[0]
-      if (!entry) return
-
-      const rate = Number(entry.cost_per_unit) || 0
-      if (!(rate > 0)) return
-
-      const binUnit = String(unit || '').trim()
-      const packUnit = String(entry.pack_unit || '').trim()
-      // A pair that cannot be bridged (a 'case' price against a kg count) keeps
-      // the unconverted figure rather than dropping to zero — no worse than
-      // before, and zeroing it would understate closing stock and overstate COGS.
-      const converted = (binUnit && packUnit)
-        ? convertUnitCost(rate, packUnit, binUnit, avgWeight.get(productId) ?? null, subUnit.get(productId) ?? null)
-        : null
-      const val = qty * (converted ?? rate)
-
-      const type = catType.get(String(category || '').trim().toLowerCase()) || 'food'
-      if (type === 'beverage') b += val
-      else if (type === 'supplies') { /* supplies aren't part of COGS */ }
-      else f += val
-    }
-
-    const counted = (rows.results ?? []).filter(r => (Number(r.counted_qty) || 0) > 0)
-
-    // Prep and packed stock are valued by what went INTO them, because nobody
-    // ever invoiced a tub of sauce. Before this they were counted and then
-    // priced at zero, so every kilo of prep in the walk-in was invisible to
-    // closing stock and inflated COGS by its whole value.
-    const hasPrep = counted.some(r => r.item_type !== 'raw_material')
-    const ctx = hasPrep ? await explodeCtx() : null
-
-    for (const r of counted) {
-      const qty = Number(r.counted_qty) || 0
-
-      if (r.item_type === 'raw_material') {
-        priceInto(r.item_id, qty, r.unit, r.category)
-        continue
-      }
-
-      for (const d of explodeToRawMaterials(r.item_type, r.item_id, qty, r.unit, ctx!)) {
-        priceInto(d.item_id, d.qty, d.unit, prodCat.get(d.item_id) || '')
-      }
-    }
-
-    return { food: f, beverage: b }
-  }
+  const { valueTake } = stockValuer(c.env.DB, org)
 
   // True COGS is a Pro feature. An Essential account normally has no stock takes
   // to bracket the period anyway, but one that was downgraded from Pro still has

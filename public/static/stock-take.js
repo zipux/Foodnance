@@ -305,6 +305,168 @@ async function loadPackConfig() {
   }
 }
 
+// ══════════════════════════════════════════════════════════════
+// PAST COUNTS — read only
+// A submitted count can be looked at and given a note, nothing else: the
+// shelf, every movement since and each month's true COGS were built on its
+// numbers (see the routes under "Past counts" in src/index.ts).
+// ══════════════════════════════════════════════════════════════
+const ST_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+  'August', 'September', 'October', 'November', 'December'];
+// 2026-10-05 → "5 October 2026": the month as a word, so day and month can't be confused.
+function stLongDate(ymd) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd || ''));
+  return m ? `${+m[3]} ${ST_MONTHS[+m[2] - 1]} ${m[1]}` : '—';
+}
+function stMoney(n) {
+  const v = Number(n) || 0;
+  return (v < 0 ? '−$' : '$') + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function stDiffPills(short, over) {
+  if (!short && !over) return '<span class="st-h-pill none">None</span>';
+  return [short ? `<span class="st-h-pill short">${short} short</span>` : '',
+          over  ? `<span class="st-h-pill over">${over} over</span>` : ''].filter(Boolean).join(' ');
+}
+
+let stHistoryOpen = null;        // the opened count, as the server sent it
+let stHistoryFilter = 'diff';    // 'diff' | 'all'
+
+async function loadHistory() {
+  const box = document.getElementById('stHistory');
+  let rows = [];
+  try {
+    const r = await fetch('/api/stock-take/history');
+    if (!r.ok) throw new Error(String(r.status));
+    rows = (await r.json()).data || [];
+  } catch (_) { return; }        // the list is extra; the page works without it
+  if (!rows.length) { box.style.display = 'none'; return; }
+
+  document.getElementById('stHistoryList').innerHTML = `
+    <table>
+      <thead><tr><th>Date</th><th>Counted</th><th>Differences</th><th class="num">Stock value</th><th></th></tr></thead>
+      <tbody>${rows.map(t => `
+        <tr class="st-h-row" data-take-id="${esc(t.id)}">
+          <td><span class="st-h-date">${esc(stLongDate(t.date))}</span>${
+            t.note ? `<div class="st-h-small"><i class="fas fa-note-sticky"></i> ${esc(t.note.length > 70 ? t.note.slice(0, 70) + '…' : t.note)}</div>` : ''}</td>
+          <td>${t.counted} item${t.counted === 1 ? '' : 's'}</td>
+          <td>${stDiffPills(t.short, t.over)}</td>
+          <td class="num">${stMoney(t.value)}</td>
+          <td><button type="button" class="st-h-open">Open</button></td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+  document.querySelectorAll('#stHistoryList tr.st-h-row').forEach(tr =>
+    tr.addEventListener('click', () => openHistory(tr.dataset.takeId)));
+  box.style.display = '';
+}
+
+async function openHistory(id) {
+  let take;
+  try {
+    const r = await fetch(`/api/stock-take/history/${encodeURIComponent(id)}`);
+    if (!r.ok) throw new Error(String(r.status));
+    take = await r.json();
+  } catch (_) {
+    showToast('Could not open that count. Check your connection and try again.', 'error');
+    return;
+  }
+  stHistoryOpen = take;
+  const diffs = take.items.filter(i => i.difference !== 0).length;
+  stHistoryFilter = diffs ? 'diff' : 'all';
+  document.getElementById('stStartPanel').style.display = 'none';
+  document.getElementById('stHistory').style.display = 'none';
+  // Today's date and "0 of 0 counted" describe a count in progress; over a past
+  // count they read as if they were about it.
+  document.querySelector('.st-header-meta').style.visibility = 'hidden';
+  renderHistoryDetail();
+  document.getElementById('stHistoryDetail').style.display = '';
+  window.scrollTo(0, 0);
+}
+
+function closeHistory() {
+  stHistoryOpen = null;
+  document.getElementById('stHistoryDetail').style.display = 'none';
+  document.getElementById('stStartPanel').style.display = '';
+  document.querySelector('.st-header-meta').style.visibility = '';
+  loadHistory();                 // a note saved meanwhile shows on its row
+}
+
+function renderHistoryDetail() {
+  const take = stHistoryOpen;
+  const box  = document.getElementById('stHistoryDetail');
+  const diffItems = take.items.filter(i => i.difference !== 0);
+  const shown = stHistoryFilter === 'diff' ? diffItems : take.items;
+  // What the differences were worth: stock found over, less stock found short.
+  const net = (Number(take.over_value) || 0) - (Number(take.short_value) || 0);
+
+  box.innerHTML = `
+    <div class="st-h-head">
+      <div>
+        <h2>Stock count, ${esc(stLongDate(take.date))}</h2>
+        <p class="st-history-sub" style="margin-bottom:0"><button type="button" class="st-h-open st-h-back"><i class="fas fa-arrow-left"></i> Back to past counts</button></p>
+      </div>
+      <span class="st-h-lock"><i class="fas fa-lock"></i> Read only</span>
+    </div>
+    <div class="st-h-facts">
+      <div><div class="k">Items counted</div><div class="v">${take.items.length}</div></div>
+      <div><div class="k">Differences</div><div class="v">${diffItems.length}</div></div>
+      <div><div class="k">Stock value</div><div class="v">${stMoney(take.value)}</div></div>
+      <div><div class="k">Value of differences</div><div class="v ${net < 0 ? 'st-h-short' : net > 0 ? 'st-h-over' : ''}">${stMoney(net)}</div></div>
+    </div>
+    <div class="st-h-note">
+      <label for="stHistoryNote">Note</label>
+      <textarea id="stHistoryNote" maxlength="1000" placeholder="Anything worth remembering about this count">${esc(take.note || '')}</textarea>
+      <div class="row">
+        <button type="button" class="btn btn-secondary st-h-save">Save note</button>
+        <span class="st-h-small">A note explains a count. It does not change any number.</span>
+      </div>
+    </div>
+    <div class="st-h-filter">
+      <button type="button" class="st-h-chip ${stHistoryFilter === 'diff' ? 'on' : ''}" data-filter="diff">Differences only (${diffItems.length})</button>
+      <button type="button" class="st-h-chip ${stHistoryFilter === 'all' ? 'on' : ''}" data-filter="all">All items (${take.items.length})</button>
+    </div>
+    <div class="st-history-scroll">
+      <table>
+        <thead><tr><th>Item</th><th class="num">Expected</th><th class="num">Counted</th><th class="num">Difference</th><th>Reason</th></tr></thead>
+        <tbody>${shown.length ? shown.map(i => `
+          <tr>
+            <td>${esc(i.item_name)}<div class="st-h-small">${esc(i.item_type === 'batch' ? 'Prep' : (i.category || ''))}</div></td>
+            <td class="num">${fmtQty(i.expected_qty)} ${esc(i.unit)}</td>
+            <td class="num">${fmtQty(i.counted_qty)} ${esc(i.unit)}</td>
+            <td class="num ${i.difference < 0 ? 'st-h-short' : i.difference > 0 ? 'st-h-over' : ''}">${
+              i.difference === 0 ? '—' : (i.difference < 0 ? '−' : '+') + fmtQty(Math.abs(i.difference)) + ' ' + esc(i.unit)}</td>
+            <td>${esc(i.difference === 0 ? '' : (i.reason || '—'))}</td>
+          </tr>`).join('') : `<tr><td colspan="5" class="st-h-small">Everything counted matched what was expected.</td></tr>`}
+        </tbody>
+      </table>
+    </div>`;
+
+  box.querySelector('.st-h-back').addEventListener('click', closeHistory);
+  box.querySelector('.st-h-save').addEventListener('click', saveHistoryNote);
+  box.querySelectorAll('.st-h-chip').forEach(b => b.addEventListener('click', () => {
+    // Keep a note being typed when the list is switched.
+    stHistoryOpen.note = document.getElementById('stHistoryNote').value;
+    stHistoryFilter = b.dataset.filter;
+    renderHistoryDetail();
+  }));
+}
+
+async function saveHistoryNote() {
+  if (!stHistoryOpen) return;
+  const note = document.getElementById('stHistoryNote').value;
+  try {
+    const r = await fetch(`/api/stock-take/history/${encodeURIComponent(stHistoryOpen.id)}/note`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || 'Could not save the note.');
+    stHistoryOpen.note = d.note;
+    showToast('Note saved.', 'success');
+  } catch (e) {
+    showToast(e.message || 'Could not save the note.', 'error');
+  }
+}
+
 function todayYMD() {
   const d = new Date();
   const dd = String(d.getDate()).padStart(2, '0');
@@ -346,6 +508,7 @@ async function loadOrStart() {
       // Nothing in progress and nobody asked to begin — show the panel and stop.
       document.getElementById('stLoading').style.display = 'none';
       document.getElementById('stStartPanel').style.display = '';
+      loadHistory();   // past counts, listed under the panel
       // Nothing to cancel yet, and its confirm text talks about discarding
       // counts that don't exist. The panel's own "Back to Inventory" is the way out.
       document.getElementById('stCancelBtn').style.display = 'none';
@@ -730,7 +893,7 @@ function reasonHtml(snapId, currentReason, visible, variance) {
   const dir = variance == null || variance === 0 ? '' : (variance > 0 ? 'add' : 'remove');
   return `
     <select class="${cls} st-reason-select" data-snap-id="${esc(snapId)}" data-dir="${dir}" ${visible ? '' : 'tabindex="-1"'}>
-      <option value="">Select reason…</option>
+      <option value="">Reason (optional)</option>
       ${extra}
       ${opts.map(o => `
         <option value="${esc(o.code)}" ${o.code === current ? 'selected' : ''}>${esc(o.label)}</option>
@@ -968,21 +1131,11 @@ async function cancelStockTake() {
 
 async function submitStockTake() {
   if (!stockTake?.id) return;
-  const counted = snapshotItems.filter(it => hasCount(it.id));
-
-  // Validate: any counted item with variance !== 0 must have a reason
-  const missing = counted.filter(it => {
-    const state = inputState.get(it.id);
-    const variance = parseFloat(state.counted) - (parseFloat(it.expected_qty) || 0);
-    return variance !== 0 && !(state.reason && state.reason.trim());
-  });
-  if (missing.length) {
-    showToast(`Select a reason for ${missing.length} item${missing.length > 1 ? 's' : ''} with a variance.`, 'error');
-    // Scroll the first missing one into view
-    const el = document.querySelector(`.st-reason-select[data-snap-id="${cssEscape(missing[0].id)}"]`);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    return;
-  }
+  // A reason for a difference is offered, never demanded (the user's decision,
+  // 2026-10-06). A real count almost never matches to the gram, so requiring a
+  // pick on every such line made a full sheet a chore; a kitchen that knows why
+  // will say so, and a line without one is logged as a plain stock-take
+  // difference by the server.
 
   // Anything left uncounted keeps its existing stock. That is a reasonable
   // default but a terrible surprise, so say so plainly before committing.

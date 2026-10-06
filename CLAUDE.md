@@ -437,6 +437,7 @@ npm run test:duplicate      # duplicate-invoice block (number + supplier) — ne
 npm run test:terms          # Terms acceptance record — needs the sandbox (0061 applied locally)
 npm run test:sub-unit-stock # case/can/weight stock: stock-take value + sales import — needs the sandbox
 npm run test:count-date     # stock count's local day + drinks sales split — needs the sandbox (0062 applied locally)
+npm run test:history        # past stock counts: list, sheet, note, isolation — needs the sandbox
 ```
 
 **The account purge** (`DELETE /api/admin/organizations/:id`, admin-screen button) is
@@ -780,6 +781,27 @@ keeps that match when there is one (the category's own type wins, drink or not) 
 reads the name for a whole drink word (`DRINK_WORDS`; the list is the user's, a guess by
 design). It moves money between the two sales lines only; the total cannot change.
 `tests/count-date-and-drinks.test.mjs` + `npm run test:count-date` (needs the sandbox).
+
+### Past stock counts are read only (added 2026-10-06, no migration)
+
+The Stock Take page lists every submitted count under the start panel (date, items counted,
+short/over, stock value); opening one shows each line (expected, counted, difference, reason),
+what the differences were worth, and a **note** box. That note is the only thing that can be
+written on a past count (`stock_takes.note`, a column that existed since `0015` and was never
+used). There is deliberately **no re-open, edit or delete**: submitting a count set the shelf,
+and every movement since and each month's true COGS were built on it. A wrong count is put
+right on the Inventory page or by the next count. Routes: `GET /api/stock-take/history`,
+`GET /api/stock-take/history/:id`, `POST /api/stock-take/history/:id/note` (list declared
+before `:id`). Values come from **`stockValuer(db, org)`**, the valuation lifted out of
+`/api/pnl` so the history and the P&L share one copy (`valueTake` for a whole count,
+`valueRows` for any list of quantities — the differences). Counts are dated by
+`STOCK_TAKE_DAY` (0062). Known limits: who submitted a count is not recorded; and "read only"
+is the screen's and these routes' promise — the generic `/api/tables/stock_takes` routes can
+still PATCH a count (the integration tests backdate takes that way).
+**A reason for a difference is optional** (the user's decision, same day): the page used to
+refuse to submit until every line that differed had one, which on a real sheet is nearly every
+line. An unexplained difference is logged by the server as `'Stock take'` / `stock_take`.
+`tests/stock-take-history.test.mjs` + `npm run test:history` (needs the sandbox).
 
 ### Stock-take valuation (true COGS)
 `valueTake()` inside `/api/pnl` prices a submitted stock take. Two things about it

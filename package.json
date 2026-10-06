@@ -36,6 +36,7 @@
     "test:terms": "node tests/integration/terms-acceptance.test.mjs",
     "test:sub-unit-stock": "node tests/integration/sub-unit-stock.test.mjs",
     "test:count-date": "node tests/integration/count-date-and-drinks.test.mjs",
+    "test:history": "node tests/integration/stock-take-history.test.mjs",
     "test:line-product": "node tests/integration/invoice-line-product.test.mjs"
   },
   "dependencies": {
