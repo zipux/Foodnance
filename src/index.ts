@@ -129,6 +129,12 @@ function isDrinkSale(categoryType: unknown, posCategory: unknown): boolean {
   return DRINK_WORDS.test(String(posCategory || ''))
 }
 
+// D1 refuses a statement with more than 100 bound values ("too many SQL
+// variables"). Any `IN (?, ?, …)` built from a list must be sent in chunks of
+// this size, which leaves room for the other values the statement binds.
+// Local SQLite allows 32,766, so only a real D1 shows a mistake here.
+const D1_IN_CHUNK = 90
+
 // ─── Helper: generate uid ─────────────────────────────────────
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
@@ -3872,22 +3878,20 @@ async function planPosDepletion(
     }
 
     for (const d of res.deductions) {
-      const key = `${l.sold_date}|${d.item_type}|${d.item_id}`
+      // One running total per ingredient, per day, PER UNIT it was asked for in.
+      // Two lines can name the same ingredient in different units (a recipe in
+      // cans, another by the kilo); each unit is added up on its own here and
+      // converted into the bin's unit below, where the product's can weight and
+      // sub-unit are at hand. This used to convert the second unit onto the
+      // first with no product facts — which always failed for can ↔ kg — and
+      // then stored the failure with set(), so each later amount in that unit
+      // REPLACED the one before: a day's Arrabbiata tomatoes vanished whenever
+      // Rosé sauce, also by weight, was sold after it (found 2026-10-06).
+      const key = `${l.sold_date}|${d.item_type}|${d.item_id}|${String(d.unit || '').trim().toLowerCase()}`
       const cur = agg.get(key)
-      if (cur) {
-        // Two lines can name the same ingredient in different units (a recipe in
-        // g, a finished-product line in kg). Normalise onto whatever the first
-        // one used; the bin conversion below handles the rest.
-        if (sameUnitName(cur.unit, d.unit)) { cur.qty += d.qty }
-        else {
-          const conv = convertQty(d.qty, d.unit, cur.unit, null)
-          if (conv.error) { agg.set(key + '|' + d.unit, { ...d, sold_date: l.sold_date }) }
-          else cur.qty += conv.qty as number
-        }
-      } else {
-        agg.set(key, { sold_date: l.sold_date, item_id: d.item_id, item_type: d.item_type,
-                       item_name: d.item_name, qty: d.qty, unit: d.unit })
-      }
+      if (cur) cur.qty += d.qty
+      else agg.set(key, { sold_date: l.sold_date, item_id: d.item_id, item_type: d.item_type,
+                          item_name: d.item_name, qty: d.qty, unit: d.unit })
     }
   }
 
@@ -3910,6 +3914,9 @@ async function planPosDepletion(
   for (const p of (prodRows.results || []) as any[]) products.set(p.id, p)
 
   const movements: any[] = []
+  // After conversion every amount is in the bin's unit, so the per-unit totals
+  // of one ingredient on one day fold back into a single movement.
+  const moveByDayItem = new Map<string, any>()
   for (const a of agg.values()) {
     const binKey = a.item_type + '|' + a.item_id
     const bin    = bins.get(binKey)
@@ -3938,7 +3945,10 @@ async function planPosDepletion(
     const qty = Math.round((conv.qty as number) * 1e6) / 1e6
     if (!(qty > 0)) continue
 
-    movements.push({
+    const dayItem = `${a.sold_date}|${binKey}`
+    const already = moveByDayItem.get(dayItem)
+    if (already) { already.qty = Math.round((already.qty + qty) * 1e6) / 1e6; continue }
+    const move = {
       sold_date: a.sold_date,
       inventory_id: bin ? bin.id : '',
       item_id: a.item_id, item_type: a.item_type,
@@ -3949,7 +3959,9 @@ async function planPosDepletion(
       category: (bin && bin.category)
         || (prod && prod.category)
         || (a.item_type === 'batch' ? 'Batch' : a.item_type === 'finished_product' ? 'Finished Product' : ''),
-    })
+    }
+    moveByDayItem.set(dayItem, move)
+    movements.push(move)
   }
 
   for (const [key, msg] of lineErrors) {
@@ -4078,10 +4090,13 @@ app.post('/api/pos-imports/:id/commit', async (c) => {
   const refs = allLines.map(l => String(l.external_ref || '')).filter(Boolean)
   const seen = new Set<string>()
   if (refs.length) {
-    // Chunked: SQLite caps bound parameters, and a month of sales can be
-    // thousands of refs.
-    for (let i = 0; i < refs.length; i += 200) {
-      const chunk = refs.slice(i, i + 200)
+    // Chunked: D1 allows 100 bound values in one statement, and a month of
+    // sales can be thousands of refs. This asked for 200 at a time, so every
+    // file of 100 lines or more failed with "too many SQL variables" — a 500
+    // on Confirm & Import (found 2026-10-06 with a real week of sales; local
+    // SQLite allows 32,766, which is why no test saw it).
+    for (let i = 0; i < refs.length; i += D1_IN_CHUNK) {
+      const chunk = refs.slice(i, i + D1_IN_CHUNK)
       const marks = chunk.map(() => '?').join(',')
       const found = await c.env.DB.prepare(
         `SELECT external_ref FROM pos_sale_lines
@@ -4543,10 +4558,13 @@ app.post('/api/invoice-lines/:invoice_id/replace', async (c) => {
   const wantedIds = [...new Set((body.lines || [])
     .map(l => String(l.generic_product_id || '').trim()).filter(Boolean))]
   const ownIds = new Set<string>()
-  if (wantedIds.length) {
+  // Chunked for the same reason as the sales import: an invoice with a hundred
+  // linked lines would otherwise be one statement with too many bound values.
+  for (let i = 0; i < wantedIds.length; i += D1_IN_CHUNK) {
+    const chunk = wantedIds.slice(i, i + D1_IN_CHUNK)
     const found = await c.env.DB.prepare(
-      `SELECT id FROM generic_products WHERE id IN (${wantedIds.map(() => '?').join(',')}) AND org_id IS ?`
-    ).bind(...wantedIds, org).all<{ id: string }>()
+      `SELECT id FROM generic_products WHERE id IN (${chunk.map(() => '?').join(',')}) AND org_id IS ?`
+    ).bind(...chunk, org).all<{ id: string }>()
     for (const r of (found.results ?? [])) ownIds.add(r.id)
   }
 

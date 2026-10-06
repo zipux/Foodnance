@@ -684,6 +684,19 @@ the month back to the typed figure on its own.
 Known gap: a recipe left on `on_demand` can still be sent through Produce Batch,
 creating batch stock nothing draws down.
 
+**Two bugs found by the first realistic week of sales (2026-10-06), both invisible to
+every earlier test.** (1) *Any file of 100+ lines 500'd on Confirm & Import:* the duplicate
+pre-query put 200 refs in one `IN (…)` and D1 allows 100 bound values per statement
+("too many SQL variables"); local SQLite allows 32,766, and every test file had under 100
+lines. Lists are now cut with `D1_IN_CHUNK` (90) — use it for any `IN` built from a list.
+(2) *A product used in two units on the same day was under-deducted:* `planPosDepletion`
+tried to convert the second unit onto the first with no product facts (so can ↔ kg always
+failed) and stored the failure with `agg.set(...)`, each later amount replacing the one
+before. Deductions are now totalled per ingredient, day **and unit**, converted into the
+bin's unit with the product's sub-unit and can weight, then folded into one movement per
+ingredient per day. `tests/sub-unit-stock.test.mjs` pins both; the sandbox test sells one
+product by the can and twice by weight on the same day.
+
 ### Costing is derived, never stored
 Cost flows one way — `product_entries` → product → recipe → finished product —
 and every level is computed **at read time** from current invoice prices.

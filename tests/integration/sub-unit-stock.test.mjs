@@ -141,8 +141,17 @@ const pizza = (await call(u, 'POST', '/api/tables/finished_products',
   { name: 'Margherita Pizza', selling_price: 12, total_cost: 0 })).data.id;
 const line = (type, ref, name, q, unit) => call(u, 'POST', '/api/tables/finished_product_items',
   { finished_product_id: pizza, item_type: type, ref_id: ref, ref_name: name, quantity: q, unit, line_cost: 0 });
+// A second made-to-order recipe that also takes tomato BY WEIGHT. Two by-weight
+// amounts for one product on the same day is what the import used to get wrong:
+// it kept the last and dropped the ones before (found on a real week of sales,
+// 2026-10-06 — a day's Arrabbiata tomatoes vanished whenever Rosé was sold too).
+const soup = (await call(u, 'POST', '/api/tables/recipes',
+  { name: 'SS Soup', servings: 1, yield_unit: 'kg', total_cost: 0, production_mode: 'on_demand' })).data.id;
+await call(u, 'POST', '/api/tables/recipe_items',
+  { recipe_id: soup, product_id: tomato, product_name: 'SS Tomato', quantity: 500, unit: 'g', line_cost: 0 });
 await line('product', tomato, 'SS Tomato', 2, 'can');
 await line('recipe',  sauce,  'SS Sauce', 0.5, 'kg');
+await line('recipe',  soup,   'SS Soup', 0.4, 'kg');
 await line('product', olives, 'SS Olives', 1, 'can');
 await line('product', capers, 'SS Capers', 80, 'g');
 await line('product', beans,  'SS Beans', 100, 'g');
@@ -168,10 +177,11 @@ const commit = await call(u, 'POST', `/api/pos-imports/${importId}/commit`, { it
 t.check('the import lands despite the one it could not convert', commit.status === 200,
   `${commit.status} ${JSON.stringify(commit.data?.error)}`);
 
-// Tomato: 5 × 2 cans = 10 cans, plus 5 × 0.5 kg sauce × 400 g = 1000 g = 1.25 cans.
-// 11.25 cans ÷ 6 = 1.875 cases off a bin of 10.
-t.check('tomato, counted in cases: 10 → 8.125', t.near(await qtyOf(tomato), 8.125, 1e-5), `${await qtyOf(tomato)}`);
-t.check('and not the 10 → 0 a bare "10 cans = 10 cases" would give', (await qtyOf(tomato)) > 8);
+// Tomato: 5 × 2 cans = 10 cans; sauce 5 × 0.5 kg × 400 g = 1000 g = 1.25 cans; soup
+// 5 × 0.4 kg × 500 g = 1000 g = 1.25 cans. 12.5 cans ÷ 6 = 2.083333 cases off a bin of 10.
+t.check('tomato, counted in cases: 10 → 7.916667', t.near(await qtyOf(tomato), 10 - 12.5 / 6, 1e-5), `${await qtyOf(tomato)}`);
+t.check('both by-weight amounts came off, not only the last one', (await qtyOf(tomato)) < 8.0);
+t.check('and not the 10 → 0 a bare "10 cans = 10 cases" would give', (await qtyOf(tomato)) > 7.5);
 t.check('olives, counted in cans: 12 → 7', t.near(await qtyOf(olives), 7, 1e-5), `${await qtyOf(olives)}`);
 t.check('capers, counted in kg: 4.8 → 4.4', t.near(await qtyOf(capers), 4.4, 1e-5), `${await qtyOf(capers)}`);
 t.check('beans are left alone rather than guessed', t.near(await qtyOf(beans), 10, 1e-9), `${await qtyOf(beans)}`);

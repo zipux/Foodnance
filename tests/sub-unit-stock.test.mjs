@@ -165,4 +165,20 @@ t.check('the batch going in is checked along with the ingredients',
 t.check('a bad line records nothing and says so', /showToast\(`Batch not recorded\. \$\{e\.message\}`, 'error'\);\s*return;/.test(pb));
 t.check('what is checked is what is written (one list)', (pb.match(/upsertInventory\(/g) || []).length === 1);
 
+t.section('a sales import adds up every amount, in every unit');
+const salesPlan = backendSrc.slice(backendSrc.indexOf('for (const d of res.deductions)'), backendSrc.indexOf('for (const [key, msg] of lineErrors)'));
+t.check('one running total per ingredient, day AND unit', /\$\{l\.sold_date\}\|\$\{d\.item_type\}\|\$\{d\.item_id\}\|\$\{String\(d\.unit/.test(salesPlan));
+t.check('an amount is always added, never set over the one before', /if \(cur\) cur\.qty \+= d\.qty/.test(salesPlan) && !/agg\.set\(key \+ '\|'/.test(salesPlan));
+t.check('no conversion is attempted without the product\'s facts', !/convertQty\([^)]*, null\)/.test(salesPlan));
+t.check('the per-unit totals fold back into one movement per ingredient per day',
+  /moveByDayItem\.get\(dayItem\)/.test(salesPlan) && /already\.qty = Math\.round\(\(already\.qty \+ qty\)/.test(salesPlan));
+
+t.section('lists sent to the database stay under its 100-value limit');
+t.check('the chunk size leaves room for the other bound values', /const D1_IN_CHUNK = 90\b/.test(backendSrc));
+const lists = [...backendSrc.matchAll(/IN \(\$\{(\w+)\.map\(\(\) => '\?'\)\.join\(','\)\}\)/g)].map(m => m[1])
+  .concat([...backendSrc.matchAll(/const marks = (\w+)\.map\(\(\) => '\?'\)/g)].map(m => m[1]));
+t.check('every such list is a chunk', lists.length >= 2 && lists.every(n => n === 'chunk'), lists.join(', '));
+t.check('and every chunk is cut with D1_IN_CHUNK', (backendSrc.match(/\.slice\(i, i \+ D1_IN_CHUNK\)/g) || []).length >= 2
+  && !/\.slice\(i, i \+ 200\)/.test(backendSrc));
+
 t.done();
