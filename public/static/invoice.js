@@ -886,6 +886,7 @@ async function saveQuickInvoice() {
       invoice_ref: r.invoice_ref || '',
       original_ocr: originalGptNames[idx] || r._original_ocr || '',
       auto_mapped: !!r._auto_mapped,
+      ...(r._pack_was ? { pack_was: r._pack_was } : {}),
     })),
     warnings: invoiceWarnings.slice(),
     file_name: currentFileName || '',
@@ -1267,6 +1268,18 @@ function vendorNamesMatch(storedVendor, currentVendorName) {
   return aWords.some(w => b.includes(w)) || bWords.some(w => a.includes(w));
 }
 
+// True only when both are filled in and say different things ("5 kg" vs
+// "10 kg"); spacing, case and "5.0" vs "5" are not a difference.
+function packSizeDiffers(a, b) {
+  const key = s => {
+    const t = String(s || '').toLowerCase().replace(/\s+/g, '');
+    const m = t.match(/^(\d*\.?\d+)(.*)$/);
+    return m ? parseFloat(m[1]) + m[2] : t;
+  };
+  const x = key(a), y = key(b);
+  return !!x && !!y && x !== y;
+}
+
 async function applyProductMappings(vendor) {
   if (!vendor || !vendor.trim()) return;
   try {
@@ -1289,7 +1302,13 @@ async function applyProductMappings(vendor) {
         row.name      = match.corrected_name;
         row.brand     = match.corrected_brand     || row.brand;
         row.sku       = match.corrected_sku       || row.sku;
-        row.pack_size = match.corrected_pack_size || row.pack_size;
+        // The remembered pack fills a gap; it no longer overrules the page. A
+        // supplier that moves from 5 kg to 10 kg cases used to arrive as 5 kg
+        // with no sign of it (half the stock, double the price per kg). When
+        // the two differ the printed pack stays and the review screen asks.
+        const remembered = match.corrected_pack_size || '';
+        if (packSizeDiffers(remembered, row.pack_size)) row._pack_was = remembered;
+        else row.pack_size = remembered || row.pack_size;
         row._auto_mapped = true;
       }
     });

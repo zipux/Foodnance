@@ -435,6 +435,20 @@ the absorbed product was worth $0 once its purchases had moved (a $6,197 count r
 The line keeps its own unit and quantity. Not retroactive: lines orphaned by a merge made
 before this still point at the archived product. `npm run test:merge`.
 
+### A supplier's pack-size change is flagged, not overwritten (2026-10-06)
+
+Every approved line is remembered per supplier (`product_mappings`, pack size included), and
+`applyProductMappings()` on the upload page used to put the remembered pack over whatever
+was just read: spaghetti printed as 10 kg arrived as 5 kg with no warning (half the stock,
+double the price per kg). Now the remembered pack only fills a gap. When both exist and
+differ (`packSizeDiffers`: spacing, case and "5.0" vs "5" are not a difference) the printed
+pack stays, the old one travels with the line as `parsed_data.items[].pack_was`, and the
+review screen highlights the line: "Pack size changed? Last time 5 kg, this invoice says
+10 kg", **Keep** / **Use** (`keepPrintedPack` / `useRememberedPack` in `invoices.js`).
+Saving is not blocked; ignoring the flag keeps the printed pack. The cost, accepted by the
+user: a pack the AI misreads every time (bottled drinks) is no longer corrected silently, it
+is flagged each time and takes one click. `tests/pack-size-change.test.mjs`.
+
 ### Tests
 
 ```bash

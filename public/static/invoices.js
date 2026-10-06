@@ -806,6 +806,9 @@ async function loadAndRenderLines(invoiceId) {
         line_total:   parseFloat(it.cost)       || 0,
         _original_ocr: it.original_ocr || '',
         _auto_mapped:  !!it.auto_mapped,
+        // The pack remembered for this supplier's item, when this invoice shows
+        // a different one (set by applyProductMappings on the upload page).
+        ...(it.pack_was ? { _pack_was: it.pack_was } : {}),
         // A product link the operator accepted before releasing (see
         // workingCopyToParsed) — the same fields the manual link flow sets.
         ...(it.link_product_id ? { _link_product_id: it.link_product_id, _link_product_name: it.link_product_name || '' } : {}),
@@ -875,6 +878,27 @@ function dismissProductMatch(idx) {
   delete line._nameMatch;
   renderLinesTable();
 }
+// "Pack size changed?" — the line already shows the pack printed on this
+// invoice. Keep it, or put back the one remembered from last time.
+function keepPrintedPack(idx) {
+  const line = currentLines[idx];
+  if (!line || !line._pack_was) return;
+  delete line._pack_was;
+  renderLinesTable();
+  showToast(`${[line.pack_qty, line.pack_unit].filter(Boolean).join(' ')} kept. It will be remembered for next time.`, 'success');
+}
+function useRememberedPack(idx) {
+  const line = currentLines[idx];
+  if (!line || !line._pack_was) return;
+  const { pack_qty, pack_unit } = parsePackaging(line._pack_was);
+  line.pack_qty = pack_qty; line.pack_unit = pack_unit;
+  const was = line._pack_was;
+  delete line._pack_was;
+  renderLinesTable();
+  showToast(`Changed back to ${was}.`, 'success');
+}
+window.keepPrintedPack   = keepPrintedPack;
+window.useRememberedPack = useRememberedPack;
 window.acceptProductMatch  = acceptProductMatch;
 window.dismissProductMatch = dismissProductMatch;
 
@@ -1272,7 +1296,7 @@ function renderLinesTable() {
   }
 
   tbody.innerHTML = currentLines.map((l, i) => `
-    <tr data-idx="${i}">
+    <tr data-idx="${i}"${l._pack_was ? ' style="background:#fffbeb"' : ''}>
       <td>
         <div style="display:flex;align-items:center;gap:.2rem">
           <input type="text" class="line-input" data-idx="${i}" data-f="product_name" value="${esc(l.product_name||'')}" title="${esc(l.product_name||'')}" placeholder="Product" style="width:110px"/>
@@ -1296,6 +1320,13 @@ function renderLinesTable() {
             <a href="#" onclick="acceptProductMatch(${i});return false" style="font-weight:600">Use it</a>
             <a href="#" onclick="dismissProductMatch(${i});return false">No</a>
           </div>` : '')}
+        ${l._pack_was ? `
+          <div class="pack-changed" style="font-size:.68rem;color:#92400e;margin-top:.15rem;display:flex;align-items:center;gap:.25rem;flex-wrap:wrap">
+            <i class="fas fa-box-open"></i>
+            <span><strong>Pack size changed?</strong> Last time ${esc(l._pack_was)}, this invoice says ${esc([l.pack_qty, l.pack_unit].filter(Boolean).join(' '))}.</span>
+            <a href="#" onclick="keepPrintedPack(${i});return false" style="font-weight:600">Keep ${esc([l.pack_qty, l.pack_unit].filter(Boolean).join(' '))}</a>
+            <a href="#" onclick="useRememberedPack(${i});return false">Use ${esc(l._pack_was)}</a>
+          </div>` : ''}
       </td>
       <td><input type="text"   class="line-input" data-idx="${i}" data-f="vendor_item"  value="${esc(l.vendor_item ||'')}" placeholder="Vendor item" style="width:110px"/></td>
       <td><input type="text"   class="line-input" data-idx="${i}" data-f="item_code"    value="${esc(l.item_code   ||'')}" placeholder="Code" style="width:72px"/></td>
@@ -2105,6 +2136,7 @@ function workingCopyToParsed() {
       unit_price:   price,
       cost:         price * qty,
       auto_mapped:  !!l._auto_mapped,
+      ...(l._pack_was ? { pack_was: l._pack_was } : {}),
       ...(l._link_product_id ? { link_product_id: l._link_product_id, link_product_name: l._link_product_name || '' } : {}),
     };
   });
