@@ -419,6 +419,22 @@ number alone blocked, so two suppliers both numbering from #1001 collided. Still
 browser-side only (the server doesn't re-check on save), unchanged by decision.
 `npm run test:duplicate`.
 
+### Merging or grouping products converts the stock (2026-10-06)
+
+`mergeInto()` used to pool two bins with `quantity = quantity + ?`: 10 lb of mozzarella
+merged into a bin counted in kg became 10 kg. `mergedStockIn()` now converts the absorbed
+bin into the survivor's unit (`convertQty`, trying the survivor's weight / sub-unit facts
+first, then the absorbed product's) and the survivor gets one `stock_log` line
+(`reason='Merged product'`, `reason_code='correction'`) so "Stock after" still adds up.
+When nothing bridges the units the merge is **refused with 409** (`MergeRefused`) before
+any write; an empty bin merges freely. Group checks every bin up front, because the group
+as a whole is not one transaction and must not stop half-way with the survivor renamed.
+A merge also re-points **past count lines** (`stock_take_items`) to the survivor: a count is
+valued at read time from the purchases of the product each line points at, so a line left on
+the absorbed product was worth $0 once its purchases had moved (a $6,197 count read $6,145).
+The line keeps its own unit and quantity. Not retroactive: lines orphaned by a merge made
+before this still point at the archived product. `npm run test:merge`.
+
 ### Tests
 
 ```bash

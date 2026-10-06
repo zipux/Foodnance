@@ -5603,6 +5603,39 @@ async function buildExplodeCtx(db: D1Database, org: string | null): Promise<Expl
 // invoices using that wording route into the survivor. It is written inside the
 // same transaction as the merge, so an absorbed product can never end up live
 // history-less AND un-aliased.
+// A merge that cannot be done safely. Routes answer 409 with the message.
+class MergeRefused extends Error {}
+
+// What an absorbed product's stock is worth in the survivor's unit.
+// Merging used to add the two bins' bare numbers: 10 lb of mozzarella merged
+// into a bin counted in kg became 10 kg (found 2026-10-06 — 5.46 kg of stock
+// that did not exist). It is now converted, with whichever product's facts
+// bridge the two units (can weight, cans per case); and when nothing bridges
+// them the merge is refused rather than guessed, because a wrong shelf number
+// surfaces weeks later as a count nobody can explain. An empty bin merges
+// freely — there is nothing to convert.
+async function mergedStockIn(
+  db: D1Database, merged: { id: string; name: string }, surviving: { id: string; name: string },
+  mergedInv: { quantity: number; unit: string | null }, survivingUnit: string | null, org: string | null,
+): Promise<{ qty: number; error?: undefined } | { qty?: undefined; error: string }> {
+  const qty = Number(mergedInv.quantity) || 0
+  const from = String(mergedInv.unit || '').trim(), to = String(survivingUnit || '').trim()
+  if (qty === 0 || !from || !to || sameUnitName(from, to)) return { qty }
+  const facts = await db.prepare(
+    `SELECT id, avg_weight_per_unit, sub_unit_name, sub_unit_qty FROM generic_products WHERE id IN (?, ?) AND org_id IS ?`,
+  ).bind(surviving.id, merged.id, org).all<{ id: string; avg_weight_per_unit: number | null; sub_unit_name: string | null; sub_unit_qty: number | null }>()
+  const rows = facts.results ?? []
+  for (const id of [surviving.id, merged.id]) {            // the survivor's facts first: they are the ones that stay
+    const f = rows.find(r => r.id === id)
+    const conv = convertQty(qty, from, to, f?.avg_weight_per_unit != null ? Number(f.avg_weight_per_unit) : null, subUnitOf(f))
+    if (conv.qty !== undefined) return { qty: Math.round(conv.qty * 1e6) / 1e6 }
+  }
+  return {
+    error: `"${merged.name}" is counted in ${from} and "${surviving.name}" in ${to}, and the app can't turn one into the other. ` +
+           `Change the stocking unit of one of them so they match, then merge again.`,
+  }
+}
+
 async function mergeInto(
   db: D1Database,
   merged: { id: string; name: string },
@@ -5615,12 +5648,20 @@ async function mergeInto(
   // five separate awaits, and when one failed the earlier ones had already
   // committed — the purchase history moved to the survivor while the absorbed
   // product stayed live, empty and un-aliased, with the user shown only a 500.
-  const mergedInv = await db.prepare('SELECT id, quantity FROM inventory WHERE item_id = ? AND org_id IS ?')
-    .bind(merged.id, org).first<{ id: string; quantity: number }>()
+  const mergedInv = await db.prepare('SELECT id, quantity, unit FROM inventory WHERE item_id = ? AND org_id IS ?')
+    .bind(merged.id, org).first<{ id: string; quantity: number; unit: string | null }>()
   const survivingInv = mergedInv
-    ? await db.prepare('SELECT id FROM inventory WHERE item_id = ? AND org_id IS ?')
-        .bind(surviving.id, org).first<{ id: string }>()
+    ? await db.prepare('SELECT id, unit FROM inventory WHERE item_id = ? AND org_id IS ?')
+        .bind(surviving.id, org).first<{ id: string; unit: string | null }>()
     : null
+  // The absorbed bin's stock, expressed in the survivor's unit. Refused (before
+  // any write) when the two units can't be bridged — see mergedStockIn().
+  let pooled = 0
+  if (mergedInv && survivingInv) {
+    const moved = await mergedStockIn(db, merged, surviving, mergedInv, survivingInv.unit, org)
+    if (moved.error !== undefined) throw new MergeRefused(moved.error)
+    pooled = moved.qty
+  }
   const alias    = (aliasName || '').trim()
   const aliasDup = alias
     ? await db.prepare(
@@ -5638,11 +5679,22 @@ async function mergeInto(
   // 2. Merge inventory rows (pool the stock into one bin)
   if (mergedInv && survivingInv) {
     writes.push(
-      db.prepare('UPDATE inventory SET quantity = quantity + ? WHERE item_id = ? AND org_id IS ?')
-        .bind(mergedInv.quantity, surviving.id, org),
+      db.prepare('UPDATE inventory SET quantity = ROUND(quantity + ?, 6) WHERE item_id = ? AND org_id IS ?')
+        .bind(pooled, surviving.id, org),
       db.prepare('DELETE FROM inventory WHERE item_id = ? AND org_id IS ?')
         .bind(merged.id, org),
     )
+    // The survivor's shelf just changed, so its log gets a line saying why —
+    // otherwise "Stock after" on every earlier line is off by this amount.
+    if (pooled !== 0) {
+      writes.push(db.prepare(
+        `INSERT INTO stock_log
+           (id, inventory_id, item_id, item_type, item_name, change, reason, reason_code, note, lot_number, moved_at, org_id)
+         VALUES (?, ?, ?, 'raw_material', ?, ?, 'Merged product', 'correction', ?, '', ?, ?)`,
+      ).bind(uid(), survivingInv.id, surviving.id, surviving.name, pooled,
+             `Stock of "${merged.name}": ${Number(mergedInv.quantity) || 0} ${mergedInv.unit || ''}`.trim(),
+             new Date().toISOString(), org))
+    }
   } else if (mergedInv) {
     // No surviving inventory row — reassign the merged row
     writes.push(db.prepare('UPDATE inventory SET item_id = ?, item_name = ? WHERE item_id = ? AND org_id IS ?')
@@ -5672,6 +5724,13 @@ async function mergeInto(
     db.prepare('UPDATE product_mappings SET corrected_name = ? WHERE LOWER(TRIM(corrected_name)) = LOWER(TRIM(?)) AND org_id IS ?')
       .bind(surviving.name, merged.name, org),
     db.prepare('UPDATE stock_log SET item_id = ?, item_name = ? WHERE item_id = ? AND org_id IS ?')
+      .bind(surviving.id, surviving.name, merged.id, org),
+    // Past count lines too. A count is valued at read time from the purchases
+    // of the product each line points at; those purchases have just moved, so a
+    // line left on the absorbed product would be worth $0 from now on and the
+    // count (and any month it opens or closes) would lose that stock. The line
+    // keeps its own unit and quantity — the valuation converts per line.
+    db.prepare("UPDATE stock_take_items SET item_id = ?, item_name = ? WHERE item_id = ? AND item_type = 'raw_material' AND org_id IS ?")
       .bind(surviving.id, surviving.name, merged.id, org),
   )
 
@@ -5733,7 +5792,12 @@ app.post('/api/products/merge', async (c) => {
 
   // Both sides resolved within this business, so a cross-business merge is
   // impossible: one of them simply isn't found.
-  await mergeInto(c.env.DB, merged, surviving, org)
+  try {
+    await mergeInto(c.env.DB, merged, surviving, org)
+  } catch (e) {
+    if (e instanceof MergeRefused) return c.json({ error: e.message }, 409)
+    throw e
+  }
   return c.json({ ok: true, merged_name: merged.name, surviving_name: surviving.name })
 })
 
@@ -5764,6 +5828,24 @@ app.post('/api/products/group', async (c) => {
   // Survivor: prefer one already named general_name, else the first selected. It
   // is renamed to the umbrella name; the rest are merged into it.
   const survivor = products.find(p => p.name.trim().toLowerCase() === generalName.toLowerCase()) || products[0]
+
+  // Check every bin BEFORE the first write. Each merge below is atomic, but the
+  // group is not: a product whose stock can't be converted must stop the whole
+  // group, not leave it half done with the survivor already renamed.
+  {
+    const binOf = (id: string) => c.env.DB.prepare('SELECT quantity, unit FROM inventory WHERE item_id = ? AND org_id IS ?')
+      .bind(id, org).first<{ quantity: number; unit: string | null }>()
+    let unit = (await binOf(survivor.id))?.unit ?? null     // null: no bin yet — the first absorbed bin becomes it
+    for (const p of products) {
+      if (p.id === survivor.id) continue
+      const bin = await binOf(p.id)
+      if (!bin) continue
+      if (unit === null) { unit = bin.unit; continue }
+      const moved = await mergedStockIn(c.env.DB, p, { id: survivor.id, name: generalName }, bin, unit, org)
+      if (moved.error !== undefined) return c.json({ error: moved.error }, 409)
+    }
+  }
+
   if (survivor.name.trim().toLowerCase() !== generalName.toLowerCase()) {
     await cascadeRename(c.env.DB, survivor.id, survivor.name, generalName, org)
   }

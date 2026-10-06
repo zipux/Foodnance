@@ -83,6 +83,8 @@ const created = await post(admin, '/api/admin/organizations', {
   name: ORG.name, owner_email: ORG.email, owner_password: ORG.password, account_type: 'restaurant',
 });
 t.check('test restaurant created', created.status === 200, JSON.stringify(created.data));
+// Pro, so the past-count case below can write a stock take.
+await post(admin, `/api/admin/organizations/${created.data?.organization?.id}/plan`, { plan: 'pro' });
 
 const own = jar();
 await post(own, '/api/auth/login', { email: ORG.email, password: ORG.password });
@@ -208,6 +210,68 @@ t.check('the absorbed name is remembered as an alias', aliases.length === 1,
   JSON.stringify(aliases.map(a => a.alias_name)));
 t.check('and it is the name that was absorbed',
   aliases[0]?.alias_name === absorbed?.name, `${aliases[0]?.alias_name} vs ${absorbed?.name}`);
+
+// ── Stock in different units is converted, never added as bare numbers ──
+// Found 2026-10-06: 10 lb merged into a bin counted in kg became 10 kg.
+async function mkBin(id, name, qty, unit) {
+  await post(own, '/api/tables/inventory', { item_id: id, item_type: 'raw_material', item_name: name, quantity: qty, unit });
+}
+const binOf = async id => (await rows('inventory')).find(r => r.item_id === id);
+const lbId = await mkProduct(`Mozz lb ${STAMP}`), kgId = await mkProduct(`Mozz kg ${STAMP}`);
+await mkBin(lbId, `Mozz lb ${STAMP}`, 10, 'lb');
+await mkBin(kgId, `Mozz kg ${STAMP}`, 100, 'kg');
+const conv = await post(own, '/api/products/merge', { merged_id: lbId, surviving_id: kgId });
+t.check('a lb bin merges into a kg bin', conv.status === 200, `status ${conv.status} · ${JSON.stringify(conv.data)}`);
+const convBin = await binOf(kgId);
+t.check('10 lb arrives as 4.535924 kg, not 10 kg',
+  Math.abs(Number(convBin?.quantity) - 104.535924) < 1e-5, `quantity ${convBin?.quantity}`);
+const convLog = (await rows('stock_log')).filter(l => l.item_id === kgId && l.reason === 'Merged product');
+t.check('the survivor gets one log line for the stock that came in',
+  convLog.length === 1 && Math.abs(Number(convLog[0].change) - 4.535924) < 1e-5, JSON.stringify(convLog.map(l => l.change)));
+
+// ── A past count keeps its value after a merge ──
+// Found 2026-10-06: the count line stayed on the absorbed product, whose
+// purchases had moved away, so the line (and the count) lost its value.
+const pcA = await mkProduct(`Count dup ${STAMP}`), pcB = await mkProduct(`Count real ${STAMP}`);
+await mkEntry(pcA, `Count dup ${STAMP}`, 'Sacco Foods', 12.50);
+const pcTake = await post(own, '/api/tables/stock_takes', { status: 'submitted', submitted_at: '2026-08-02T10:00:00.000Z' });
+const pcTakeId = pcTake.data?.data?.id || pcTake.data?.id;
+const pcLine = await post(own, '/api/tables/stock_take_items', {
+  stock_take_id: pcTakeId, inventory_id: '', item_id: pcA, item_type: 'raw_material', item_name: `Count dup ${STAMP}`,
+  unit: 'kg', expected_qty: 4, counted_qty: 4, category: 'Dry Goods',
+});
+t.check('fixture: a submitted count with a line for the duplicate',
+  !!pcTakeId && (pcLine.status === 200 || pcLine.status === 201), `take ${pcTake.status} · line ${pcLine.status} ${JSON.stringify(pcLine.data)}`);
+const pcMerge = await post(own, '/api/products/merge', { merged_id: pcA, surviving_id: pcB });
+const pcAfter = (await rows('stock_take_items')).find(r => r.stock_take_id === pcTakeId);
+t.check('the past count line now points at the surviving product',
+  pcMerge.status === 200 && pcAfter?.item_id === pcB && pcAfter?.item_name === `Count real ${STAMP}`,
+  `status ${pcMerge.status} · ${pcAfter?.item_id} ${pcAfter?.item_name}`);
+t.check('and keeps its own quantity and unit', Number(pcAfter?.counted_qty) === 4 && pcAfter?.unit === 'kg');
+
+const eaId = await mkProduct(`Odd each ${STAMP}`), kg2Id = await mkProduct(`Odd kg ${STAMP}`);
+await mkBin(eaId, `Odd each ${STAMP}`, 7, 'each');
+await mkBin(kg2Id, `Odd kg ${STAMP}`, 3, 'kg');
+const refused = await post(own, '/api/products/merge', { merged_id: eaId, surviving_id: kg2Id });
+t.check('units that cannot be converted: the merge is refused with 409', refused.status === 409,
+  `status ${refused.status} · ${JSON.stringify(refused.data)}`);
+t.check('the refusal names both units in plain words',
+  /counted in each/.test(refused.data?.error || '') && /in kg/.test(refused.data?.error || ''), refused.data?.error);
+t.check('and nothing moved: both bins are as they were',
+  Number((await binOf(eaId))?.quantity) === 7 && Number((await binOf(kg2Id))?.quantity) === 3);
+t.check('and the product was not archived',
+  !(await rows('generic_products')).find(g => g.id === eaId)?.deleted_at);
+
+const grpRefused = await post(own, '/api/products/group', { general_name: `Odd group ${STAMP}`, product_ids: [kg2Id, eaId] });
+t.check('a group with a bin that cannot be converted is refused before anything is renamed',
+  grpRefused.status === 409 && (await rows('generic_products')).find(g => g.id === kg2Id)?.name === `Odd kg ${STAMP}`,
+  `status ${grpRefused.status}`);
+
+const emptyId = await mkProduct(`Empty each ${STAMP}`);
+await mkBin(emptyId, `Empty each ${STAMP}`, 0, 'each');
+const emptyOk = await post(own, '/api/products/merge', { merged_id: emptyId, surviving_id: kg2Id });
+t.check('an empty bin merges whatever its unit', emptyOk.status === 200 && Number((await binOf(kg2Id))?.quantity) === 3,
+  `status ${emptyOk.status}`);
 
 // ── Guards that must still refuse ────────────────────────────────
 const self = await post(own, '/api/products/merge', { merged_id: realId, surviving_id: realId });
