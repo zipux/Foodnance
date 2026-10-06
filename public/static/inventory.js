@@ -32,13 +32,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('logModal').addEventListener('click', e => {
     if (e.target === document.getElementById('logModal')) closeModal('logModal');
   });
-  document.getElementById('applyLogFilterBtn').addEventListener('click', () => renderLogTable());
-  document.getElementById('clearLogFilterBtn').addEventListener('click', () => {
-    document.getElementById('logDateFrom').value = '';
-    document.getElementById('logDateTo').value   = '';
-    renderLogTable();
+  document.getElementById('logDateFrom').addEventListener('change', () => reloadLog());
+  document.getElementById('logDateTo').addEventListener('change',   () => reloadLog());
+  let logSearchTimer = null;
+  document.getElementById('logSearch').addEventListener('input', () => {
+    clearTimeout(logSearchTimer);
+    logSearchTimer = setTimeout(() => reloadLog(), 300);
   });
-  document.getElementById('clearLogBtn').addEventListener('click', clearStockLog);
   document.getElementById('logLoadMoreBtn').addEventListener('click', loadOlderLogEntries);
 
   // Adjust modal
@@ -338,6 +338,7 @@ function renderInventory() {
         <td style="color:var(--text-muted);font-size:.8rem">${updated}</td>
         <td style="white-space:nowrap">
           ${stockButtonsHtml(r)}
+          ${historyButtonHtml(r)}
           <button class="btn btn-danger btn-icon" onclick="deleteInventoryItem('${esc(r.id)}', this.dataset.name)" data-name="${esc(r.item_name)}" title="Delete item">
             <i class="fas fa-trash"></i>
           </button>
@@ -359,6 +360,14 @@ function stockButtonsHtml(r) {
   }
   return `<button class="btn btn-secondary btn-sm" onclick="openAdjustModal('${esc(r.id)}', 'waste')">Record waste</button>
           <button class="btn btn-secondary btn-sm" onclick="openAdjustModal('${esc(r.id)}', 'recount')">Recount</button>`;
+}
+
+// The log, opened on this one item.
+function historyButtonHtml(r) {
+  return `<button class="btn btn-secondary btn-icon" onclick="openLogModal({ inventoryId: '${esc(r.id)}', name: this.dataset.name })"
+                  data-name="${esc(r.item_name)}" title="History of this item" aria-label="History of this item">
+            <i class="fas fa-clock-rotate-left"></i>
+          </button>`;
 }
 
 function buildPriceCell(r) {
@@ -866,143 +875,191 @@ async function applyAdjustment() {
 }
 
 // ── Stock Log Modal ────────────────────────────────────────────
-// Newest movement first. The log opens on the latest 500 (the server's limit per
-// request); "Load older movements" fetches the next 500 each time it is pressed.
-const LOG_BATCH = 500;
-let allLogEntries   = []; // cached after first fetch
-let logBatchesLoaded = 0;
-let logHasOlder      = false;
+// Opens on the last 30 days, newest first. Every filter — dates, one item, the
+// kind of movement — is applied by the server (GET /api/stock-log), so the
+// answer is complete whatever is asked: the old log filtered the latest 500
+// lines in the browser and said "No movements found" for older ones.
+const LOG_DAYS = 30;
+const LOG_KINDS = [
+  { key: '',           label: 'All' },
+  { key: 'delivery',   label: 'Deliveries' },
+  { key: 'sales',      label: 'Sales' },
+  { key: 'waste',      label: 'Waste' },
+  { key: 'count',      label: 'Counts' },
+  { key: 'production', label: 'Production' },
+];
+let allLogEntries = [];
+let logHasMore    = false;   // more lines inside the current dates
+let logKind       = '';
+let logItem       = null;    // { inventoryId, name } when opened on one item
+let logRequest    = 0;       // guards against an older answer landing last
 
-async function fetchLogBatch(n) {
-  const data = await apiGet(`tables/${LOG_TABLE}?page=${n}&limit=${LOG_BATCH}`);
-  const rows = data.data || [];
-  logHasOlder = rows.length === LOG_BATCH;
-  return rows;
+const logYmd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+// A date box holds a day on THIS device's clock; the server compares instants.
+const logDayStart = ymd => new Date(ymd + 'T00:00:00').toISOString();
+const logDayEnd   = ymd => new Date(ymd + 'T23:59:59.999').toISOString();
+
+function logQuery(offset) {
+  const p = new URLSearchParams();
+  const from = document.getElementById('logDateFrom').value;
+  const to   = document.getElementById('logDateTo').value;
+  if (from) p.set('from', logDayStart(from));
+  if (to)   p.set('to', logDayEnd(to));
+  if (logKind) p.set('kind', logKind);
+  if (logItem) p.set('inventory_id', logItem.inventoryId);
+  const q = document.getElementById('logSearch').value.trim();
+  if (q && !logItem) p.set('q', q);
+  if (offset) p.set('offset', String(offset));
+  return p.toString();
 }
 
+// `item`: { inventoryId, name } opens the log on that one item (History on a row).
+async function openLogModal(item) {
+  logItem = (item && item.inventoryId) ? item : null;
+  logKind = '';
+  const today = new Date();
+  document.getElementById('logDateTo').value   = logYmd(today);
+  document.getElementById('logDateFrom').value = logYmd(new Date(today.getFullYear(), today.getMonth(), today.getDate() - LOG_DAYS));
+  document.getElementById('logSearch').value   = '';
+  renderLogFilters();
+  openModal('logModal');
+  await reloadLog();
+}
+
+function renderLogFilters() {
+  document.getElementById('logKinds').innerHTML = LOG_KINDS.map(k =>
+    `<button type="button" class="log-kind ${k.key === logKind ? 'on' : ''}" data-kind="${k.key}">${k.label}</button>`).join('');
+  document.querySelectorAll('#logKinds .log-kind').forEach(b => b.addEventListener('click', () => {
+    logKind = b.dataset.kind;
+    renderLogFilters();
+    reloadLog();
+  }));
+  const tag = document.getElementById('logItemTag');
+  const search = document.getElementById('logSearch');
+  if (logItem) {
+    tag.innerHTML = `Only: ${esc(logItem.name)} <button type="button" title="Show every item" aria-label="Show every item">&times;</button>`;
+    tag.classList.remove('hidden');
+    tag.querySelector('button').addEventListener('click', () => { logItem = null; renderLogFilters(); reloadLog(); });
+    search.classList.add('hidden');
+  } else {
+    tag.classList.add('hidden');
+    search.classList.remove('hidden');
+  }
+}
+
+async function reloadLog() {
+  const mine = ++logRequest;
+  const tbody = document.getElementById('logBody');
+  tbody.innerHTML = '<tr><td colspan="5" class="empty-row"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>';
+  try {
+    const data = await apiGet(`stock-log?${logQuery(0)}`);
+    if (mine !== logRequest) return;
+    allLogEntries = data.data || [];
+    logHasMore    = !!data.has_more;
+  } catch (e) {
+    if (mine !== logRequest) return;
+    allLogEntries = [];
+    logHasMore    = false;
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-row">Could not load the log. Check your connection and try again.</td></tr>';
+    return;
+  }
+  renderLogTable();
+}
+
+// One button, two jobs: more lines inside the dates shown when there are any,
+// otherwise the 30 days before them.
 async function loadOlderLogEntries() {
   const btn = document.getElementById('logLoadMoreBtn');
   btn.disabled = true;
   try {
-    const rows = await fetchLogBatch(logBatchesLoaded + 1);
-    logBatchesLoaded++;
-    // By id, so a movement recorded between two requests can't appear twice.
-    const seen = new Set(allLogEntries.map(l => l.id));
-    allLogEntries = allLogEntries.concat(rows.filter(l => !seen.has(l.id)));
-    renderLogTable();
+    if (logHasMore) {
+      const data = await apiGet(`stock-log?${logQuery(allLogEntries.length)}`);
+      // By id, so a movement recorded between two requests can't appear twice.
+      const seen = new Set(allLogEntries.map(l => l.id));
+      allLogEntries = allLogEntries.concat((data.data || []).filter(l => !seen.has(l.id)));
+      logHasMore = !!data.has_more;
+      renderLogTable();
+    } else {
+      const fromEl = document.getElementById('logDateFrom');
+      const cur = fromEl.value ? new Date(fromEl.value + 'T00:00:00') : new Date();
+      fromEl.value = logYmd(new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() - LOG_DAYS));
+      await reloadLog();
+    }
   } catch (e) {
     showToast('Could not load older movements. Please try again.', 'error');
   }
   btn.disabled = false;
 }
 
-async function openLogModal() {
-  openModal('logModal');
-  // Reset filters on fresh open
-  document.getElementById('logDateFrom').value = '';
-  document.getElementById('logDateTo').value   = '';
-  await fetchLogEntries();
-  renderLogTable();
-}
-
-async function fetchLogEntries() {
-  const tbody = document.getElementById('logBody');
-  tbody.innerHTML = '<tr><td colspan="6" class="empty-row"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>';
-  try {
-    allLogEntries    = await fetchLogBatch(1); // the server lists newest first
-    logBatchesLoaded = 1;
-  } catch (e) {
-    allLogEntries = [];
-    logHasOlder   = false;
-    tbody.innerHTML = '<tr><td colspan="6" class="empty-row">Failed to load log.</td></tr>';
+const LOG_WASTE_WORDS = {
+  spillage: 'spillage', breakage: 'breakage', staff_meal: 'staff meal', sample: 'sample / comp',
+  menu_testing: 'menu testing', theft: 'theft / loss', other: 'other',
+};
+// What a line says happened, and the page that shows where it came from.
+function logWhatHtml(l) {
+  let text, link = '';
+  const count = l.stock_take_id
+    ? ` <a class="log-link" href="/stock-take.html?history=1&open=${encodeURIComponent(l.stock_take_id)}">Open count</a>` : '';
+  if (l.kind === 'sales') {
+    // Taken off by a sales import, or put back when one was undone / redone.
+    text = /voided/i.test(l.reason) ? 'Sales, import undone' : /restored/i.test(l.reason) ? 'Sales, import put back' : 'Sales';
+    link = ' <a class="log-link" href="/sales.html">Open sales</a>';
+    // The note on these lines is the import's internal id; it means nothing to a customer.
+    return `${text}${link}`;
+  } else if (l.kind === 'waste') {
+    text = `Waste, ${esc(LOG_WASTE_WORDS[l.reason_code] || l.reason || 'other')}`;
+    link = count;
+  } else if (l.kind === 'count') {
+    text = l.take_kind === 'recount' ? 'Recount' : 'Stock count';
+    link = count;
+  } else if (l.kind === 'delivery') {
+    text = l.invoice_number ? `Delivery, invoice ${esc(l.invoice_number)}` : `Delivery${l.reason ? ` · ${esc(l.reason)}` : ''}`;
+    if (l.invoice_id) link = ` <a class="log-link" href="/invoices.html?open=${encodeURIComponent(l.invoice_id)}">Open invoice</a>`;
+  } else {
+    text = esc(l.reason || (l.reason_code ? adjustReasonLabel(l.reason_code) : 'Manual adjustment'));
   }
+  return `${text}${link}${l.note ? `<div class="log-sub">${esc(l.note)}</div>` : ''}`;
 }
 
 function renderLogTable() {
-  const tbody   = document.getElementById('logBody');
-  const fromVal = document.getElementById('logDateFrom').value; // 'YYYY-MM-DD' or ''
-  const toVal   = document.getElementById('logDateTo').value;
+  const tbody = document.getElementById('logBody');
+  const from  = document.getElementById('logDateFrom').value;
+  const more  = document.getElementById('logLoadMoreLabel');
+  more.textContent = logHasMore ? 'Load more' : `Load the ${LOG_DAYS} days before`;
+  document.getElementById('logLoadMoreNote').textContent = logHasMore
+    ? `Showing the latest ${allLogEntries.length} in these dates.`
+    : (from ? `Showing from ${fmtDate(from)}.` : '');
+  document.getElementById('logCount').textContent = allLogEntries.length
+    ? `${allLogEntries.length}${logHasMore ? '+' : ''} movement${allLogEntries.length !== 1 ? 's' : ''}` : '';
 
-  // Build date boundaries (inclusive)
-  const fromDate = fromVal ? new Date(fromVal + 'T00:00:00') : null;
-  const toDate   = toVal   ? new Date(toVal   + 'T23:59:59') : null;
-
-  document.getElementById('logLoadMore').classList.toggle('hidden', !logHasOlder);
-  document.getElementById('logLoadMoreNote').textContent =
-    `Showing your latest ${allLogEntries.length} movements.`;
-
-  let logs = allLogEntries;
-  if (fromDate) logs = logs.filter(l => new Date(l.moved_at || l.created_at) >= fromDate);
-  if (toDate)   logs = logs.filter(l => new Date(l.moved_at || l.created_at) <= toDate);
-
-  // Update count label
-  const countEl = document.getElementById('logCount');
-  if (countEl) {
-    countEl.textContent = logs.length
-      ? `${logs.length} movement${logs.length !== 1 ? 's' : ''}${(fromDate || toDate) ? ' (filtered)' : ''}`
-      : '';
-  }
-
-  if (!logs.length) {
-    tbody.innerHTML = `<tr><td colspan="6" class="empty-row">${(fromDate || toDate) ? 'No movements found in this date range.' : 'No stock movements yet.'}</td></tr>`;
+  if (!allLogEntries.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-row">No movements in these dates.</td></tr>';
     return;
   }
 
-  tbody.innerHTML = logs.map(l => {
-    const change    = parseFloat(l.change) || 0;
-    const sign      = change >= 0 ? '+' : '';
-    const chipClass = change >= 0 ? 'inv-change-in' : 'inv-change-out';
-    const typeLabel = filterLabel(l.item_type);
-    const date      = fmtDateTime(l.moved_at);
+  const num = n => (Math.round(n * 1000) / 1000).toString();
+  tbody.innerHTML = allLogEntries.map(l => {
+    const change = Number(l.change) || 0;
+    const unit   = l.unit ? ` ${esc(l.unit)}` : '';
     return `
       <tr>
-        <td style="font-size:.8rem;color:var(--text-muted)">${date}</td>
-        <td><strong>${esc(l.item_name)}</strong></td>
-        <td><span class="inv-type-badge">${esc(typeLabel)}</span></td>
-        <td><span class="inv-change-chip ${chipClass}">${sign}${change.toFixed(3).replace(/\.?0+$/, '')}</span></td>
-        <td>
-          ${esc(l.reason || (l.reason_code ? adjustReasonLabel(l.reason_code) : '—'))}
-          ${l.note ? `<div style="font-size:.75rem;color:var(--text-muted);margin-top:.15rem">${esc(l.note)}</div>` : ''}
-        </td>
-        <td style="color:var(--text-muted);font-size:.8rem">${esc(l.lot_number || '—')}</td>
+        <td class="log-when">${fmtDateTime(l.moved_at)}</td>
+        <td><strong>${esc(l.item_name)}</strong>${l.item_type !== 'raw_material' ? `<div class="log-sub">${esc(filterLabel(l.item_type))}</div>` : ''}</td>
+        <td>${logWhatHtml(l)}</td>
+        <td style="text-align:right"><span class="inv-change-chip ${change >= 0 ? 'inv-change-in' : 'inv-change-out'}">${change >= 0 ? '+' : '−'}${num(Math.abs(change))}${unit}</span></td>
+        <td style="text-align:right" class="log-after">${l.stock_after === null || l.stock_after === undefined ? '—' : num(Number(l.stock_after)) + unit}</td>
       </tr>
     `;
   }).join('');
 }
 
-async function clearStockLog() {
-  if (!confirm('Clear the entire stock movement log? This cannot be undone.')) return;
-  const btn = document.getElementById('clearLogBtn');
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Clearing…';
-  try {
-    // Fetch all log entries and delete them one by one
-    const data = await apiGet(`tables/${LOG_TABLE}?page=1&limit=1000`);
-    const entries = data.data || [];
-    for (const entry of entries) {
-      await apiDelete(`tables/${LOG_TABLE}/${entry.id}`);
-    }
-    allLogEntries = [];
-    renderLogTable();
-    showToast('Stock log cleared.', 'warning');
-  } catch (e) {
-    showToast('Failed to clear log: ' + e.message, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-trash"></i> Clear All Log';
-  }
-}
-
 // ── Delete Inventory Item ─────────────────────────────────────
 async function deleteInventoryItem(invId, itemName) {
-  if (!confirm(`Delete "${itemName}" from inventory?\nThis will also remove its stock log entries. This cannot be undone.`)) return;
+  if (!confirm(`Remove "${itemName}" from inventory?\nIts movement history is kept.`)) return;
   try {
-    // Delete all stock log entries for this inventory row
-    const logData = await apiGet(`tables/${LOG_TABLE}?page=1&limit=1000`);
-    const logs    = (logData.data || []).filter(l => l.inventory_id === invId);
-    for (const l of logs) await apiDelete(`tables/${LOG_TABLE}/${l.id}`);
-
-    // Delete the inventory row itself
+    // The row goes; its lines in the stock log stay. They are history — the
+    // waste totals and the log itself are read back from them — and the server
+    // refuses to delete them in any case.
     await apiDelete(`tables/${INV_TABLE}/${invId}`);
 
     showToast(`"${itemName}" removed from inventory.`, 'warning');

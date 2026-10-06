@@ -153,4 +153,35 @@ t.check('Essential is offered an upgrade, not the action', (await waste({ qty: 1
 t.check('signed out: refused', (await waste({ qty: 1, reason_code: 'spillage' }, jar())).status === 401);
 t.check('the shelf is where we left it', t.near(await shelf(), 4, 1e-9));
 
+t.section('the P&L explains it: waste by reason, and what went missing with no reason');
+const pnl = (await call(u, 'GET', `/api/pnl?from=${period}&to=${period}`)).data || {};
+const w = pnl.waste || {};
+const reason = (code) => (w.by_reason || []).find(r => r.code === code) || {};
+// Flour is $2/kg. Waste: spillage 1.5, menu testing 0.5, breakage 1, other 1, and 1 kg
+// the theft recount took off. Missing: the recounts with no reason, 15 kg and 2 kg.
+t.check('waste totals $10', t.near(w.total, 10, 0.01), JSON.stringify(w.by_reason));
+t.check('split by reason: spillage $3, breakage $2, other $2, theft $2, menu testing $1',
+  t.near(reason('spillage').value, 3, 0.01) && t.near(reason('breakage').value, 2, 0.01) && t.near(reason('other').value, 2, 0.01)
+  && t.near(reason('theft').value, 2, 0.01) && t.near(reason('menu_testing').value, 1, 0.01));
+t.check('biggest reason first', (w.by_reason || [])[0]?.code === 'spillage');
+t.check('each entry is listed with its amount, reason, worth and note', (w.entries || []).length === 5
+  && (w.entries || []).some(e => e.item_name === 'WR Flour' && e.qty === 1.5 && e.unit === 'kg' && e.reason === 'Spillage / waste'
+    && t.near(e.value, 3, 0.01) && e.note === 'Tray dropped'), JSON.stringify(w.entries));
+t.check('a waste reason given on a recount counts as waste, not as missing',
+  (w.entries || []).some(e => e.reason === 'Theft / loss') && !(w.missing?.entries || []).some(e => e.qty === 1));
+t.check('missing with no reason totals $34 (15 kg and 2 kg)', t.near(w.missing?.total, 34, 0.01)
+  && (w.missing?.entries || []).length === 2, JSON.stringify(w.missing));
+t.check('each missing line says what was expected and counted',
+  (w.missing?.entries || []).some(e => e.expected_qty === 18 && e.counted_qty === 3 && e.qty === 15 && t.near(e.value, 30, 0.01)));
+t.check('stock found OVER is in neither list', !(w.entries || []).concat(w.missing?.entries || []).some(e => e.qty === 4));
+t.check('none of it is added to the cost: food COGS is purchases + opening − closing, as before',
+  t.near(pnl.cogs.food_cogs, pnl.food_cost + pnl.cogs.opening_food - pnl.cogs.closing_food, 0.01));
+const lastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+const prev = `${lastMonth.getUTCFullYear()}-${String(lastMonth.getUTCMonth() + 1).padStart(2, '0')}`;
+const wPrev = (await call(u, 'GET', `/api/pnl?from=${prev}&to=${prev}`)).data?.waste || {};
+t.check('another month shows none of it', wPrev.total === 0 && (wPrev.missing?.entries || []).length === 0, JSON.stringify(wPrev));
+const wOther = (await call(other, 'GET', `/api/pnl?from=${period}&to=${period}`)).data?.waste || {};
+t.check('another business shows none of it', wOther.total === 0 && (wOther.entries || []).length === 0);
+t.check('Essential gets no waste block', (await call(essential, 'GET', `/api/pnl?from=${period}&to=${period}`)).data?.waste === null);
+
 t.done();

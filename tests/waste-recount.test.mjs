@@ -60,7 +60,7 @@ t.check('count, line, shelf and log go in one batch', /DB\.batch\(statements\)/.
 
 t.section('a recount never brackets a month');
 t.check('existing counts are full', /ADD COLUMN kind TEXT NOT NULL DEFAULT 'full'/.test(mig));
-const pnl = src.slice(src.indexOf('const closingTake = await'), src.indexOf('const { valueTake } = stockValuer('));
+const pnl = src.slice(src.indexOf('const closingTake = await'), src.indexOf('const { valueTake } = valuer'));
 t.check('the P&L picks full counts only, for both ends', (pnl.match(/status = 'submitted' AND kind = 'full'/g) || []).length === 2);
 t.check('so do the Inventory page\'s counted marks',
   /kind = 'full'/.test(src.slice(src.indexOf("app.get('/api/stock-take/latest-statuses'"), src.indexOf("app.get('/api/stock-take/latest-statuses'") + 500)));
@@ -82,5 +82,27 @@ const apply = inv.slice(inv.indexOf('async function applyAdjustment'), inv.index
 t.check('waste is sent as an amount, not a new total', /inventory\/\$\{invId\}\/waste`, \{ qty, reason_code: reasonCode, note \}/.test(apply));
 t.check('waste beyond the shelf is turned away towards Recount', /adjustMode === 'waste' && newQty < 0/.test(apply) && /use Recount/.test(apply));
 t.check('a recount goes to its own route with the device\'s day', /inventory\/\$\{invId\}\/recount`/.test(apply) && /count_date:/.test(apply));
+
+t.section('the waste report explains the cost, and never adds to it');
+const report = src.slice(src.indexOf('async function wasteReport'), src.indexOf('// ─── Valuing counted stock'));
+const pnlRoute = src.slice(src.indexOf("app.get('/api/pnl'"), src.indexOf("app.get('/api/pnl'") + 40000);
+const pnlJs = readFileSync(join(ROOT, 'public/static/pnl.js'), 'utf8');
+t.check('only waste reasons, only stock going down', /Object\.keys\(WASTE_REASONS\)/.test(report) && /l\.change < 0/.test(report)
+  && /l\.reason_code IN \(/.test(report));
+t.check('missing = short at a submitted count with no reason', /ROUND\(i\.counted_qty - i\.expected_qty, 6\) < 0/.test(report)
+  && /COALESCE\(i\.reason_code, ''\) = ''/.test(report) && /t\.status = 'submitted'/.test(report));
+t.check('a count\'s lines are dated by the count\'s own day', (report.match(/COALESCE\((st|t)\.count_date, date\(/g) || []).length >= 4);
+t.check('priced by the same valuation as a stock count', /valuer\.valueRows\(/.test(report));
+t.check('every statement is scoped to the organization', (report.match(/org_id IS \?1/g) || []).length === 5);
+t.check('the P&L attaches it without touching the cost figures', /waste = await wasteReport\(c\.env\.DB, org, valuer, periodStart, periodEnd\)/.test(pnlRoute)
+  && !/food_cogs:[^\n]*waste/.test(pnlRoute) && !/food \+= [^\n]*waste/.test(pnlRoute));
+t.check('a failure there cannot break the P&L', /try \{ waste = await wasteReport[\s\S]{0,120}catch \(e\)/.test(pnlRoute));
+t.check('it is a Pro figure, like the counts it reads', /if \(trueCogsAllowed\) \{\s*try \{ waste = await wasteReport/.test(pnlRoute));
+const blocks = pnlJs.slice(pnlJs.indexOf('function wasteBlocksHtml'), pnlJs.indexOf('function fmtMoney'));
+t.check('the page shows both blocks and says they are already in the cost',
+  /Waste, stock lost outside a sale/.test(blocks) && /Missing at the count, no reason given/.test(blocks) && /Already inside the food cost above/.test(blocks));
+t.check('gross profit is still sales less food and drinks, nothing else', /const cogsTotal = food \+ beverage;\s*const gross   = sales - cogsTotal;/.test(pnlJs));
+t.check('server text is escaped', !/\$\{e\.item_name\}|\$\{e\.note\}|\$\{r\.label\}|\$\{e\.reason\}/.test(blocks));
+t.check('nothing shows when there is nothing to show', /if \(!\(w\.entries \|\| \[\]\)\.length && !\(missing\.entries \|\| \[\]\)\.length\) return ''/.test(blocks));
 
 t.done();

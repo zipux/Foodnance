@@ -95,6 +95,25 @@
       gap: .5rem 1rem; align-items: baseline;
       padding: .5rem .25rem; border-bottom: 1px solid #f1f5f9;
     }
+    /* Waste, and stock missing with no reason: they explain part of the cost
+       above and are never added to it. */
+    .pnl-waste { background: #fffbeb; border: 1px solid #f0d9a8; border-radius: 10px; padding: .75rem .9rem; margin: .6rem 0 .2rem; display: flex; flex-direction: column; gap: .55rem; }
+    .pnl-waste.pnl-missing { background: var(--bg-alt); border-color: var(--border); }
+    .pnl-waste-head { display: flex; align-items: baseline; gap: .75rem; }
+    .pnl-waste-head .t { flex: 1; min-width: 0; font-weight: 600; color: #92400e; font-size: .92rem; }
+    .pnl-waste.pnl-missing .pnl-waste-head .t { color: var(--text); }
+    .pnl-waste-reason { display: grid; grid-template-columns: minmax(0, 9.5rem) minmax(0, 1fr) auto; gap: .75rem; align-items: center; font-size: .88rem; }
+    .pnl-waste-track { height: 8px; background: #f0d9a8; border-radius: 999px; overflow: hidden; }
+    .pnl-waste-track > span { display: block; height: 100%; background: #d97706; border-radius: 999px; }
+    .pnl-waste-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .pnl-waste-scroll { overflow-x: auto; }
+    .pnl-waste table { width: 100%; border-collapse: collapse; font-size: .84rem; }
+    .pnl-waste th { text-align: left; font-size: .66rem; letter-spacing: .07em; text-transform: uppercase; color: var(--text-muted); font-weight: 600; padding: .35rem .5rem; border-bottom: 1px solid #f0d9a8; white-space: nowrap; }
+    .pnl-waste td { padding: .4rem .5rem; border-bottom: 1px solid #f0d9a8; vertical-align: top; }
+    .pnl-waste.pnl-missing th, .pnl-waste.pnl-missing td { border-bottom-color: var(--border); }
+    .pnl-waste tr:last-child td { border-bottom: 0; }
+    .pnl-waste .r { text-align: right; }
+    .pnl-waste a { color: var(--primary-d); font-weight: 600; white-space: nowrap; }
     .pnl-label { font-size: .95rem; color: var(--text); }
     .pnl-sub   { font-size: .78rem; color: var(--text-muted); margin-top: .1rem; }
     /* Indented breakdown under a rolled-up line (e.g. what's inside Supplies) */
@@ -337,6 +356,6 @@
 
   <script src="/static/env-banner.js?v=20260807-2"></script>
   <script src="/static/utils.js?v=20261006-3"></script>
-  <script src="/static/pnl.js?v=20261006-1"></script>
+  <script src="/static/pnl.js?v=20261006-2"></script>
 </body>
 </html>

@@ -439,6 +439,7 @@ npm run test:sub-unit-stock # case/can/weight stock: stock-take value + sales im
 npm run test:count-date     # stock count's local day + drinks sales split — needs the sandbox (0062 applied locally)
 npm run test:history        # past stock counts: list, sheet, note, isolation — needs the sandbox
 npm run test:waste          # Record waste + Recount, recount kept out of the P&L — needs the sandbox (0063 applied locally)
+npm run test:stock-log      # stock movement log: server filters, Stock after, links, history kept — needs the sandbox
 ```
 
 **The account purge** (`DELETE /api/admin/organizations/:id`, admin-screen button) is
@@ -835,8 +836,55 @@ One modal, three modes (`adjustMode` in `inventory.js`). A **commissary keeps th
 Stock** (`/adjust`) by decision — moving stock by hand is their workflow, and there are no
 commissary customers to ask yet; `stockButtonsHtml()` picks by `window.__accountType`, drawing
 an unknown type as a restaurant and redrawing on `dm:plan-known`. `/adjust` itself is unchanged
-and still trusts the browser's total. Not built: a waste total by reason (the codes are stored
-and nothing reads them yet). `npm run test:waste` (needs the sandbox).
+and still trusts the browser's total. `npm run test:waste` (needs the sandbox).
+
+**The P&L shows where it went** (`wasteReport()`, returned as `waste` on `/api/pnl`, Pro only,
+fail-soft). Two blocks under the cost lines, each opening to its entries: **Waste** — every
+stock-log line with a waste reason, by reason, from Record waste, a recount, or a full-count
+line where a reason was picked; and **Missing at the count, no reason given** — lines of a
+submitted count that came up short with an empty reason. Both are priced through
+`stockValuer().valueRows` at the price current on the day. A count's lines are dated by the
+count's own day (`count_date`, else its `submitted_at`), the day the P&L files the count under. **They explain the cost and are
+never added to it**: lost stock is already inside true COGS because the closing count found
+less, so gross profit is untouched (`tests/waste-recount.test.mjs` pins that). Known limits: a
+count line given a non-waste reason (kitchen usage, correction, transfer — the count sheet
+still offers those) appears in neither block; lines counted *over* are not netted off; a
+hand-recorded waste entry is dated by its UTC timestamp, while a count's lines use the count's
+own day (0062).
+
+### The stock movement log (redone 2026-10-06, no migration)
+
+Inventory → **Stock Log**, and the clock icon on each row opens it on that one item. It reads
+`GET /api/stock-log` (`from`/`to` as instants, `inventory_id`, `q`, `kind`, `offset`; 200 a
+page, `has_more`), which **filters on the server** — the old window loaded the latest 500
+lines and filtered those in the browser, so an older date range answered "No movements found"
+for movements that existed. Opens on the last 30 days; the one button under the table loads
+more lines inside the dates shown, or else the 30 days before. `kind` is derived per line by
+`STOCK_LOG_KIND_SQL` (sales, waste, count, production, delivery, other; a count line with a
+waste reason is *waste*, so the filter matches the P&L's waste block). A line links to its
+invoice (`?open=`, resolved from the number in "Invoice stock-in: N" only when that number is
+one invoice's alone), its count (`/stock-take.html?history=1&open=<id>`) or the Sales page.
+
+**"Stock after" is not stored.** It is the bin's quantity now less every change **recorded**
+after the line (a window `SUM` per `inventory_id` ordered by `rowid`, computed before the
+filters so a filtered line keeps its true figure). **Recording order, never `moved_at`:** a
+sales import is dated by the day of the sale but takes its stock off the day it is uploaded,
+often after that week's deliveries and counts. The first version walked back by date and, on
+production, put Tuesday's sales before a count that had already absorbed them and showed a
+shelf of −1.4 kg. The list is in the same order, so the column reads as one story; the Date
+column says which day a line is about, and so can look out of order. NULL when the bin is
+gone.
+It is only as true as the log is complete: a quantity changed with no log line (the generic
+`PATCH` on `inventory`) shifts every figure before it, and lines from before a bin's unit was
+changed are shown in today's unit.
+
+**The log is history: add, never change or delete.** The P&L's waste totals, undoing a sales
+import and "Stock after" are all read back from it. So "Clear All Log" is gone, removing an
+item from inventory keeps its lines, and the generic table routes refuse `PUT`/`PATCH`/`DELETE`
+on `stock_log` (`stockLogIsHistory`, 409). `POST` stays open — the pages write lines through
+it. Gone by decision: the "Lot #" column (nothing ever filled it; maybe for commissaries
+later) and any dollar value on a line. `tests/stock-log.test.mjs` + `npm run test:stock-log`
+(needs the sandbox).
 
 ### Stock-take valuation (true COGS)
 `valueTake()` inside `/api/pnl` prices a submitted stock take. Two things about it

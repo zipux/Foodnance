@@ -520,3 +520,22 @@
 .st-h-filter { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: .8rem; }
 .st-h-chip { font: inherit; font-size: .82rem; font-weight: 600; border-radius: 999px; padding: .3rem .8rem; border: 1px solid var(--border); background: var(--card-bg); color: var(--text-muted); cursor: pointer; }
 .st-h-chip.on { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+/* ── Stock movement log (Inventory page, which also loads this file) ── */
+.log-bar { padding: .75rem 1.25rem; border-bottom: 1px solid var(--border); background: var(--bg-alt); display: flex; flex-direction: column; gap: .6rem; }
+.log-bar-row { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+.log-search { flex: 1 1 200px; min-width: 0; }
+.log-date { font-size: .75rem; font-weight: 600; color: var(--text-muted); display: flex; align-items: center; gap: .35rem; }
+.log-date input { padding: .35rem .5rem; border: 1px solid var(--border); border-radius: 6px; font-size: .85rem; font-family: inherit; background: var(--card-bg); }
+.log-kinds { display: flex; flex-wrap: wrap; gap: .4rem; }
+.log-kind { font: inherit; font-size: .8rem; font-weight: 600; border-radius: 999px; padding: .25rem .75rem; border: 1px solid var(--border); background: var(--card-bg); color: var(--text-muted); cursor: pointer; }
+.log-kind.on { background: var(--primary); border-color: var(--primary); color: #fff; }
+.log-item-tag { font-size: .8rem; font-weight: 600; background: #e0f2fe; color: var(--primary-d); border-radius: 999px; padding: .25rem .3rem .25rem .75rem; display: inline-flex; align-items: center; gap: .3rem; }
+.log-item-tag.hidden { display: none; }
+.log-item-tag button { font: inherit; border: 0; background: none; color: inherit; cursor: pointer; padding: 0 .35rem; }
+.log-count { font-size: .8rem; color: var(--text-muted); }
+.log-more { display: flex; align-items: center; justify-content: center; gap: .8rem; padding: .9rem 1rem; font-size: .85rem; color: var(--text-muted); flex-wrap: wrap; }
+.log-when { font-size: .8rem; color: var(--text-muted); white-space: nowrap; }
+.log-sub { font-size: .75rem; color: var(--text-muted); margin-top: .15rem; }
+.log-after { font-family: var(--font-mono); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.log-link { color: var(--primary-d); font-weight: 600; white-space: nowrap; margin-left: .35rem; }

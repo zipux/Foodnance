@@ -515,6 +515,9 @@ async function loadOrStart() {
     document.getElementById('stCancelBtn').style.display = 'none';
     document.querySelector('.st-header-meta').style.visibility = 'hidden';
     await loadHistory(true);
+    // "Open count" on a stock-log line lands here with the count to show.
+    const wanted = new URLSearchParams(location.search).get('open');
+    if (wanted) await openHistory(wanted);
     return;
   }
   try {

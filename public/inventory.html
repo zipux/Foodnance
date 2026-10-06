@@ -9,7 +9,7 @@
   <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
   <title>Inventory — Foodnance</title>
   <link rel="stylesheet" href="/static/style.css?v=20260923-1" />
-  <link rel="stylesheet" href="/static/stock-take.css?v=20261006-2" />
+  <link rel="stylesheet" href="/static/stock-take.css?v=20261006-3" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560;9..144,620&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
   <script src="/static/nav-gate.js?v=20260921-3"></script>
@@ -182,55 +182,49 @@
 
   <!-- ── STOCK LOG MODAL ── -->
   <div class="modal-overlay hidden" id="logModal">
-    <div class="modal" style="max-width:860px">
+    <div class="modal" style="max-width:920px">
       <div class="modal-header">
         <h3><i class="fas fa-history"></i> Stock Movement Log</h3>
         <button class="modal-close" id="closeLogModal"><i class="fas fa-times"></i></button>
       </div>
-      <!-- Filter bar -->
-      <div style="padding:.75rem 1.25rem;border-bottom:1px solid var(--border);background:#f0f9ff;display:flex;flex-wrap:wrap;gap:.75rem;align-items:flex-end">
-        <div class="form-group" style="margin:0;flex:1;min-width:140px">
-          <label style="font-size:.75rem;font-weight:600;color:var(--text-muted);margin-bottom:.25rem;display:block">From</label>
-          <input type="date" id="logDateFrom" style="width:100%;padding:.35rem .6rem;border:1px solid var(--border);border-radius:6px;font-size:.85rem;font-family:inherit" />
+      <!-- Filters. Every one is applied by the server (GET /api/stock-log), so
+           an old date range or one item always gets a complete answer. -->
+      <div class="log-bar">
+        <div class="log-bar-row">
+          <input type="text" id="logSearch" class="search-input log-search" placeholder="Search an item…" autocomplete="off" />
+          <label class="log-date">From <input type="date" id="logDateFrom" /></label>
+          <label class="log-date">To <input type="date" id="logDateTo" /></label>
         </div>
-        <div class="form-group" style="margin:0;flex:1;min-width:140px">
-          <label style="font-size:.75rem;font-weight:600;color:var(--text-muted);margin-bottom:.25rem;display:block">To</label>
-          <input type="date" id="logDateTo" style="width:100%;padding:.35rem .6rem;border:1px solid var(--border);border-radius:6px;font-size:.85rem;font-family:inherit" />
+        <div class="log-bar-row">
+          <div id="logKinds" class="log-kinds"></div>
+          <span id="logItemTag" class="log-item-tag hidden"></span>
+          <div style="flex:1"></div>
+          <div id="logCount" class="log-count"></div>
         </div>
-        <button class="btn btn-primary" id="applyLogFilterBtn" style="padding:.38rem .9rem;font-size:.82rem">
-          <i class="fas fa-filter"></i> Filter
-        </button>
-        <button class="btn btn-secondary" id="clearLogFilterBtn" style="padding:.38rem .9rem;font-size:.82rem">
-          <i class="fas fa-times"></i> Clear Filter
-        </button>
-        <div style="flex:1"></div>
-        <div id="logCount" style="font-size:.8rem;color:var(--text-muted);align-self:center"></div>
       </div>
       <div class="modal-body" style="padding:0">
-        <div class="table-scroll" style="max-height:460px">
+        <div class="table-scroll" style="max-height:min(400px, 48vh)">
           <table class="data-table">
             <thead>
               <tr>
-                <th>Date / Time</th>
+                <th>Date</th>
                 <th>Item</th>
-                <th>Type</th>
-                <th>Change</th>
-                <th>Reason</th>
-                <th>Lot #</th>
+                <th>What happened</th>
+                <th style="text-align:right">Change</th>
+                <th style="text-align:right" title="What the app had on the shelf once this line was recorded">Stock after</th>
               </tr>
             </thead>
             <tbody id="logBody">
-              <tr><td colspan="6" class="empty-row"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>
+              <tr><td colspan="5" class="empty-row"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>
             </tbody>
           </table>
-          <div id="logLoadMore" class="hidden" style="display:flex;align-items:center;justify-content:center;gap:.8rem;padding:.9rem 1rem;font-size:.85rem;color:var(--text-muted)">
+          <div id="logLoadMore" class="log-more">
             <span id="logLoadMoreNote"></span>
-            <button class="btn btn-secondary btn-sm" id="logLoadMoreBtn" type="button"><i class="fas fa-clock-rotate-left"></i> Load older movements</button>
+            <button class="btn btn-secondary btn-sm" id="logLoadMoreBtn" type="button"><i class="fas fa-clock-rotate-left"></i> <span id="logLoadMoreLabel">Load the 30 days before</span></button>
           </div>
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-danger" id="clearLogBtn"><i class="fas fa-trash"></i> Clear All Log</button>
         <div style="flex:1"></div>
         <button class="btn btn-secondary" id="closeLogBtn">Close</button>
       </div>
@@ -242,6 +236,6 @@
 
   <script src="/static/env-banner.js?v=20260807-2"></script>
   <script src="/static/utils.js?v=20261006-3"></script>
-  <script src="/static/inventory.js?v=20261006-3"></script>
+  <script src="/static/inventory.js?v=20261006-4"></script>
 </body>
 </html>

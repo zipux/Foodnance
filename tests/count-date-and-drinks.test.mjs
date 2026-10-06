@@ -43,7 +43,7 @@ t.check('anything not shaped like a date is dropped',
 t.section('the count date is saved and used');
 t.check('the column exists and starts empty', /ALTER TABLE stock_takes ADD COLUMN count_date TEXT DEFAULT NULL/.test(mig));
 t.check('submit writes it through the check', /count_date = \?[\s\S]{0,120}localCountDate\(body\.count_date, now\)/.test(src));
-const pnlTakes = src.slice(src.indexOf('const closingTake = await'), src.indexOf('const { valueTake } = stockValuer('));
+const pnlTakes = src.slice(src.indexOf('const closingTake = await'), src.indexOf('const { valueTake } = valuer'));
 t.check('the P&L picks both counts by it, falling back to the UTC day',
   (pnlTakes.match(/COALESCE\(count_date, date\(submitted_at\)\) AS d/g) || []).length === 2
   && /COALESCE\(count_date, date\(submitted_at\)\) <= \?/.test(pnlTakes)

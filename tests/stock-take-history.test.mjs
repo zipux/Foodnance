@@ -48,7 +48,7 @@ t.check('length is capped', /\.slice\(0, 1000\)/.test(note));
 
 t.section('one valuation for the history and the P&L');
 const pnl = handlerBody('get', '/api/pnl');
-t.check('the P&L values counts through stockValuer', /const \{ valueTake \} = stockValuer\(c\.env\.DB, org\)/.test(pnl));
+t.check('the P&L values counts through stockValuer', /const valuer = stockValuer\(c\.env\.DB, org\)/.test(pnl));
 t.check('the list does too', /stockValuer\(c\.env\.DB, org\)/.test(list) && /valuer\.valueTake\(t\.id, t\.d\)/.test(list));
 t.check('so does the opened count, differences included',
   /valuer\.valueTake\(take\.id, take\.d\)/.test(one) && /valuer\.valueRows\(/.test(one));
@@ -69,7 +69,7 @@ t.section('there is a way to reach it');
 const invHtml = readFileSync(join(ROOT, 'public/inventory.html'), 'utf8');
 t.check('the Inventory page has a Past Counts button', /href="\/stock-take\.html\?history=1"[^>]*id="pastCountsBtn"/.test(invHtml) && /Past Counts/.test(invHtml));
 t.check('it does not start a count', !/history=1[^"]*start=1|start=1[^"]*history=1/.test(invHtml));
-const boot = page.slice(page.indexOf('async function loadOrStart'), page.indexOf('async function loadOrStart') + 900);
+const boot = page.slice(page.indexOf('async function loadOrStart'), page.indexOf('async function loadOrStart') + 1600);
 t.check('the page shows the list when asked, before looking for a count in progress',
   boot.indexOf("get('history') === '1'") > -1 && boot.indexOf("get('history') === '1'") < boot.indexOf('/api/stock-take/active'));
 t.check('an empty list says so when it was asked for', /No counts submitted yet/.test(page));

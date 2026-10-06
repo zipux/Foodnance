@@ -1148,6 +1148,119 @@ app.post('/api/inventory/:id/recount', async (c) => {
   return c.json({ ok: true, stock_take_id: takeId, quantity: counted, expected, change: variance })
 })
 
+// ── Stock movement log ────────────────────────────────────────
+// The log is history: lines are added, never changed or removed. The waste
+// totals on the P&L, undoing a sales import, and "Stock after" below are all
+// read back from it, so a deleted line quietly falsifies each of them. The
+// page used to offer "Clear All Log" and deleted an item's lines along with
+// the item; both are gone, and the generic table routes refuse the rest.
+function stockLogIsHistory(c: any) {
+  return c.json({ error: "Stock history can't be changed or deleted." }, 409)
+}
+
+// What kind of movement a line is, for the log's filter. Order matters: a count
+// line given a waste reason is waste (so the Waste filter matches the P&L's
+// waste block); it keeps its stock_take_id, so the page can still link the count.
+const STOCK_LOG_KIND_SQL = `CASE
+  WHEN COALESCE(l.pos_import_id, '') != '' OR l.reason LIKE 'Sales import%' THEN 'sales'
+  WHEN l.reason_code IN (${Object.keys(WASTE_REASONS).map(k => `'${k}'`).join(', ')}) THEN 'waste'
+  WHEN COALESCE(l.stock_take_id, '') != '' THEN 'count'
+  WHEN l.reason_code = 'production' OR l.reason LIKE 'Batch production%' OR l.reason LIKE 'Pack run%' THEN 'production'
+  WHEN l.change > 0 AND (l.reason_code = 'received' OR l.reason LIKE 'Invoice stock-in%' OR l.reason LIKE 'Stock-in%') THEN 'delivery'
+  ELSE 'other' END`
+const STOCK_LOG_KINDS = new Set(['sales', 'waste', 'count', 'production', 'delivery', 'other'])
+const STOCK_LOG_PAGE = 200
+
+// GET /api/stock-log?from=<ISO>&to=<ISO>&inventory_id=&q=&kind=&offset=
+// Newest first, filtered HERE: the page used to load the latest 500 lines and
+// filter those in the browser, so an older date range answered "No movements
+// found" for movements that existed.
+//
+// stock_after is what the app had on the shelf once a line had been RECORDED.
+// It is not stored: it is the bin's quantity now, less every change recorded
+// after that line. "Recorded after" means a later rowid, NOT a later moved_at:
+// a sales import is dated by the day of the sale but takes its stock off on the
+// day it is uploaded, often after that week's deliveries and counts. Walking
+// back by date put Tuesday's sales before Thursday's count that had already
+// absorbed them, and showed a shelf of −1.4 kg (seen on production, 2026-10-06).
+// For the same reason the list itself is in recording order, so the column
+// reads as one unbroken story down the page; the Date column says which day a
+// line is about. NULL when the bin no longer exists. It is only as true as the
+// log is complete — a quantity changed without a log line shifts every figure
+// before it.
+app.get('/api/stock-log', async (c) => {
+  const org = orgOf(c)
+  const iso = (v: string | undefined) => {
+    const t = Date.parse(String(v || ''))
+    return Number.isNaN(t) ? null : new Date(t).toISOString()
+  }
+  const to = iso(c.req.query('to')) || new Date().toISOString()
+  // Default window: the 30 days up to `to`.
+  const from = iso(c.req.query('from')) || new Date(Date.parse(to) - 30 * 86400000).toISOString()
+  const offset = Math.max(0, Math.floor(Number(c.req.query('offset')) || 0))
+  const kind = String(c.req.query('kind') || '')
+  const inventoryId = String(c.req.query('inventory_id') || '')
+  const q = String(c.req.query('q') || '').trim().slice(0, 80)
+
+  const where: string[] = ['datetime(moved_at) >= datetime(?2)', 'datetime(moved_at) <= datetime(?3)']
+  const binds: unknown[] = [org, from, to]
+  if (inventoryId) { binds.push(inventoryId); where.push(`inventory_id = ?${binds.length}`) }
+  if (q) { binds.push(`%${q.replace(/[\\%_]/g, ch => '\\' + ch)}%`); where.push(`item_name LIKE ?${binds.length} ESCAPE '\\'`) }
+  if (STOCK_LOG_KINDS.has(kind)) { binds.push(kind); where.push(`kind = ?${binds.length}`) }
+  binds.push(STOCK_LOG_PAGE + 1, offset)
+
+  const rows = await c.env.DB.prepare(
+    `SELECT * FROM (
+       SELECT l.id, l.rowid AS rid, l.moved_at, l.inventory_id, l.item_type, l.item_name, l.change,
+              l.reason, l.reason_code, l.note, l.stock_take_id, l.pos_import_id,
+              inv.unit AS unit, st.kind AS take_kind,
+              CASE WHEN inv.id IS NULL THEN NULL ELSE ROUND(inv.quantity - COALESCE(SUM(l.change) OVER (
+                PARTITION BY l.inventory_id ORDER BY l.rowid DESC
+                ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0), 6) END AS stock_after,
+              ${STOCK_LOG_KIND_SQL} AS kind
+         FROM stock_log l
+         LEFT JOIN inventory inv ON inv.id = l.inventory_id AND inv.org_id IS ?1
+         LEFT JOIN stock_takes st ON st.id = l.stock_take_id AND st.org_id IS ?1
+        -- Everything recorded since the oldest line the dates can show: that is
+        -- all the running figure needs, whatever day each line is about.
+        WHERE l.org_id IS ?1 AND l.rowid >= COALESCE((
+          SELECT MIN(o.rowid) FROM stock_log o WHERE o.org_id IS ?1 AND datetime(o.moved_at) >= datetime(?2)), 0)
+     ) WHERE ${where.join(' AND ')}
+     ORDER BY rid DESC LIMIT ?${binds.length - 1} OFFSET ?${binds.length}`,
+  ).bind(...binds).all<Record<string, any>>()
+
+  const all = rows.results ?? []
+  const page = all.slice(0, STOCK_LOG_PAGE)
+
+  // A delivery line names its invoice only by number ("Invoice stock-in: FV-1").
+  // Resolve it to an id so the page can link it — but only when the number is
+  // one invoice's alone: two suppliers both using #1001 must not be guessed between.
+  const numbers = [...new Set(page.map(r => (/^Invoice stock-in: (.+)$/.exec(String(r.reason || '')) || [])[1]).filter(Boolean))].slice(0, 80)
+  const invoiceByNumber = new Map<string, string | null>()
+  if (numbers.length) {
+    const inv = await c.env.DB.prepare(
+      `SELECT id, invoice_number FROM invoices WHERE org_id IS ?1 AND invoice_number IN (${numbers.map((_, i) => `?${i + 2}`).join(',')})`,
+    ).bind(org, ...numbers).all<{ id: string; invoice_number: string }>()
+    for (const r of (inv.results ?? [])) {
+      invoiceByNumber.set(r.invoice_number, invoiceByNumber.has(r.invoice_number) ? null : r.id)
+    }
+  }
+
+  return c.json({
+    has_more: all.length > STOCK_LOG_PAGE, from, to,
+    data: page.map(r => {
+      const number = (/^Invoice stock-in: (.+)$/.exec(String(r.reason || '')) || [])[1] || ''
+      return {
+        id: r.id, moved_at: r.moved_at, inventory_id: r.inventory_id, item_type: r.item_type, item_name: r.item_name,
+        change: Number(r.change) || 0, unit: r.unit || '', stock_after: r.stock_after,
+        kind: r.kind, reason: r.reason || '', reason_code: r.reason_code || '', note: r.note || '',
+        stock_take_id: r.stock_take_id || '', take_kind: r.take_kind || '', pos_import_id: r.pos_import_id || '',
+        invoice_number: number, invoice_id: (number && invoiceByNumber.get(number)) || '',
+      }
+    }),
+  })
+})
+
 // ══════════════════════════════════════════════════════════════
 // AUTH ROUTES  (declared before the generic CRUD — Hono matches in order)
 // ══════════════════════════════════════════════════════════════
@@ -2647,6 +2760,7 @@ function featureForPath(path: string): string | null {
   if (path.startsWith('/api/pos-'))           return 'pos_sales'
   // Adjust Stock only. Reading inventory stays open — see PRO_ONLY_TABLES.
   if (/^\/api\/inventory\/[^/]+\/(adjust|waste|recount)$/.test(path)) return 'inventory_tools'
+  if (path === '/api/stock-log') return 'inventory_tools'
   const table = path.match(/^\/api\/tables\/([^/?]+)/)
   if (table) return PRO_ONLY_TABLES[table[1]] || null
   return null
@@ -3291,6 +3405,7 @@ app.post('/api/tables/:table', async (c) => {
 app.put('/api/tables/:table/:id', async (c) => {
   const { table, id } = c.req.param()
   if (!ALLOWED_TABLES.includes(table)) return c.json({ error: 'Unknown table' }, 400)
+  if (table === 'stock_log') return stockLogIsHistory(c)
   const body = stripServerOwned(await c.req.json() as Record<string, unknown>)
   if (table === 'invoices') {
     const refused = await guardInvoiceWrite(c, 'PUT', id, body)
@@ -3311,6 +3426,7 @@ app.put('/api/tables/:table/:id', async (c) => {
 app.patch('/api/tables/:table/:id', async (c) => {
   const { table, id } = c.req.param()
   if (!ALLOWED_TABLES.includes(table)) return c.json({ error: 'Unknown table' }, 400)
+  if (table === 'stock_log') return stockLogIsHistory(c)
   const body = stripServerOwned(await c.req.json() as Record<string, unknown>)
   if (table === 'invoices') {
     const refused = await guardInvoiceWrite(c, 'PATCH', id, body)
@@ -3444,6 +3560,7 @@ app.put('/api/generic_products/:id', async (c) => {
 app.delete('/api/tables/:table/:id', async (c) => {
   const { table, id } = c.req.param()
   if (!ALLOWED_TABLES.includes(table)) return c.json({ error: 'Unknown table' }, 400)
+  if (table === 'stock_log') return stockLogIsHistory(c)
   if (table === 'invoices') {
     const refused = await guardInvoiceWrite(c, 'DELETE', id, null)
     if (refused) return refused
@@ -7098,6 +7215,88 @@ app.get('/api/spending-breakdown', async (c) => {
   })
 })
 
+// ─── Waste report ─────────────────────────────────────────────
+// Two lists for a period, each priced by the rules that value a stock count
+// (stockValuer), at the purchase price current on the day it happened:
+//   · waste   — stock taken off with a waste reason (WASTE_REASONS): from Record
+//               waste, from a recount, or from a line of a full count where a
+//               reason was picked
+//   · missing — lines of a submitted count that came up short with NO reason.
+//               Nobody said it was waste, so it is not shown as waste; it is
+//               shown as what it is, stock that is gone and unexplained.
+// A count's lines belong to the count's own day (0062, else the day it was
+// submitted) — the same day the P&L files the count under; a hand-recorded
+// waste entry has only its UTC timestamp. Lines counted OVER are in neither list.
+async function wasteReport(
+  db: D1Database, org: string | null, valuer: ReturnType<typeof stockValuer>, periodStart: string, periodEnd: string,
+) {
+  const codes = Object.keys(WASTE_REASONS)
+  const logRows = await db.prepare(
+    `SELECT l.item_id, l.item_type, l.item_name, l.change, l.reason_code, l.note,
+            COALESCE(st.count_date, date(st.submitted_at), date(l.moved_at)) AS d, inv.unit AS unit, inv.category AS category
+       FROM stock_log l
+       LEFT JOIN stock_takes st ON st.id = l.stock_take_id AND st.org_id IS ?1
+       LEFT JOIN inventory inv ON inv.id = l.inventory_id AND inv.org_id IS ?1
+      WHERE l.org_id IS ?1 AND l.change < 0
+        AND l.reason_code IN (${codes.map((_, i) => `?${i + 4}`).join(',')})
+        AND COALESCE(st.count_date, date(st.submitted_at), date(l.moved_at)) BETWEEN ?2 AND ?3
+      ORDER BY d DESC, l.moved_at DESC LIMIT 500`,
+  ).bind(org, periodStart, periodEnd, ...codes).all<{
+    item_id: string; item_type: string; item_name: string; change: number; reason_code: string; note: string | null
+    d: string; unit: string | null; category: string | null
+  }>()
+
+  const worth = async (r: { item_id: string; item_type: string; category: string | null; unit: string | null }, qty: number, day: string) => {
+    const v = await valuer.valueRows([{
+      item_id: r.item_id, item_type: r.item_type, category: r.category || '', unit: r.unit || '', counted_qty: qty,
+    }], day)
+    return round2(v.food + v.beverage)
+  }
+
+  const entries = []
+  const byReason = new Map<string, { code: string; label: string; value: number; count: number }>()
+  for (const r of (logRows.results ?? [])) {
+    const qty = Math.abs(Number(r.change) || 0)
+    const value = await worth(r, qty, r.d)
+    entries.push({ date: r.d, item_name: r.item_name, qty, unit: r.unit || '', reason: WASTE_REASONS[r.reason_code], value, note: r.note || '' })
+    const g = byReason.get(r.reason_code) ?? { code: r.reason_code, label: WASTE_REASONS[r.reason_code], value: 0, count: 0 }
+    g.value = round2(g.value + value); g.count += 1
+    byReason.set(r.reason_code, g)
+  }
+
+  const shortRows = await db.prepare(
+    `SELECT i.item_id, i.item_type, i.item_name, i.category, i.unit, i.expected_qty, i.counted_qty,
+            COALESCE(t.count_date, date(t.submitted_at)) AS d
+       FROM stock_take_items i
+       JOIN stock_takes t ON t.id = i.stock_take_id AND t.org_id IS ?1
+      WHERE i.org_id IS ?1 AND t.status = 'submitted' AND t.submitted_at IS NOT NULL
+        AND i.counted_qty IS NOT NULL AND ROUND(i.counted_qty - i.expected_qty, 6) < 0
+        AND COALESCE(i.reason_code, '') = ''
+        AND COALESCE(t.count_date, date(t.submitted_at)) BETWEEN ?2 AND ?3
+      ORDER BY d DESC, i.item_name COLLATE NOCASE LIMIT 500`,
+  ).bind(org, periodStart, periodEnd).all<{
+    item_id: string; item_type: string; item_name: string; category: string | null; unit: string | null
+    expected_qty: number; counted_qty: number; d: string
+  }>()
+  const missing = []
+  for (const r of (shortRows.results ?? [])) {
+    const qty = Math.round(((Number(r.expected_qty) || 0) - (Number(r.counted_qty) || 0)) * 1e6) / 1e6
+    missing.push({
+      date: r.d, item_name: r.item_name, unit: r.unit || '',
+      expected_qty: Number(r.expected_qty) || 0, counted_qty: Number(r.counted_qty) || 0, qty,
+      value: await worth(r, qty, r.d),
+    })
+  }
+
+  const sum = (list: { value: number }[]) => round2(list.reduce((s, e) => s + e.value, 0))
+  return {
+    total: sum(entries),
+    by_reason: [...byReason.values()].sort((a, b) => b.value - a.value),
+    entries,
+    missing: { total: sum(missing), entries: missing },
+  }
+}
+
 // ─── Valuing counted stock ────────────────────────────────────
 // What a stock count (or any list of counted quantities) is worth. One
 // implementation for the P&L's true COGS and for the count history on the
@@ -7444,7 +7643,8 @@ app.get('/api/pnl', async (c) => {
     ORDER BY d DESC, submitted_at DESC LIMIT 1
   `).bind(periodStart, org).first<{ id: string; d: string }>()
 
-  const { valueTake } = stockValuer(c.env.DB, org)
+  const valuer = stockValuer(c.env.DB, org)
+  const { valueTake } = valuer
 
   // True COGS is a Pro feature. An Essential account normally has no stock takes
   // to bracket the period anyway, but one that was downgraded from Pro still has
@@ -7483,6 +7683,17 @@ app.get('/api/pnl', async (c) => {
       food_cogs:     round2(food + opening.food - closing.food),
       beverage_cogs: round2(beverage + opening.beverage - closing.beverage),
     }
+  }
+
+  // ── Waste, and stock that went missing with no reason ────────
+  // Explains part of the cost above; it is never added to it. Stock lost is
+  // already inside true COGS (the closing count found less), so charging it
+  // again would count it twice. Fail-soft: a P&L without this block is still a
+  // P&L, a P&L that 500s because of it is not.
+  let waste: Awaited<ReturnType<typeof wasteReport>> | null = null
+  if (trueCogsAllowed) {
+    try { waste = await wasteReport(c.env.DB, org, valuer, periodStart, periodEnd) }
+    catch (e) { console.error('waste report failed', e) }
   }
 
   // ── Imported POS revenue, per month ──────────────────────────
@@ -7558,6 +7769,7 @@ app.get('/api/pnl', async (c) => {
       amount:   round2(r.amount ?? 0),
     })),
     cogs,
+    waste,
   })
 })
 

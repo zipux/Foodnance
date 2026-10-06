@@ -188,6 +188,95 @@ async function loadPnl() {
 }
 
 // ── Render ─────────────────────────────────────────────────────
+// ── Waste, and stock missing with no reason ───────────────────
+// Two blocks under the cost lines. They EXPLAIN part of the cost and are never
+// added to it: stock that was lost is already inside true COGS, because the
+// closing count found less. Each opens to the entries behind its total.
+let pnlWasteOpen   = false;
+let pnlMissingOpen = false;
+function pnlToggleWaste(which) {
+  if (which === 'missing') pnlMissingOpen = !pnlMissingOpen; else pnlWasteOpen = !pnlWasteOpen;
+  render();
+}
+const PNL_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function pnlShortDate(ymd) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd || ''));
+  return m ? `${+m[3]} ${PNL_MON[+m[2] - 1]}` : '';
+}
+function pnlQty(n) {
+  return String(Math.round((Number(n) || 0) * 1000) / 1000);
+}
+// Sub-percent shares matter here (waste is small against sales), so one decimal
+// below 10% where the cost lines above round to whole numbers.
+function pnlSmallPct(text, n, total) {
+  if (text === '—' || !(total > 0)) return text;
+  const p = (n / total) * 100;
+  return p > 0 && p < 10 ? p.toFixed(1) + '%' : text;
+}
+
+function wasteBlocksHtml(w, useCogs, pct, sales) {
+  if (!w) return '';
+  const missing = w.missing || { total: 0, entries: [] };
+  if (!(w.entries || []).length && !(missing.entries || []).length) return '';
+  const inside = useCogs ? 'Already inside the food cost above.' : 'It does not change the figures above.';
+  const n = (list, word) => `${list.length} ${list.length === 1 ? word : (word === 'entry' ? 'entries' : word + 's')}`;
+  let html = '';
+
+  if (w.entries.length) {
+    const top = Math.max(...w.by_reason.map(r => r.value), 0.01);
+    html += `
+    <div class="pnl-waste">
+      <div class="pnl-waste-head">
+        <div class="t">Waste, stock lost outside a sale</div>
+        <div class="pnl-amount">${fmtMoney(w.total)}</div>
+        <div class="pnl-pct">${pnlSmallPct(pct(w.total), w.total, sales)}</div>
+      </div>
+      ${w.by_reason.map(r => `
+      <div class="pnl-waste-reason">
+        <span>${esc(r.label)}</span>
+        <span class="pnl-waste-track"><span style="width:${Math.max(3, Math.round((r.value / top) * 100))}%"></span></span>
+        <span class="pnl-waste-num">${fmtMoney(r.value)}</span>
+      </div>`).join('')}
+      ${pnlWasteOpen ? `
+      <div class="pnl-waste-scroll"><table>
+        <thead><tr><th>Date</th><th>Item</th><th class="r">Amount</th><th>Reason</th><th class="r">Worth</th></tr></thead>
+        <tbody>${w.entries.map(e => `
+          <tr><td>${esc(pnlShortDate(e.date))}</td>
+              <td>${esc(e.item_name)}${e.note ? `<div class="pnl-sub">${esc(e.note)}</div>` : ''}</td>
+              <td class="r pnl-waste-num">${pnlQty(e.qty)} ${esc(e.unit)}</td>
+              <td>${esc(e.reason)}</td><td class="r pnl-waste-num">${fmtMoney(e.value)}</td></tr>`).join('')}
+        </tbody></table></div>` : ''}
+      <div class="pnl-sub">${inside} Shown so you can see where it went.
+        <a href="#" onclick="pnlToggleWaste('waste');return false">${pnlWasteOpen ? 'Hide the entries' : `Show the ${n(w.entries, 'entry')}`}</a></div>
+    </div>`;
+  }
+
+  if (missing.entries.length) {
+    html += `
+    <div class="pnl-waste pnl-missing">
+      <div class="pnl-waste-head">
+        <div class="t">Missing at the count, no reason given</div>
+        <div class="pnl-amount">${fmtMoney(missing.total)}</div>
+        <div class="pnl-pct">${pnlSmallPct(pct(missing.total), missing.total, sales)}</div>
+      </div>
+      ${pnlMissingOpen ? `
+      <div class="pnl-waste-scroll"><table>
+        <thead><tr><th>Date</th><th>Item</th><th class="r">Expected</th><th class="r">Counted</th><th class="r">Missing</th><th class="r">Worth</th></tr></thead>
+        <tbody>${missing.entries.map(e => `
+          <tr><td>${esc(pnlShortDate(e.date))}</td><td>${esc(e.item_name)}</td>
+              <td class="r pnl-waste-num">${pnlQty(e.expected_qty)} ${esc(e.unit)}</td>
+              <td class="r pnl-waste-num">${pnlQty(e.counted_qty)} ${esc(e.unit)}</td>
+              <td class="r pnl-waste-num">${pnlQty(e.qty)} ${esc(e.unit)}</td>
+              <td class="r pnl-waste-num">${fmtMoney(e.value)}</td></tr>`).join('')}
+        </tbody></table></div>` : ''}
+      <div class="pnl-sub">${useCogs ? 'Also inside the food cost above.' : inside} Nobody said why it is gone: it may be waste
+        that was not recorded, portions bigger than the recipe says, or a delivery that came short.
+        <a href="#" onclick="pnlToggleWaste('missing');return false">${pnlMissingOpen ? 'Hide the items' : `Show the ${n(missing.entries, 'item')}`}</a></div>
+    </div>`;
+  }
+  return html;
+}
+
 function fmtMoney(n) {
   const num = parseFloat(n) || 0;
   return (num < 0 ? '-$' : '$') + Math.abs(num).toFixed(2);
@@ -704,6 +793,7 @@ function render() {
     ${costRow('Food (ingredients)', cogsSub(foodBought, cogsData.opening_food, cogsData.closing_food), food)}
     ${uncatNote}
     ${costRow('Drinks (beverage)', cogsSub(bevBought, cogsData.opening_beverage, cogsData.closing_beverage), beverage)}
+    ${wasteBlocksHtml(pnlCosts.waste, useCogs, pct, sales)}
     ${totalRow('Gross profit', gross, gross >= 0 ? 'good' : 'bad')}
 
     <div class="pnl-section-head">Running costs</div>

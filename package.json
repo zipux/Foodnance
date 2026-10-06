@@ -38,6 +38,7 @@
     "test:count-date": "node tests/integration/count-date-and-drinks.test.mjs",
     "test:history": "node tests/integration/stock-take-history.test.mjs",
     "test:waste": "node tests/integration/waste-recount.test.mjs",
+    "test:stock-log": "node tests/integration/stock-log.test.mjs",
     "test:line-product": "node tests/integration/invoice-line-product.test.mjs"
   },
   "dependencies": {
