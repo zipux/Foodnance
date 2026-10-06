@@ -788,7 +788,10 @@ The Stock Take page lists every submitted count under the start panel (date, ite
 short/over, stock value); opening one shows each line (expected, counted, difference, reason),
 what the differences were worth, and a **note** box. That note is the only thing that can be
 written on a past count (`stock_takes.note`, a column that existed since `0015` and was never
-used). There is deliberately **no re-open, edit or delete**: submitting a count set the shelf,
+used). It is reached from the **Past Counts** button on the Inventory page
+(`/stock-take.html?history=1`, which shows the list even while a count is in progress); the
+only other link there, Start Stock Take, opens a count, so without the button nobody could
+find the list. There is deliberately **no re-open, edit or delete**: submitting a count set the shelf,
 and every movement since and each month's true COGS were built on it. A wrong count is put
 right on the Inventory page or by the next count. Routes: `GET /api/stock-take/history`,
 `GET /api/stock-take/history/:id`, `POST /api/stock-take/history/:id/note` (list declared

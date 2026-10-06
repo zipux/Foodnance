@@ -52,6 +52,12 @@
         <a href="/stock-take.html?start=1" class="btn btn-success" id="startStockTakeBtn">
           <i class="fas fa-clipboard-check"></i> Start Stock Take
         </a>
+        <!-- ?history=1 opens the read-only list of submitted counts. Without it
+             this page would show a count in progress instead, and the only
+             other link here (above) starts one. -->
+        <a href="/stock-take.html?history=1" class="btn btn-secondary" id="pastCountsBtn">
+          <i class="fas fa-list-check"></i> Past Counts
+        </a>
         <a href="/storage-layout.html" class="btn btn-secondary">
           <i class="fas fa-sitemap"></i> Storage Layout
         </a>

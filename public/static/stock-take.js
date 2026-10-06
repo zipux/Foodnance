@@ -331,7 +331,9 @@ function stDiffPills(short, over) {
 let stHistoryOpen = null;        // the opened count, as the server sent it
 let stHistoryFilter = 'diff';    // 'diff' | 'all'
 
-async function loadHistory() {
+// `asked`: the visitor came for the list itself (Past Counts), so an empty one
+// says so instead of leaving a blank space under the start panel.
+async function loadHistory(asked) {
   const box = document.getElementById('stHistory');
   let rows = [];
   try {
@@ -339,7 +341,13 @@ async function loadHistory() {
     if (!r.ok) throw new Error(String(r.status));
     rows = (await r.json()).data || [];
   } catch (_) { return; }        // the list is extra; the page works without it
-  if (!rows.length) { box.style.display = 'none'; return; }
+  if (!rows.length) {
+    if (!asked) { box.style.display = 'none'; return; }
+    document.getElementById('stHistoryList').innerHTML =
+      '<p class="st-h-small" style="padding:.9rem 1rem">No counts submitted yet. Your first one will be listed here.</p>';
+    box.style.display = '';
+    return;
+  }
 
   document.getElementById('stHistoryList').innerHTML = `
     <table>
@@ -387,8 +395,9 @@ function closeHistory() {
   stHistoryOpen = null;
   document.getElementById('stHistoryDetail').style.display = 'none';
   document.getElementById('stStartPanel').style.display = '';
-  document.querySelector('.st-header-meta').style.visibility = '';
-  loadHistory();                 // a note saved meanwhile shows on its row
+  const asked = new URLSearchParams(location.search).get('history') === '1';
+  document.querySelector('.st-header-meta').style.visibility = asked ? 'hidden' : '';
+  loadHistory(asked);            // a note saved meanwhile shows on its row
 }
 
 function renderHistoryDetail() {
@@ -493,6 +502,17 @@ async function beginStockTake() {
 // user actually asks. Arriving from Inventory's "Start Stock Take" carries
 // ?start=1 so that button still goes straight into counting with no extra click.
 async function loadOrStart() {
+  // "Past Counts" on the Inventory page. Asked for by name, so it is shown even
+  // while a count is in progress — which the start button below then resumes
+  // (POST /start hands back the open count rather than making a second one).
+  if (new URLSearchParams(location.search).get('history') === '1') {
+    document.getElementById('stLoading').style.display = 'none';
+    document.getElementById('stStartPanel').style.display = '';
+    document.getElementById('stCancelBtn').style.display = 'none';
+    document.querySelector('.st-header-meta').style.visibility = 'hidden';
+    await loadHistory(true);
+    return;
+  }
   try {
     const active = await fetch('/api/stock-take/active').then(r => {
       if (!r.ok) throw new Error(`Load failed: ${r.status}`);

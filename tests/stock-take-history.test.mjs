@@ -58,12 +58,21 @@ t.check('a count is dated by the restaurant\'s own day, as in the P&L', /\$\{STO
 
 t.section('the page');
 const hist = page.slice(page.indexOf('// PAST COUNTS'), page.indexOf('function todayYMD'));
-t.check('the list loads when no count is in progress', /loadHistory\(\);/.test(page.slice(page.indexOf("getElementById('stStartPanel').style.display = '';"), page.indexOf("getElementById('stStartPanel').style.display = '';") + 200)));
+t.check('the list loads when no count is in progress', /Nothing in progress[\s\S]{0,400}loadHistory\(\);/.test(page));
 t.check('the opened count has no quantity inputs', !/<input/.test(hist) && !/<select/.test(hist));
 t.check('the only request that writes is the note', (hist.match(/method: 'POST'/g) || []).length === 1 && /\/note`/.test(hist));
 t.check('it says it cannot be changed', /They cannot be changed\./.test(html) && /Read only/.test(hist));
 t.check('a failed list never breaks the page', /catch \(_\) \{ return; \}/.test(hist));
 t.check('everything the server sends is escaped', !/\$\{t\.note\}|\$\{i\.item_name\}|\$\{i\.reason\}|\$\{take\.note\}/.test(hist));
+
+t.section('there is a way to reach it');
+const invHtml = readFileSync(join(ROOT, 'public/inventory.html'), 'utf8');
+t.check('the Inventory page has a Past Counts button', /href="\/stock-take\.html\?history=1"[^>]*id="pastCountsBtn"/.test(invHtml) && /Past Counts/.test(invHtml));
+t.check('it does not start a count', !/history=1[^"]*start=1|start=1[^"]*history=1/.test(invHtml));
+const boot = page.slice(page.indexOf('async function loadOrStart'), page.indexOf('async function loadOrStart') + 900);
+t.check('the page shows the list when asked, before looking for a count in progress',
+  boot.indexOf("get('history') === '1'") > -1 && boot.indexOf("get('history') === '1'") < boot.indexOf('/api/stock-take/active'));
+t.check('an empty list says so when it was asked for', /No counts submitted yet/.test(page));
 
 t.section('a reason for a difference is optional');
 const submit = page.slice(page.indexOf('async function submitStockTake'), page.indexOf('function openSubmitSummary'));
