@@ -355,10 +355,14 @@ async function loadHistory(asked) {
       <tbody>${rows.map(t => `
         <tr class="st-h-row" data-take-id="${esc(t.id)}">
           <td><span class="st-h-date">${esc(stLongDate(t.date))}</span>${
+            t.kind === 'recount' ? ` <span class="st-h-pill kind">Recount</span><div class="st-h-small">${esc(t.item_name || '')}</div>` : ''}${
             t.note ? `<div class="st-h-small"><i class="fas fa-note-sticky"></i> ${esc(t.note.length > 70 ? t.note.slice(0, 70) + '…' : t.note)}</div>` : ''}</td>
           <td>${t.counted} item${t.counted === 1 ? '' : 's'}</td>
           <td>${stDiffPills(t.short, t.over)}</td>
-          <td class="num">${stMoney(t.value)}</td>
+          ${t.kind === 'recount'
+            // One line of the shelf, not the stock: it has no "stock value".
+            ? '<td class="num st-h-small" style="font-family:inherit">not a full count</td>'
+            : `<td class="num">${stMoney(t.value)}</td>`}
           <td><button type="button" class="st-h-open">Open</button></td>
         </tr>`).join('')}
       </tbody>
@@ -411,7 +415,7 @@ function renderHistoryDetail() {
   box.innerHTML = `
     <div class="st-h-head">
       <div>
-        <h2>Stock count, ${esc(stLongDate(take.date))}</h2>
+        <h2>${take.kind === 'recount' ? 'Recount' : 'Stock count'}, ${esc(stLongDate(take.date))}</h2>
         <p class="st-history-sub" style="margin-bottom:0"><button type="button" class="st-h-open st-h-back"><i class="fas fa-arrow-left"></i> Back to past counts</button></p>
       </div>
       <span class="st-h-lock"><i class="fas fa-lock"></i> Read only</span>
@@ -419,7 +423,7 @@ function renderHistoryDetail() {
     <div class="st-h-facts">
       <div><div class="k">Items counted</div><div class="v">${take.items.length}</div></div>
       <div><div class="k">Differences</div><div class="v">${diffItems.length}</div></div>
-      <div><div class="k">Stock value</div><div class="v">${stMoney(take.value)}</div></div>
+      ${take.kind === 'recount' ? '' : `<div><div class="k">Stock value</div><div class="v">${stMoney(take.value)}</div></div>`}
       <div><div class="k">Value of differences</div><div class="v ${net < 0 ? 'st-h-short' : net > 0 ? 'st-h-over' : ''}">${stMoney(net)}</div></div>
     </div>
     <div class="st-h-note">

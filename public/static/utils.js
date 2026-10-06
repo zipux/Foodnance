@@ -1398,11 +1398,21 @@ const STOCK_REASONS = [
   { code: 'breakage',     label: 'Breakage',              types: ['remove'] },
   { code: 'staff_meal',   label: 'Staff meal',            types: ['remove'] },
   { code: 'sample',       label: 'Sample / comp',         types: ['remove'] },
+  { code: 'menu_testing', label: 'Menu testing',          types: ['remove'] },
   { code: 'theft',        label: 'Theft / loss',          types: ['remove'] },
   { code: 'transfer_out', label: 'Transfer out',          types: ['remove'] },
   { code: 'correction',   label: 'Stock correction',      types: ['add', 'remove', 'set'] },
   { code: 'other',        label: 'Other',                 types: ['add', 'remove'] },
 ];
+
+// What "Record waste" offers: stock that left the shelf with no sale behind it.
+// Not 'usage' (a sales import already took it), not a transfer, not a
+// correction (that is a recount). KEEP IN STEP with WASTE_REASONS in
+// src/index.ts, which refuses any other code on /api/inventory/:id/waste.
+const WASTE_REASON_CODES = ['spillage', 'breakage', 'staff_meal', 'sample', 'menu_testing', 'theft', 'other'];
+function wasteReasons() {
+  return WASTE_REASON_CODES.map(code => STOCK_REASONS.find(r => r.code === code)).filter(Boolean);
+}
 
 function stockReasonsFor(type) {
   return STOCK_REASONS.filter(r => r.types.includes(type));

@@ -49,6 +49,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   document.getElementById('saveAdjustBtn').addEventListener('click', applyAdjustment);
 
+  // The row buttons depend on the account type (stockButtonsHtml), which is
+  // only known once the session bootstrap answers — after the first paint.
+  window.addEventListener('dm:plan-known', () => { if (allInventory.length) renderInventory(); });
+
   // Live preview in adjust modal
   document.getElementById('adjustQty').addEventListener('input', updateAdjustPreview);
   document.getElementById('adjustType').addEventListener('change', () => {
@@ -333,9 +337,7 @@ function renderInventory() {
         <td>${priceCell}</td>
         <td style="color:var(--text-muted);font-size:.8rem">${updated}</td>
         <td style="white-space:nowrap">
-          <button class="btn btn-primary btn-icon" onclick="openAdjustModal('${esc(r.id)}')" title="Adjust stock">
-            <i class="fas fa-sliders-h"></i>
-          </button>
+          ${stockButtonsHtml(r)}
           <button class="btn btn-danger btn-icon" onclick="deleteInventoryItem('${esc(r.id)}', this.dataset.name)" data-name="${esc(r.item_name)}" title="Delete item">
             <i class="fas fa-trash"></i>
           </button>
@@ -343,6 +345,20 @@ function renderInventory() {
       </tr>
     `;
   }).join('');
+}
+
+// A restaurant gets two buttons that each do one thing. A commissary keeps the
+// old three-way Adjust Stock for now (by decision, 2026-10-06): moving stock by
+// hand is their workflow. The account type arrives after the first paint, so
+// an unknown one is drawn as a restaurant and redrawn on dm:plan-known.
+function stockButtonsHtml(r) {
+  if (window.__accountType === 'commissary') {
+    return `<button class="btn btn-primary btn-icon" onclick="openAdjustModal('${esc(r.id)}')" title="Adjust stock">
+            <i class="fas fa-sliders-h"></i>
+          </button>`;
+  }
+  return `<button class="btn btn-secondary btn-sm" onclick="openAdjustModal('${esc(r.id)}', 'waste')">Record waste</button>
+          <button class="btn btn-secondary btn-sm" onclick="openAdjustModal('${esc(r.id)}', 'recount')">Recount</button>`;
 }
 
 function buildPriceCell(r) {
@@ -524,15 +540,39 @@ async function saveInvEditProduct() {
 let adjustPackState = null;   // { top, mid, base } or null when not a pack item
 let adjustPack      = null;   // pkInfoFor() result, or null
 
-function openAdjustModal(invId) {
+// 'waste' | 'recount' | 'adjust'. The window is one piece of markup; the mode
+// decides its title, its one question, its reasons and where it saves.
+let adjustMode = 'adjust';
+const ADJUST_MODES = {
+  adjust:  { title: 'Adjust Stock',       current: 'Current stock:',  save: 'Apply Adjustment', icon: 'fa-check' },
+  waste:   { title: 'Record waste',       current: 'On the shelf:',   save: 'Record waste',     icon: 'fa-check' },
+  recount: { title: 'Recount this item',  current: 'The app says:',   save: 'Save recount',     icon: 'fa-check' },
+};
+function adjustSaveHtml() {
+  const m = ADJUST_MODES[adjustMode];
+  return `<i class="fas ${m.icon}"></i> ${m.save}`;
+}
+
+function openAdjustModal(invId, mode) {
   const row = allInventory.find(r => r.id === invId);
   if (!row) return;
+  adjustMode = ADJUST_MODES[mode] ? mode : 'adjust';
+  const m = ADJUST_MODES[adjustMode];
+  document.getElementById('adjustTitle').textContent        = m.title;
+  document.getElementById('adjustCurrentLabel').textContent = m.current;
+  document.getElementById('saveAdjustBtn').innerHTML        = adjustSaveHtml();
+  document.getElementById('adjustTypeGroup').classList.toggle('hidden', adjustMode !== 'adjust');
+  document.getElementById('adjustReasonOptional').classList.toggle('hidden', adjustMode !== 'recount');
+  document.getElementById('adjustSavedNote').classList.toggle('hidden', adjustMode !== 'recount');
 
   document.getElementById('adjustInvId').value          = invId;
   document.getElementById('adjustItemLabel').textContent = row.item_name;
   document.getElementById('adjustCurrentStock').textContent =
     `${pkFmtQty(row.quantity)} ${row.unit || ''}`;
-  document.getElementById('adjustType').value  = 'add';
+  // Record waste only removes; a recount sets the figure. Only the old
+  // three-way window starts on "add".
+  document.getElementById('adjustType').value  =
+    adjustMode === 'waste' ? 'remove' : adjustMode === 'recount' ? 'set' : 'add';
   document.getElementById('adjustQty').value   = '';
   document.getElementById('adjustNote').value  = '';
 
@@ -555,6 +595,12 @@ function openAdjustModal(invId) {
   if (first) first.focus();
 }
 
+// The one question each window asks.
+function adjustAsk() {
+  return adjustMode === 'waste' ? 'How much was lost?'
+       : adjustMode === 'recount' ? 'How much is really there?' : 'Quantity';
+}
+
 // Swap between the pack boxes and the plain quantity input.
 function renderAdjustQtyInput(row) {
   const wrap  = document.getElementById('adjustPackWrap');
@@ -565,7 +611,7 @@ function renderAdjustQtyInput(row) {
     wrap.classList.add('hidden');
     wrap.innerHTML = '';
     plain.classList.remove('hidden');
-    label.innerHTML = `Quantity (<span id="adjustUnitLabel">${esc(row.unit || 'unit')}</span>)`;
+    label.innerHTML = `${adjustAsk()} (<span id="adjustUnitLabel">${esc(row.unit || 'unit')}</span>)`;
     return;
   }
 
@@ -578,7 +624,7 @@ function renderAdjustQtyInput(row) {
     state:      adjustPackState,
     inputClass: 'pk-adjust-input',
   });
-  label.textContent = 'Quantity';
+  label.textContent = adjustAsk();
   wrap.querySelectorAll('.pk-adjust-input').forEach(el => {
     el.addEventListener('input', onAdjustPackBoxChange);
   });
@@ -642,6 +688,17 @@ function populateAdjustReasons() {
   const sel  = document.getElementById('adjustReasonCode');
   const prev = sel.value;
 
+  if (adjustMode !== 'adjust') {
+    // Waste: one of the waste reasons. Recount: the same list, or nothing —
+    // on a count the reason is optional and "Not sure" is an honest answer.
+    const list = wasteReasons();
+    sel.innerHTML = (adjustMode === 'recount' ? '<option value="">Not sure</option>' : '')
+      + list.map(r => `<option value="${esc(r.code)}">${esc(r.label)}</option>`).join('');
+    sel.disabled = false;
+    sel.value = adjustMode === 'recount' ? '' : list[0].code;
+    return;
+  }
+
   const opts = stockReasonsFor(type);
   sel.innerHTML = opts.map(r => `<option value="${esc(r.code)}">${esc(r.label)}</option>`).join('');
 
@@ -662,7 +719,8 @@ function adjustReasonLabel(code) {
 // Returns null when nothing usable has been entered.
 function adjustComputeNewQty(row) {
   const qty = adjustEnteredQty();
-  if (qty === null || qty === 0) return null;
+  // Counting none left is a real answer to "how much is really there?".
+  if (qty === null || (qty === 0 && adjustMode !== 'recount')) return null;
   const current = parseFloat(row.quantity) || 0;
   const type    = document.getElementById('adjustType').value;
   if (type === 'add')    return current + qty;
@@ -703,6 +761,29 @@ function updateAdjustPreview() {
     ? `  ·  ${change >= 0 ? '+' : '−'}${fmt(Math.abs(change) * cpu)}`
     : '';
 
+  const worth = (cpu != null && !isNaN(cpu) && cpu > 0) ? fmt(Math.abs(change) * cpu) : '';
+
+  if (adjustMode === 'waste') {
+    if (newQty < 0) {
+      preview.classList.add('error');
+      text.textContent = `That is more than the ${pkFmtQty(current)} ${unit} the app has on the shelf. `
+        + 'If the shelf number is wrong, use Recount instead.';
+      return;
+    }
+    preview.classList.add('ready');
+    text.textContent = `Shelf goes from ${pkFmtQty(current)} ${unit} to ${pkFmtQty(newQty)} ${unit}.`
+      + (worth ? ` About ${worth} lost.` : '');
+    return;
+  }
+  if (adjustMode === 'recount') {
+    preview.classList.add('ready');
+    text.textContent = change === 0
+      ? `That matches what the app has: ${pkFmtQty(current)} ${unit}.`
+      : `That is ${pkFmtQty(Math.abs(change))} ${unit} ${change < 0 ? 'less' : 'more'} than expected`
+        + (worth ? `, about ${worth}.` : '.');
+    return;
+  }
+
   if (newQty < 0) {
     preview.classList.add('error');
     text.textContent =
@@ -722,13 +803,21 @@ async function applyAdjustment() {
   if (!row) return;
 
   const qty = adjustEnteredQty();
-  if (qty === null || qty <= 0) { showToast('Enter a valid quantity.', 'error'); return; }
+  const zeroOk = adjustMode === 'recount';
+  if (qty === null || qty < 0 || (qty === 0 && !zeroOk)) { showToast('Enter a valid quantity.', 'error'); return; }
 
   const newQty = adjustComputeNewQty(row);
   if (newQty === null) { showToast('Enter a valid quantity.', 'error'); return; }
 
+  // Waste cannot exceed what is there: a shelf number that is wrong is a
+  // recount, and filing the gap as waste would put it in the waste figures.
+  if (adjustMode === 'waste' && newQty < 0) {
+    showToast('That is more than the app has on the shelf. If the shelf number is wrong, use Recount.', 'error');
+    return;
+  }
+
   // Negative stock is almost always a data-entry slip, so make it deliberate.
-  if (newQty < 0 && !confirm(
+  if (adjustMode === 'adjust' && newQty < 0 && !confirm(
     `This would leave "${row.item_name}" at ${pkFmtQty(newQty)} ${row.unit || ''} — below zero.\n\nApply it anyway?`
   )) return;
 
@@ -743,21 +832,36 @@ async function applyAdjustment() {
   try {
     // Single endpoint so the quantity update and the log line commit together —
     // a half-applied adjustment would silently lose stock history.
-    await apiPost(`inventory/${invId}/adjust`, {
-      new_quantity: newQty,
-      change:       newQty - current,
-      reason_code:  reasonCode,
-      reason:       adjustReasonLabel(reasonCode),
-      note,
-    });
-    showToast('Stock updated!', 'success');
+    if (adjustMode === 'waste') {
+      // The server subtracts from whatever is on the shelf now, so this cannot
+      // overwrite a sales import that landed since the page loaded.
+      await apiPost(`inventory/${invId}/waste`, { qty, reason_code: reasonCode, note });
+      showToast('Waste recorded.', 'success');
+    } else if (adjustMode === 'recount') {
+      const d = new Date();
+      await apiPost(`inventory/${invId}/recount`, {
+        counted_qty: qty, reason_code: reasonCode, note,
+        // The day on this device's clock, as a full count sends it (0062).
+        count_date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+      });
+      showToast('Recount saved. You can see it under Past Counts.', 'success');
+    } else {
+      await apiPost(`inventory/${invId}/adjust`, {
+        new_quantity: newQty,
+        change:       newQty - current,
+        reason_code:  reasonCode,
+        reason:       adjustReasonLabel(reasonCode),
+        note,
+      });
+      showToast('Stock updated!', 'success');
+    }
     closeModal('adjustModal');
     await loadInventory();
   } catch (e) {
     showToast('Failed: ' + e.message, 'error');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-check"></i> Apply Adjustment';
+    btn.innerHTML = adjustSaveHtml();
   }
 }
 

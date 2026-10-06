@@ -1,0 +1,16 @@
+-- ============================================================
+-- A one-item recount is not a full stock count
+-- ============================================================
+-- "Recount this item" on the Inventory page (POST /api/inventory/:id/recount)
+-- fixes one wrong shelf number and saves it as a count, so it shows in Past
+-- Counts with what was expected and what was found. But the P&L brackets a
+-- month between two FULL counts: a recount of one cheese on the 20th must not
+-- become that month's closing count, or the whole shelf would be valued as one
+-- cheese.
+--
+-- kind  'full'    — a stock take from the Stock Take page (every existing row)
+--       'recount' — one item, from the Inventory page
+--
+-- Only 'full' counts open or close a period in /api/pnl, and only a 'full'
+-- count drives the Inventory page's counted / not counted marks.
+ALTER TABLE stock_takes ADD COLUMN kind TEXT NOT NULL DEFAULT 'full';

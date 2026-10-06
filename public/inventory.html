@@ -9,7 +9,7 @@
   <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
   <title>Inventory — Foodnance</title>
   <link rel="stylesheet" href="/static/style.css?v=20260923-1" />
-  <link rel="stylesheet" href="/static/stock-take.css?v=20260922-1" />
+  <link rel="stylesheet" href="/static/stock-take.css?v=20261006-2" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560;9..144,620&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
   <script src="/static/nav-gate.js?v=20260921-3"></script>
@@ -98,7 +98,7 @@
   <div class="modal-overlay hidden" id="adjustModal">
     <div class="modal" style="max-width:440px">
       <div class="modal-header">
-        <h3><i class="fas fa-sliders-h"></i> Adjust Stock</h3>
+        <h3><i class="fas fa-sliders-h"></i> <span id="adjustTitle">Adjust Stock</span></h3>
         <button class="modal-close" id="closeAdjustModal"><i class="fas fa-times"></i></button>
       </div>
       <div class="modal-body">
@@ -106,10 +106,12 @@
         <div class="form-group" style="margin-bottom:1rem">
           <label id="adjustItemLabel" style="font-size:1rem;font-weight:600;color:var(--text)"></label>
           <div style="margin-top:.25rem;font-size:.82rem;color:var(--text-muted)">
-            Current stock: <strong id="adjustCurrentStock"></strong>
+            <span id="adjustCurrentLabel">Current stock:</span> <strong id="adjustCurrentStock"></strong>
           </div>
         </div>
-        <div class="form-group">
+        <!-- Shown only in the old three-way mode (commissary accounts). Record
+             waste and Recount each fix the type and hide this. -->
+        <div class="form-group" id="adjustTypeGroup">
           <label>Adjustment Type</label>
           <select id="adjustType">
             <option value="add">➕ Add stock</option>
@@ -127,7 +129,7 @@
         </div>
 
         <div class="form-group">
-          <label>Reason</label>
+          <label>Reason <span id="adjustReasonOptional" class="hidden" style="font-weight:400;color:var(--text-muted)">(optional)</span></label>
           <select id="adjustReasonCode"></select>
         </div>
         <div class="form-group">
@@ -138,6 +140,9 @@
         <div id="adjustPreview" class="cost-per-unit-box" style="margin-top:.5rem">
           <i class="fas fa-info-circle"></i>
           <span id="adjustPreviewText">Enter a quantity to preview the change</span>
+        </div>
+        <div id="adjustSavedNote" class="hidden" style="margin-top:.6rem;font-size:.8rem;color:var(--text-muted)">
+          Saved in Past Counts, so there is a record of what changed.
         </div>
       </div>
       <div class="modal-footer">
@@ -236,7 +241,7 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="/static/env-banner.js?v=20260807-2"></script>
-  <script src="/static/utils.js?v=20261006-2"></script>
-  <script src="/static/inventory.js?v=20261006-2"></script>
+  <script src="/static/utils.js?v=20261006-3"></script>
+  <script src="/static/inventory.js?v=20261006-3"></script>
 </body>
 </html>

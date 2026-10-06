@@ -1037,6 +1037,117 @@ app.post('/api/inventory/:id/adjust', async (c) => {
   return c.json({ ok: true, quantity: newQty, change })
 })
 
+// ── Record waste / Recount (restaurant accounts; replaces Adjust Stock) ──
+// Adjust Stock did three jobs in one window. Two were harmful: adding stock by
+// hand (a "delivery" with no invoice raises the shelf and never reaches the
+// P&L, so food cost reads low) and "Kitchen usage" (already taken off by a
+// sales import, so it came off twice). The third, typing the exact amount, was
+// a count that left no record. These two routes are what remains, each doing
+// one thing. /adjust above stays for commissary accounts, by decision.
+
+// What can be recorded as waste: stock that left the shelf with no sale behind
+// it. The server owns the list and the wording, so a hand-made request cannot
+// file a "delivery" through this route.
+const WASTE_REASONS: Record<string, string> = {
+  spillage:     'Spillage / waste',
+  breakage:     'Breakage',
+  staff_meal:   'Staff meal',
+  sample:       'Sample / comp',
+  menu_testing: 'Menu testing',
+  theft:        'Theft / loss',
+  other:        'Other',
+}
+
+// POST /api/inventory/:id/waste   Body: { qty, reason_code, note? }
+// Takes `qty` (in the bin's unit) off the shelf. Remove only, and RELATIVE —
+// the server subtracts from whatever is there now, so a sales import landing at
+// the same moment cannot be overwritten by it.
+app.post('/api/inventory/:id/waste', async (c) => {
+  const org = orgOf(c)
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const qty = Math.round(Number(body.qty) * 1e6) / 1e6
+  if (!isFinite(qty) || !(qty > 0)) return c.json({ error: 'Enter how much was lost.' }, 400)
+  const reasonCode = String(body.reason_code || '')
+  const reason = WASTE_REASONS[reasonCode]
+  if (!reason) return c.json({ error: 'Choose a reason.' }, 400)
+
+  const row = await c.env.DB.prepare(
+    `SELECT id, item_id, item_type, item_name FROM inventory WHERE id = ? AND org_id IS ?`,
+  ).bind(c.req.param('id'), org).first<{ id: string; item_id: string; item_type: string; item_name: string }>()
+  if (!row) return c.json({ error: 'Inventory row not found' }, 404)
+
+  await c.env.DB.batch([
+    c.env.DB.prepare(`UPDATE inventory SET quantity = ROUND(quantity - ?, 6) WHERE id = ? AND org_id IS ?`)
+      .bind(qty, row.id, org),
+    c.env.DB.prepare(
+      `INSERT INTO stock_log
+         (id, inventory_id, item_id, item_type, item_name, change, reason, reason_code, note, lot_number, moved_at, org_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)`,
+    ).bind(uid(), row.id, row.item_id, row.item_type, row.item_name, -qty, reason, reasonCode,
+           cleanLabel(body.note, 300), new Date().toISOString(), org),
+  ])
+  const after = await c.env.DB.prepare(`SELECT quantity FROM inventory WHERE id = ? AND org_id IS ?`)
+    .bind(row.id, org).first<{ quantity: number }>()
+  return c.json({ ok: true, quantity: after?.quantity ?? null, change: -qty })
+})
+
+// POST /api/inventory/:id/recount   Body: { counted_qty, reason_code?, note?, count_date? }
+// One shelf number is wrong and the next full count is weeks away. Sets the bin
+// to what was counted and saves it as a count of one item (stock_takes.kind =
+// 'recount', 0063), so Past Counts shows what was expected and what was found.
+// A reason is optional, as on a full count; when given it must be one of the
+// waste reasons — a recount is not a way to book a delivery either.
+app.post('/api/inventory/:id/recount', async (c) => {
+  const org = orgOf(c)
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const counted = Math.round(Number(body.counted_qty) * 1e6) / 1e6
+  if (body.counted_qty === null || body.counted_qty === undefined || body.counted_qty === ''
+      || !isFinite(counted) || counted < 0) {
+    return c.json({ error: 'Enter how much is really there.' }, 400)
+  }
+  const reasonCode = String(body.reason_code || '')
+  if (reasonCode && !WASTE_REASONS[reasonCode]) return c.json({ error: 'Choose a reason from the list.' }, 400)
+  const reason = reasonCode ? WASTE_REASONS[reasonCode] : ''
+
+  const row = await c.env.DB.prepare(
+    `SELECT id, item_id, item_type, item_name, category, unit, quantity FROM inventory WHERE id = ? AND org_id IS ?`,
+  ).bind(c.req.param('id'), org).first<{
+    id: string; item_id: string; item_type: string; item_name: string; category: string | null; unit: string | null; quantity: number
+  }>()
+  if (!row) return c.json({ error: 'Inventory row not found' }, 404)
+
+  const expected = Number(row.quantity) || 0
+  const variance = Math.round((counted - expected) * 1e6) / 1e6
+  const now = new Date().toISOString()
+  const takeId = uid()
+  const statements = [
+    c.env.DB.prepare(
+      `INSERT INTO stock_takes (id, status, kind, submitted_at, count_date, total_items, counted_items, note, org_id)
+       VALUES (?, 'submitted', 'recount', ?, ?, 1, 1, ?, ?)`,
+    ).bind(takeId, now, localCountDate(body.count_date, now), cleanLabel(body.note, 1000), org),
+    c.env.DB.prepare(
+      `INSERT INTO stock_take_items
+         (id, stock_take_id, inventory_id, item_id, item_type, item_name, category, unit,
+          expected_qty, counted_qty, variance, reason, reason_code, counted_at, org_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(uid(), takeId, row.id, row.item_id, row.item_type, row.item_name, row.category || '', row.unit || '',
+           expected, counted, variance, reason, reasonCode, now, org),
+    c.env.DB.prepare(`UPDATE inventory SET quantity = ? WHERE id = ? AND org_id IS ?`).bind(counted, row.id, org),
+  ]
+  // The same log line a full count writes for a line that differed.
+  if (variance !== 0) {
+    statements.push(c.env.DB.prepare(
+      `INSERT INTO stock_log
+         (id, inventory_id, item_id, item_type, item_name, change, reason, reason_code, note, lot_number, moved_at, stock_take_id, org_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)`,
+    ).bind(uid(), row.id, row.item_id, row.item_type, row.item_name, variance,
+           reason || 'Stock take', reasonCode || 'stock_take',
+           `Recount: expected ${expected}, counted ${counted}`, now, takeId, org))
+  }
+  await c.env.DB.batch(statements)
+  return c.json({ ok: true, stock_take_id: takeId, quantity: counted, expected, change: variance })
+})
+
 // ══════════════════════════════════════════════════════════════
 // AUTH ROUTES  (declared before the generic CRUD — Hono matches in order)
 // ══════════════════════════════════════════════════════════════
@@ -2535,7 +2646,7 @@ function featureForPath(path: string): string | null {
   // Covers /api/pos-imports and /api/pos-mappings alike.
   if (path.startsWith('/api/pos-'))           return 'pos_sales'
   // Adjust Stock only. Reading inventory stays open — see PRO_ONLY_TABLES.
-  if (/^\/api\/inventory\/[^/]+\/adjust$/.test(path)) return 'inventory_tools'
+  if (/^\/api\/inventory\/[^/]+\/(adjust|waste|recount)$/.test(path)) return 'inventory_tools'
   const table = path.match(/^\/api\/tables\/([^/?]+)/)
   if (table) return PRO_ONLY_TABLES[table[1]] || null
   return null
@@ -5865,29 +5976,33 @@ const stockTotal = (v: { food: number; beverage: number }) => round2(round2(v.fo
 app.get('/api/stock-take/history', async (c) => {
   const org = orgOf(c)
   const takes = await c.env.DB.prepare(
-    `SELECT id, ${STOCK_TAKE_DAY} AS d, submitted_at, note FROM stock_takes
+    `SELECT id, kind, ${STOCK_TAKE_DAY} AS d, submitted_at, note FROM stock_takes
       WHERE status = 'submitted' AND submitted_at IS NOT NULL AND org_id IS ?
       ORDER BY d DESC, submitted_at DESC LIMIT 60`,
-  ).bind(org).all<{ id: string; d: string; submitted_at: string; note: string | null }>()
+  ).bind(org).all<{ id: string; kind: string; d: string; submitted_at: string; note: string | null }>()
 
   const tallies = await c.env.DB.prepare(
     `SELECT stock_take_id,
             SUM(CASE WHEN counted_qty IS NOT NULL THEN 1 ELSE 0 END) AS counted,
             SUM(CASE WHEN counted_qty IS NOT NULL AND ROUND(counted_qty - expected_qty, 6) < 0 THEN 1 ELSE 0 END) AS short,
-            SUM(CASE WHEN counted_qty IS NOT NULL AND ROUND(counted_qty - expected_qty, 6) > 0 THEN 1 ELSE 0 END) AS over
+            SUM(CASE WHEN counted_qty IS NOT NULL AND ROUND(counted_qty - expected_qty, 6) > 0 THEN 1 ELSE 0 END) AS over,
+            MAX(item_name) AS one_name
        FROM stock_take_items WHERE org_id IS ? GROUP BY stock_take_id`,
-  ).bind(org).all<{ stock_take_id: string; counted: number; short: number; over: number }>()
+  ).bind(org).all<{ stock_take_id: string; counted: number; short: number; over: number; one_name: string }>()
   const tally = new Map((tallies.results ?? []).map(r => [r.stock_take_id, r]))
 
   const valuer = stockValuer(c.env.DB, org)
   const data = []
   for (const t of (takes.results ?? [])) {
-    const v = await valuer.valueTake(t.id, t.d)
     const n = tally.get(t.id)
+    const recount = t.kind === 'recount'
     data.push({
-      id: t.id, date: t.d, note: t.note || '',
+      id: t.id, date: t.d, note: t.note || '', kind: recount ? 'recount' : 'full',
+      // A recount is one line of the shelf: it names its item and has no
+      // "stock value" — that figure means the whole count's.
+      item_name: recount ? (n?.one_name || '') : '',
       counted: n?.counted ?? 0, short: n?.short ?? 0, over: n?.over ?? 0,
-      value: stockTotal(v),
+      value: recount ? null : stockTotal(await valuer.valueTake(t.id, t.d)),
     })
   }
   return c.json({ data })
@@ -5899,9 +6014,9 @@ app.get('/api/stock-take/history', async (c) => {
 app.get('/api/stock-take/history/:id', async (c) => {
   const org = orgOf(c)
   const take = await c.env.DB.prepare(
-    `SELECT id, ${STOCK_TAKE_DAY} AS d, note FROM stock_takes
+    `SELECT id, kind, ${STOCK_TAKE_DAY} AS d, note FROM stock_takes
       WHERE id = ? AND status = 'submitted' AND submitted_at IS NOT NULL AND org_id IS ?`,
-  ).bind(c.req.param('id'), org).first<{ id: string; d: string; note: string | null }>()
+  ).bind(c.req.param('id'), org).first<{ id: string; kind: string; d: string; note: string | null }>()
   if (!take) return c.json({ error: 'That count was not found.' }, 404)
 
   const rows = await c.env.DB.prepare(
@@ -5934,8 +6049,8 @@ app.get('/api/stock-take/history/:id', async (c) => {
   }
 
   return c.json({
-    id: take.id, date: take.d, note: take.note || '',
-    value: stockTotal(whole),
+    id: take.id, date: take.d, note: take.note || '', kind: take.kind === 'recount' ? 'recount' : 'full',
+    value: take.kind === 'recount' ? null : stockTotal(whole),
     short_value: await priced(-1),
     over_value: await priced(1),
     items: items.map(({ item_id, ...rest }) => rest),
@@ -6250,7 +6365,7 @@ app.post('/api/stock-take/:id/cancel', async (c) => {
 app.get('/api/stock-take/latest-statuses', async (c) => {
   const org = orgOf(c)
   const latest = await c.env.DB.prepare(
-    `SELECT id, submitted_at FROM stock_takes WHERE status = 'submitted' AND org_id IS ? ORDER BY submitted_at DESC LIMIT 1`
+    `SELECT id, submitted_at FROM stock_takes WHERE status = 'submitted' AND kind = 'full' AND org_id IS ? ORDER BY submitted_at DESC LIMIT 1`
   ).bind(org).first<{ id: string; submitted_at: string }>()
 
   if (!latest) return c.json({ stock_take_id: null, statuses: {} })
@@ -7310,19 +7425,21 @@ app.get('/api/pnl', async (c) => {
   const [ty, tm] = to.split('-').map(Number)
   const periodEnd = `${to}-${String(new Date(Date.UTC(ty, tm, 0)).getUTCDate()).padStart(2, '0')}`  // last day of last month
 
+  // Only FULL counts bracket a period (kind, 0063): a one-item recount from the
+  // Inventory page is a count too, but of one shelf line, not of the stock.
   // A count belongs to the day on the restaurant's own clock (count_date, 0062),
   // not the UTC day of submitted_at: an evening count on the 30th in Vancouver
   // is already the 1st in UTC. Counts from before 0062 have only the UTC day.
   const closingTake = await c.env.DB.prepare(`
     SELECT id, COALESCE(count_date, date(submitted_at)) AS d FROM stock_takes
-    WHERE status = 'submitted' AND submitted_at IS NOT NULL AND COALESCE(count_date, date(submitted_at)) <= ?
+    WHERE status = 'submitted' AND kind = 'full' AND submitted_at IS NOT NULL AND COALESCE(count_date, date(submitted_at)) <= ?
       AND org_id IS ?
     ORDER BY d DESC, submitted_at DESC LIMIT 1
   `).bind(periodEnd, org).first<{ id: string; d: string }>()
 
   const openingTake = await c.env.DB.prepare(`
     SELECT id, COALESCE(count_date, date(submitted_at)) AS d FROM stock_takes
-    WHERE status = 'submitted' AND submitted_at IS NOT NULL AND COALESCE(count_date, date(submitted_at)) < ?
+    WHERE status = 'submitted' AND kind = 'full' AND submitted_at IS NOT NULL AND COALESCE(count_date, date(submitted_at)) < ?
       AND org_id IS ?
     ORDER BY d DESC, submitted_at DESC LIMIT 1
   `).bind(periodStart, org).first<{ id: string; d: string }>()

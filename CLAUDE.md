@@ -191,7 +191,7 @@ from 0024 on — org scoping, plans, suspension, the invoice cap, POS sales impo
 — was applied **by hand and never recorded**, so the command would try to replay
 0024 onward.
 
-**`migrations/` now runs to `0062_stock_take_count_date.sql`** (0061 applied to production by `--command` on 2026-10-06, unrecorded; 0058–0060 applied to production by `--command` on 2026-10-03, not recorded in `d1_migrations`; pre-change bookmark `000005b6-00000000-000050f9-0d0604a1c3a13f5c20f25018fe83498b`). Earlier it ran to `0052_invite_emails.sql` (0047–0051 landed after this note was written; 0052 is not on prod yet). It first ran to `0046_recurring_expense_dates.sql`: 0044–0046
+**`migrations/` now runs to `0063_stock_take_kind.sql`** (0061 applied to production by `--command` on 2026-10-06, unrecorded; 0058–0060 applied to production by `--command` on 2026-10-03, not recorded in `d1_migrations`; pre-change bookmark `000005b6-00000000-000050f9-0d0604a1c3a13f5c20f25018fe83498b`). Earlier it ran to `0052_invite_emails.sql` (0047–0051 landed after this note was written; 0052 is not on prod yet). It first ran to `0046_recurring_expense_dates.sql`: 0044–0046
 landed after that audit: 0044 is recorded as applied on 2026-08-04, 0045 and 0046
 are unconfirmed either way. Re-verify against live D1 — do not read the 0043
 figure as current.
@@ -438,6 +438,7 @@ npm run test:terms          # Terms acceptance record — needs the sandbox (006
 npm run test:sub-unit-stock # case/can/weight stock: stock-take value + sales import — needs the sandbox
 npm run test:count-date     # stock count's local day + drinks sales split — needs the sandbox (0062 applied locally)
 npm run test:history        # past stock counts: list, sheet, note, isolation — needs the sandbox
+npm run test:waste          # Record waste + Recount, recount kept out of the P&L — needs the sandbox (0063 applied locally)
 ```
 
 **The account purge** (`DELETE /api/admin/organizations/:id`, admin-screen button) is
@@ -805,6 +806,37 @@ still PATCH a count (the integration tests backdate takes that way).
 refuse to submit until every line that differed had one, which on a real sheet is nearly every
 line. An unexplained difference is logged by the server as `'Stock take'` / `stock_take`.
 `tests/stock-take-history.test.mjs` + `npm run test:history` (needs the sandbox).
+
+### Record waste and Recount replace Adjust Stock (added 2026-10-06, migration `0063`)
+
+On a **restaurant** account each Inventory row has two buttons, **Record waste** and **Recount**,
+instead of the three-way Adjust Stock window. The old window let a restaurant add stock by hand
+("Received / delivery" raises the shelf with no invoice behind it, so the P&L never sees the
+purchase and food cost reads low), remove "Kitchen usage" that a sales import had already taken,
+and type an exact amount that overwrote the bin and left no record. Now:
+
+- **Record waste** — `POST /api/inventory/:id/waste { qty, reason_code, note }`. Remove only,
+  and **relative** (`quantity = ROUND(quantity - ?, 6)`), so it cannot overwrite a sales import
+  landing at the same moment. Only the reasons in `WASTE_REASONS` (server) =
+  `WASTE_REASON_CODES` (`utils.js`): spillage, breakage, staff meal, sample/comp, **menu
+  testing** (the user's addition: a test dish has no sale behind it), theft/loss, other.
+  `tests/waste-recount.test.mjs` fails if the two lists drift. The page refuses waste larger
+  than the shelf and points at Recount, so a wrong shelf number is never filed as waste.
+- **Recount** — `POST /api/inventory/:id/recount { counted_qty, reason_code?, note?, count_date? }`.
+  Sets one bin to what was counted (0 allowed) and saves it as a one-item count:
+  `stock_takes.kind = 'recount'` (0063), which shows in Past Counts with a "Recount" tag, the
+  item's name and no stock value. **Only `kind = 'full'` counts bracket a period in `/api/pnl`**
+  or drive the Inventory page's counted marks — otherwise recounting one cheese on the 20th
+  would close the month on a shelf of one cheese. **Apply `0063` before deploying.** (Applied to staging and
+  production 2026-10-06 by `--command`, unrecorded; pre-change production bookmark
+  `000005ee-00000000-000050fc-caae2647afa67bef6bff5a1c371537e4`.)
+
+One modal, three modes (`adjustMode` in `inventory.js`). A **commissary keeps the old Adjust
+Stock** (`/adjust`) by decision — moving stock by hand is their workflow, and there are no
+commissary customers to ask yet; `stockButtonsHtml()` picks by `window.__accountType`, drawing
+an unknown type as a restaurant and redrawing on `dm:plan-known`. `/adjust` itself is unchanged
+and still trusts the browser's total. Not built: a waste total by reason (the codes are stored
+and nothing reads them yet). `npm run test:waste` (needs the sandbox).
 
 ### Stock-take valuation (true COGS)
 `valueTake()` inside `/api/pnl` prices a submitted stock take. Two things about it
