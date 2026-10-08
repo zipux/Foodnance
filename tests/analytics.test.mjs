@@ -57,7 +57,7 @@ const src = (code.match(/var PLAUSIBLE_SRC = '([^']*)';/) || [])[1];
 t.check('the Plausible address is empty or a plausible.io script', src === '' || /^https:\/\/plausible\.io\/js\/[\w.-]+\.js$/.test(src), src);
 
 t.section('On every public page, on no app page');
-const PUBLIC_PAGES = ['index.html', 'pricing.html', 'food-cost-calculator.html', 'food-cost-calculator-excel.html', 'refund-policy.html', 'terms.html', 'privacy.html'];
+const PUBLIC_PAGES = ['index.html', 'pricing.html', 'food-cost-calculator.html', 'food-cost-calculator-excel.html', 'menu-pricing-calculator.html', 'refund-policy.html', 'terms.html', 'privacy.html'];
 for (const f of readdirSync(PUB).filter(f => f.endsWith('.html'))) {
   const has = /\/static\/analytics\.js\?v=\d+-\d+/.test(read(f));
   if (PUBLIC_PAGES.includes(f)) t.check(`${f} loads it, with a cache-busting ?v=`, has);

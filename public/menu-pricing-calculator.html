@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <!-- Launched 2026-09-23, alongside index.html and pricing.html — see robots.txt. -->
+  <!-- Added 2026-10-08 for people searching "menu pricing calculator". See robots.txt. -->
 
-  <title>Free Food Cost Calculator and Recipe Cost Calculator</title>
-  <meta name="description" content="Free food cost and recipe cost calculator. Enter what you paid and what goes in one dish to get cost per portion and food cost percentage. Nothing is saved." />
-  <link rel="canonical" href="https://foodnance.com/food-cost-calculator" />
+  <title>Free Menu Pricing Calculator for Restaurants</title>
+  <meta name="description" content="Free menu pricing calculator. Enter what a dish costs you and your target food cost, markup or profit per plate to get the menu price. Nothing is saved." />
+  <link rel="canonical" href="https://foodnance.com/menu-pricing-calculator" />
   <meta name="theme-color" content="#0369a1" />
 
   <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
@@ -18,17 +18,17 @@
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Foodnance" />
   <meta property="og:locale" content="en_CA" />
-  <meta property="og:url" content="https://foodnance.com/food-cost-calculator" />
-  <meta property="og:title" content="Free Food Cost Calculator and Recipe Cost Calculator" />
-  <meta property="og:description" content="Enter what you paid and what goes in the dish. Get cost per portion and food cost percentage. Free, and nothing is saved." />
+  <meta property="og:url" content="https://foodnance.com/menu-pricing-calculator" />
+  <meta property="og:title" content="Free Menu Pricing Calculator for Restaurants" />
+  <meta property="og:description" content="Type what a dish costs you and what you are aiming for. Get the price to put on the menu. Free, and nothing is saved." />
   <meta property="og:image" content="https://foodnance.com/og-image.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
   <meta property="og:image:alt" content="Foodnance logo: a gold chef's hat with a bar chart. Food meets profit." />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:image" content="https://foodnance.com/og-image.png" />
-  <meta name="twitter:title" content="Free Food Cost Calculator and Recipe Cost Calculator" />
-  <meta name="twitter:description" content="Enter what you paid and what goes in the dish. Get cost per portion and food cost percentage. Free, and nothing is saved." />
+  <meta name="twitter:title" content="Free Menu Pricing Calculator for Restaurants" />
+  <meta name="twitter:description" content="Type what a dish costs you and what you are aiming for. Get the price to put on the menu. Free, and nothing is saved." />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -36,90 +36,125 @@
 
   <!-- Structured data, one @graph like the other pages, sharing their ids.
        The FAQPage below must match the visible FAQ on this page word for word
-       (tests/food-cost-calculator-page.test.mjs checks it): change both together.
-       Deliberately no aggregateRating — there are no reviews. -->
+       (tests/menu-pricing-calculator.test.mjs checks it): change both together.
+       Deliberately no aggregateRating: there are no reviews. -->
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
     "@graph": [
       {
         "@type": "WebPage",
-        "@id": "https://foodnance.com/food-cost-calculator#page",
-        "url": "https://foodnance.com/food-cost-calculator",
-        "name": "Food cost calculator",
-        "description": "A free calculator that works out the cost of a dish, the cost per portion and the food cost percentage from the prices you paid for your ingredients.",
+        "@id": "https://foodnance.com/menu-pricing-calculator#page",
+        "url": "https://foodnance.com/menu-pricing-calculator",
+        "name": "Menu pricing calculator",
+        "description": "A free calculator that turns the cost of a dish into a menu price, from a target food cost percentage, a markup or a profit per plate.",
         "inLanguage": "en-CA",
-        "dateModified": "2026-09-21",
-        "isPartOf": { "@id": "https://foodnance.com/#website" },
-        "publisher": { "@id": "https://foodnance.com/#org" },
-        "about": { "@type": "Thing", "name": "Food cost" },
-        "breadcrumb": { "@id": "https://foodnance.com/food-cost-calculator#breadcrumb" },
-        "mainEntity": { "@id": "https://foodnance.com/food-cost-calculator#tool" }
+        "dateModified": "2026-10-08",
+        "isPartOf": {
+          "@id": "https://foodnance.com/#website"
+        },
+        "publisher": {
+          "@id": "https://foodnance.com/#org"
+        },
+        "about": {
+          "@type": "Thing",
+          "name": "Menu pricing"
+        },
+        "breadcrumb": {
+          "@id": "https://foodnance.com/menu-pricing-calculator#breadcrumb"
+        },
+        "mainEntity": {
+          "@id": "https://foodnance.com/menu-pricing-calculator#tool"
+        }
       },
       {
         "@type": "BreadcrumbList",
-        "@id": "https://foodnance.com/food-cost-calculator#breadcrumb",
+        "@id": "https://foodnance.com/menu-pricing-calculator#breadcrumb",
         "itemListElement": [
-          { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://foodnance.com/" },
-          { "@type": "ListItem", "position": 2, "name": "Food cost calculator", "item": "https://foodnance.com/food-cost-calculator" }
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Home",
+            "item": "https://foodnance.com/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "Menu pricing calculator",
+            "item": "https://foodnance.com/menu-pricing-calculator"
+          }
         ]
       },
       {
         "@type": "WebApplication",
-        "@id": "https://foodnance.com/food-cost-calculator#tool",
-        "name": "Food cost calculator",
-        "url": "https://foodnance.com/food-cost-calculator",
+        "@id": "https://foodnance.com/menu-pricing-calculator#tool",
+        "name": "Menu pricing calculator",
+        "url": "https://foodnance.com/menu-pricing-calculator",
         "applicationCategory": "BusinessApplication",
         "operatingSystem": "Web browser",
         "browserRequirements": "Requires JavaScript",
         "isAccessibleForFree": true,
-        "description": "Enter what you paid for each ingredient and how much goes in one dish. The calculator returns the cost of the dish, the cost per portion, the food cost percentage and the selling price needed for a target food cost. It runs in the browser and saves nothing.",
-        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CAD" },
-        "publisher": { "@id": "https://foodnance.com/#org" }
+        "description": "Enter what a dish costs you and a target food cost percentage, a markup or a profit per plate. The calculator returns the menu price, rounded up to a whole dollar or to .95 if you choose, with the food cost and the profit per plate. It can price several dishes at once, runs in the browser and saves nothing.",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "CAD"
+        },
+        "publisher": {
+          "@id": "https://foodnance.com/#org"
+        }
       },
       {
         "@type": "FAQPage",
-        "@id": "https://foodnance.com/food-cost-calculator#faq",
+        "@id": "https://foodnance.com/menu-pricing-calculator#faq",
         "mainEntity": [
           {
             "@type": "Question",
-            "name": "What is food cost?",
-            "acceptedAnswer": { "@type": "Answer", "text": "Food cost is what the ingredients in a dish cost you, based on the prices you actually paid your suppliers. It is usually shown two ways: as dollars per portion, and as a percentage of the selling price." }
+            "name": "How do you calculate a menu price?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Divide what the dish costs you by your target food cost percentage. A dish that costs $10.28, priced for a 30 percent food cost, is $10.28 ÷ 0.30, or $34.27."
+            }
           },
           {
             "@type": "Question",
-            "name": "How do you calculate food cost percentage?",
-            "acceptedAnswer": { "@type": "Answer", "text": "Divide the cost of one portion by its selling price, then multiply by 100. A dish that costs $10.28 to make and sells for $34.00 has a food cost of 30.2 percent." }
+            "name": "What food cost percentage should I price for?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Many restaurants aim for roughly 28 to 35 percent, but the right figure depends on the kind of restaurant and the dish. Use it as a starting point, and set a target for each part of your menu."
+            }
           },
           {
             "@type": "Question",
-            "name": "How do you calculate the cost of an ingredient in a recipe?",
-            "acceptedAnswer": { "@type": "Answer", "text": "Divide what you paid by the quantity you bought to get the price per unit, then multiply by the quantity the recipe uses. Beef at $300 for 10 kg is $30.00 per kg, so 300 g of it costs $9.00." }
+            "name": "What is the difference between markup and food cost percentage?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "They are the same idea seen from opposite sides. A markup of four times cost is a food cost of 25 percent. A food cost of 30 percent is a markup of 3.33 times cost."
+            }
           },
           {
             "@type": "Question",
-            "name": "What is a good food cost percentage?",
-            "acceptedAnswer": { "@type": "Answer", "text": "Many restaurants aim for roughly 28 to 35 percent, but the right figure depends on the kind of restaurant, the menu and your prices. Use it as a starting point, and compare each dish with the target you set for your own business." }
+            "name": "Should menu prices end in .95?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "That is a choice of style. Prices ending in .95 read as a deal, and whole dollars read as more formal. The calculator can round up either way, so the price never falls short of your target."
+            }
           },
           {
             "@type": "Question",
-            "name": "How do I include trimming and waste in the cost?",
-            "acceptedAnswer": { "@type": "Answer", "text": "Enter a usable percentage for the product. If 15 percent of a 10 kg purchase of beef is lost to trimming, enter 85. The calculator then prices only the meat you can serve, so 300 g of beef costs $10.59 instead of $9.00." }
-          },
-          {
-            "@type": "Question",
-            "name": "Can I mix units, like buying in kilograms and using grams?",
-            "acceptedAnswer": { "@type": "Answer", "text": "Yes, within the same kind of unit. Weights (g, kg, oz, lb) convert to each other, and so do volumes (ml, L, fl oz, tsp, tbsp, cup). Weight and volume cannot be converted without knowing the density of the ingredient, so the calculator asks you to use a matching unit rather than guess." }
+            "name": "How often should I re-price my menu?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Check your prices whenever a main ingredient changes cost. Foodnance re-costs every dish from your supplier invoices as you upload them, so you can see which prices need a second look."
+            }
           },
           {
             "@type": "Question",
             "name": "Is anything I type saved or sent anywhere?",
-            "acceptedAnswer": { "@type": "Answer", "text": "No. The calculation happens in your browser. Nothing you enter is stored or sent to us, and it is gone when you refresh or close the page. We count visits to this page, but never what you type." }
-          },
-          {
-            "@type": "Question",
-            "name": "Why does my food cost keep changing?",
-            "acceptedAnswer": { "@type": "Answer", "text": "Supplier prices move, so the same recipe costs a different amount from one delivery to the next. A calculator shows one moment in time. Foodnance re-costs every dish from your supplier invoices as you upload them, so the numbers stay current without re-typing." }
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. The calculation happens in your browser. Nothing you enter is stored or sent to us, and it is gone when you refresh or close the page. We count visits to this page, but never what you type."
+            }
           }
         ]
       }
@@ -389,6 +424,23 @@
     @media (max-width: 359px) {
       .nav-login { display: none; }
     }
+
+    /* ===== MENU PRICING PAGE ===== */
+    h1 { max-width: 26ch; }
+    .hero .sub + .sub { margin-top: .7rem; }
+    .mp-fields { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+    .mp-fields .lbl { font-size: .82rem; }
+    .mp-head { font-size: 1.05rem; font-weight: 700; letter-spacing: -.01em; margin: 1.8rem 0 .25rem; }
+    .mp-head + p { color: var(--text-muted); font-size: .9rem; margin-bottom: .9rem; }
+    table.mp { width: 100%; min-width: 600px; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    table.mp th { text-align: left; font-size: .74rem; font-weight: 600; color: var(--text-muted); padding: 0 .4rem .4rem; }
+    table.mp td { padding: .3rem .4rem; border-top: 1px solid var(--border); }
+    table.mp .num { text-align: right; }
+    table.mp input.num { text-align: right; }
+    table.mp td.price { font-weight: 700; }
+    table.mp td:first-child { width: 38%; }
+    table.mp td:last-child { width: 2.6rem; padding-right: 0; }
+    .prose ul { margin: 0 0 1rem 1.3rem; color: var(--text-muted); }
   </style>
 </head>
 <body>
@@ -408,7 +460,7 @@
       <div class="nav-spacer"></div>
       <a class="nav-link nav-anchor" href="/#features">Features</a>
       <a class="nav-link nav-anchor" href="/#how">How it works</a>
-      <a class="nav-link nav-anchor" href="/food-cost-calculator" aria-current="page">Food cost calculator</a>
+      <a class="nav-link nav-anchor" href="/food-cost-calculator">Food cost calculator</a>
       <a class="nav-link nav-anchor" href="/pricing">Pricing</a>
       <a class="nav-link nav-anchor" href="/#faq">FAQ</a>
       <a class="nav-link nav-login" href="/login">Log in</a>
@@ -421,7 +473,7 @@
     <nav class="nav-menu" id="navMenu" aria-label="Mobile">
       <a class="nav-link" href="/#features">Features</a>
       <a class="nav-link" href="/#how">How it works</a>
-      <a class="nav-link" href="/food-cost-calculator" aria-current="page">Food cost calculator</a>
+      <a class="nav-link" href="/food-cost-calculator">Food cost calculator</a>
       <a class="nav-link" href="/pricing">Pricing</a>
       <a class="nav-link" href="/#faq">FAQ</a>
       <a class="nav-link" href="/login">Log in</a>
@@ -452,15 +504,16 @@
   <!-- ══ HERO ══ -->
   <div class="hero wrap">
     <div class="eyebrow"><span class="rule"></span><span class="kicker">Free tool</span></div>
-    <h1>Food and recipe cost calculator <span class="accent">for any dish</span></h1>
-    <p class="sub">Enter what you paid for your ingredients and what goes on the plate. You get the cost of the dish, the cost per portion and your food cost percentage. Nothing is saved.</p>
+    <h1>Menu pricing calculator <span class="accent">for any dish</span></h1>
+    <p class="sub">To price a menu item, divide what the dish costs you by your target food cost percentage. A dish that costs $10.28, priced for a 30 percent food cost, is $34.27.</p>
+    <p class="sub">Type your own cost below to get the price to put on the menu. Nothing is saved.</p>
   </div>
 
   <!-- ══ THE CALCULATOR ══ -->
   <section style="padding-top:1rem" aria-labelledby="calc-label">
     <div class="wrap">
-      <h2 id="calc-label" style="position:absolute;left:-9999px">Food cost calculator</h2>
-      <div class="calc" id="fcApp">
+      <h2 id="calc-label" style="position:absolute;left:-9999px">Menu pricing calculator</h2>
+      <div class="calc" id="mpApp">
         <div class="calc-top">
           <p class="privacy-note"><svg class="ic" style="width:.8em" aria-hidden="true" focusable="false"><use href="#i-lock"/></svg> Everything runs in your browser. Nothing you type is saved or sent anywhere.</p>
           <div class="calc-actions">
@@ -469,50 +522,52 @@
           </div>
         </div>
 
-        <div class="step">
-          <h3><span class="n">1</span> What you bought</h3>
-          <p>Type each product, how much you bought, and the total you paid. Use the price on your invoice. If part of it is lost to trimming or cooking, enter the usable percentage.</p>
-          <div class="rows" id="buyRows"></div>
-          <button type="button" class="btn btn-ghost btn-sm add" id="addBuy">+ Add a product</button>
+        <div class="mp-fields">
+          <label class="fld"><span class="lbl">What the dish costs you</span>
+            <span class="affix"><span class="pre" aria-hidden="true">$</span><input type="text" inputmode="decimal" id="mpCost" placeholder="e.g. 10.28" autocomplete="off" /></span>
+          </label>
+          <label class="fld"><span class="lbl">Price it by</span>
+            <select id="mpMethod">
+              <option value="pct">Target food cost %</option>
+              <option value="markup">Markup (times cost)</option>
+              <option value="profit">Profit per plate ($)</option>
+            </select>
+          </label>
+          <label class="fld"><span class="lbl" id="mpTargetLabel">Target food cost %</span>
+            <input type="text" inputmode="decimal" id="mpTarget" value="30" placeholder="30" autocomplete="off" />
+          </label>
+          <label class="fld"><span class="lbl">Round the price</span>
+            <select id="mpRound">
+              <option value="none">Exact, to the cent</option>
+              <option value="dollar">Up to a whole dollar</option>
+              <option value="95">Up to .95</option>
+            </select>
+          </label>
         </div>
 
-        <div class="step">
-          <h3><span class="n">2</span> What goes in one dish</h3>
-          <p>Choose each ingredient from your list and enter how much the recipe uses.</p>
-          <div class="rows" id="useRows"></div>
-          <button type="button" class="btn btn-ghost btn-sm add" id="addUse">+ Add an ingredient</button>
-        </div>
-
-        <div class="step">
-          <h3><span class="n">3</span> Portions and price</h3>
-          <p>Optional. Add the selling price to see your food cost percentage.</p>
-          <div class="inputs-3">
-            <label class="fld"><span class="lbl">Portions this recipe makes</span>
-              <input type="text" inputmode="decimal" id="portions" placeholder="1" autocomplete="off" />
-              <span class="warn-inline" id="portionsNote" hidden>Enter a number above zero.</span>
-            </label>
-            <label class="fld"><span class="lbl">Selling price per portion</span>
-              <span class="affix"><span class="pre" aria-hidden="true">$</span><input type="text" inputmode="decimal" id="price" placeholder="e.g. 34" autocomplete="off" /></span>
-            </label>
-            <label class="fld"><span class="lbl">Target food cost %</span>
-              <input type="text" inputmode="decimal" id="target" placeholder="30" autocomplete="off" />
-            </label>
-          </div>
-        </div>
-
-        <div class="results" id="results" aria-live="polite">
-          <h3>Your result</h3>
-          <div class="res-warn" id="resWarn" hidden></div>
+        <div class="results" aria-live="polite">
+          <h3>Your price</h3>
+          <div class="res-warn" id="mpWarn" hidden></div>
           <div class="stats">
-            <div class="stat"><div class="k" id="resTotalLbl">Cost of the dish</div><div class="v" id="resTotal">—</div></div>
-            <div class="stat"><div class="k">Cost per portion</div><div class="v" id="resPortion">—</div></div>
-            <div class="stat main"><div class="k">Food cost percentage</div><div class="v" id="resPct">—</div><div class="note" id="resPctNote"></div></div>
-            <div class="stat"><div class="k">Gross profit per portion</div><div class="v" id="resProfit">—</div></div>
-            <div class="stat"><div class="k" id="resTargetLbl">Price for your target</div><div class="v" id="resTarget">—</div></div>
+            <div class="stat main"><div class="k">Menu price</div><div class="v" id="resTotal">—</div><div class="note" id="resExact"></div></div>
+            <div class="stat"><div class="k">Food cost percentage</div><div class="v" id="resPct">—</div></div>
+            <div class="stat"><div class="k">Profit per plate</div><div class="v" id="resProfit">—</div></div>
           </div>
-          <p class="fine">An estimate from the numbers you typed. It covers ingredients only, not labour, packaging or overhead. Use any currency: the calculator only multiplies.</p>
         </div>
+
+        <h3 class="mp-head">Price a whole menu section</h3>
+        <p>Every dish uses the target and the rounding you chose above.</p>
+        <div class="table-wrap" style="margin:0">
+          <table class="mp">
+            <thead><tr><th>Dish</th><th class="num">Cost</th><th class="num">Menu price</th><th class="num">Food cost</th><th class="num">Profit</th><th></th></tr></thead>
+            <tbody id="mpRows"></tbody>
+          </table>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm add" id="mpAddRow">+ Add a dish</button>
+
+        <p class="fine">An estimate from the numbers you typed. Profit per plate is the price less the ingredients only, before labour, packaging and overhead. Use any currency: the calculator only multiplies.</p>
       </div>
+      <p style="text-align:center;color:var(--text-muted);font-size:.93rem;margin-top:1.2rem">Do not know what the dish costs? Work it out from your ingredients with the <a href="/food-cost-calculator">food cost calculator</a>.</p>
     </div>
   </section>
 
@@ -520,60 +575,60 @@
   <section class="section-alt">
     <div class="wrap">
       <div class="prose">
-        <h2>How to calculate food cost</h2>
-        <p>Food cost has three steps: price each ingredient, add up the dish, then compare the total with what you charge.</p>
-
+        <h2>How to price a menu item</h2>
+        <p>There are three common ways to turn the cost of a dish into a price. All three are in the calculator above.</p>
         <ol>
-          <li><strong>Find the price per unit.</strong> Divide what you paid by how much you bought.
-            <span class="formula">Price per kg = total paid ÷ kg bought</span></li>
-          <li><strong>Cost each ingredient.</strong> Multiply that price by the amount the recipe uses, then add the ingredients together to get the cost of the dish. Divide by the number of portions to get the cost per portion.
-            <span class="formula">Ingredient cost = price per kg × kg used</span></li>
-          <li><strong>Work out the food cost percentage.</strong> Divide the cost of one portion by its selling price.
-            <span class="formula">Food cost % = cost per portion ÷ selling price × 100</span>
-            To go the other way and set a price for a target, divide the cost per portion by the target.
-            <span class="formula">Selling price = cost per portion ÷ target food cost %</span></li>
+          <li><strong>By food cost percentage.</strong> Decide what share of the price the ingredients may take, then divide the cost by it.
+            <span class="formula">Menu price = cost of the dish ÷ target food cost %</span></li>
+          <li><strong>By markup.</strong> Multiply the cost by a number.
+            <span class="formula">Menu price = cost of the dish × markup</span></li>
+          <li><strong>By profit per plate.</strong> Add the dollars you want each plate to leave after ingredients.
+            <span class="formula">Menu price = cost of the dish + profit per plate</span></li>
         </ol>
-        <p>If you lose part of a product to trimming or cooking, price only the part you serve.</p>
-        <span class="formula">Price per kg = total paid ÷ (kg bought × usable %)</span>
 
-        <h2>A worked example</h2>
-        <p>A kitchen buys 10 kg of beef for $300 and 5 kg of potatoes for $32. One dish uses 300 g of beef and 200 g of potatoes.</p>
+        <h2>Food cost percentage and markup, side by side</h2>
+        <p>A target food cost and a markup are two ways of saying the same thing. This is what each one gives for a dish that costs $10.00.</p>
         <div class="table-wrap">
           <table class="eg">
-            <thead><tr><th>Ingredient</th><th>Bought</th><th class="num">Price per kg</th><th>Used</th><th class="num">Cost</th></tr></thead>
+            <thead><tr><th class="num">Target food cost</th><th class="num">Same as a markup of</th><th class="num">Price of a $10.00 dish</th></tr></thead>
             <tbody>
-              <tr><td>Beef</td><td>10 kg for $300</td><td class="num">$30.00</td><td>300 g</td><td class="num">$9.00</td></tr>
-              <tr><td>Potatoes</td><td>5 kg for $32</td><td class="num">$6.40</td><td>200 g</td><td class="num">$1.28</td></tr>
-              <tr class="total"><td colspan="4">Cost of the dish</td><td class="num">$10.28</td></tr>
+              <tr><td class="num">25%</td><td class="num">4.00 times cost</td><td class="num">$40.00</td></tr>
+              <tr><td class="num">28%</td><td class="num">3.57 times cost</td><td class="num">$35.71</td></tr>
+              <tr><td class="num">30%</td><td class="num">3.33 times cost</td><td class="num">$33.33</td></tr>
+              <tr><td class="num">32%</td><td class="num">3.13 times cost</td><td class="num">$31.25</td></tr>
+              <tr><td class="num">35%</td><td class="num">2.86 times cost</td><td class="num">$28.57</td></tr>
             </tbody>
           </table>
         </div>
-        <p>Sold at $34.00, the food cost is $10.28 ÷ $34.00 × 100, which is 30.2 percent, and each portion leaves $23.72 of gross profit. To hit exactly 30 percent, the price would be $10.28 ÷ 0.30, or $34.27. Press <strong>Try an example</strong> above to see the calculator do the same.</p>
 
-        <h2>What this calculator does not include</h2>
-        <p>Food cost covers ingredients only. It leaves out labour, packaging, delivery fees and overhead, so a dish with a good food cost percentage can still lose money. It also uses the prices you type today. If your supplier raises a price next week, the answer changes and you need to run it again.</p>
-        <p>Know the cost and need a price? Use the <a href="/menu-pricing-calculator">menu pricing calculator</a>.</p>
+        <h2>A worked example</h2>
+        <p>A dish costs $10.28 to make and the kitchen aims for a 30 percent food cost. $10.28 ÷ 0.30 is $34.27. Rounded up to $34.95, the food cost is 29.4 percent and each plate leaves $24.67 after ingredients. Press <strong>Try an example</strong> above to see the calculator do the same.</p>
+
+        <h2>What the calculator does not know</h2>
+        <ul>
+          <li><strong>Your other costs.</strong> Labour, rent, packaging and delivery fees are not in the cost of the dish. A dish with a good food cost can still lose money.</li>
+          <li><strong>What customers will pay.</strong> The price down the street and what your guests expect matter as much as the formula.</li>
+          <li><strong>Tomorrow's prices.</strong> When a supplier raises a price, the cost of the dish changes and so does the right menu price.</li>
+        </ul>
         <p>Prefer a spreadsheet? <a href="/food-cost-calculator-excel">Download the free Excel food cost template</a>.</p>
       </div>
     </div>
   </section>
 
   <!-- ══ FAQ ══ -->
-  <section>
+  <section id="faq">
     <div class="wrap">
       <div class="section-head">
-        <h2 class="section-title">Food cost questions</h2>
+        <h2 class="section-title">Menu pricing questions</h2>
         <p>Short answers to what people usually ask.</p>
       </div>
       <div class="faq">
-        <div class="q"><h3>What is food cost?</h3><p>Food cost is what the ingredients in a dish cost you, based on the prices you actually paid your suppliers. It is usually shown two ways: as dollars per portion, and as a percentage of the selling price.</p></div>
-        <div class="q"><h3>How do you calculate food cost percentage?</h3><p>Divide the cost of one portion by its selling price, then multiply by 100. A dish that costs $10.28 to make and sells for $34.00 has a food cost of 30.2 percent.</p></div>
-        <div class="q"><h3>How do you calculate the cost of an ingredient in a recipe?</h3><p>Divide what you paid by the quantity you bought to get the price per unit, then multiply by the quantity the recipe uses. Beef at $300 for 10 kg is $30.00 per kg, so 300 g of it costs $9.00.</p></div>
-        <div class="q"><h3>What is a good food cost percentage?</h3><p>Many restaurants aim for roughly 28 to 35 percent, but the right figure depends on the kind of restaurant, the menu and your prices. Use it as a starting point, and compare each dish with the target you set for your own business.</p></div>
-        <div class="q"><h3>How do I include trimming and waste in the cost?</h3><p>Enter a usable percentage for the product. If 15 percent of a 10 kg purchase of beef is lost to trimming, enter 85. The calculator then prices only the meat you can serve, so 300 g of beef costs $10.59 instead of $9.00.</p></div>
-        <div class="q"><h3>Can I mix units, like buying in kilograms and using grams?</h3><p>Yes, within the same kind of unit. Weights (g, kg, oz, lb) convert to each other, and so do volumes (ml, L, fl oz, tsp, tbsp, cup). Weight and volume cannot be converted without knowing the density of the ingredient, so the calculator asks you to use a matching unit rather than guess.</p></div>
+        <div class="q"><h3>How do you calculate a menu price?</h3><p>Divide what the dish costs you by your target food cost percentage. A dish that costs $10.28, priced for a 30 percent food cost, is $10.28 ÷ 0.30, or $34.27.</p></div>
+        <div class="q"><h3>What food cost percentage should I price for?</h3><p>Many restaurants aim for roughly 28 to 35 percent, but the right figure depends on the kind of restaurant and the dish. Use it as a starting point, and set a target for each part of your menu.</p></div>
+        <div class="q"><h3>What is the difference between markup and food cost percentage?</h3><p>They are the same idea seen from opposite sides. A markup of four times cost is a food cost of 25 percent. A food cost of 30 percent is a markup of 3.33 times cost.</p></div>
+        <div class="q"><h3>Should menu prices end in .95?</h3><p>That is a choice of style. Prices ending in .95 read as a deal, and whole dollars read as more formal. The calculator can round up either way, so the price never falls short of your target.</p></div>
+        <div class="q"><h3>How often should I re-price my menu?</h3><p>Check your prices whenever a main ingredient changes cost. Foodnance re-costs every dish from your supplier invoices as you upload them, so you can see which prices need a second look.</p></div>
         <div class="q"><h3>Is anything I type saved or sent anywhere?</h3><p>No. The calculation happens in your browser. Nothing you enter is stored or sent to us, and it is gone when you refresh or close the page. We count visits to this page, but never what you type.</p></div>
-        <div class="q"><h3>Why does my food cost keep changing?</h3><p>Supplier prices move, so the same recipe costs a different amount from one delivery to the next. A calculator shows one moment in time. Foodnance re-costs every dish from your supplier invoices as you upload them, so the numbers stay current without re-typing.</p></div>
       </div>
     </div>
   </section>
@@ -582,8 +637,8 @@
   <section style="padding-top:0">
     <div class="wrap">
       <div class="final">
-        <h2>Costing one dish is a start</h2>
-        <p>Foodnance is food cost software for independent Canadian restaurants and bakeries. Photograph a supplier invoice, and your recipe costs, margins and P&amp;L update themselves.</p>
+        <h2>The right price depends on today's cost</h2>
+        <p>Foodnance is food costing software for independent Canadian restaurants and bakeries. Photograph a supplier invoice, and your recipe costs, margins and P&amp;L update themselves.</p>
         <a class="btn btn-primary btn-lg js-request-access" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">Request access</a>
         <p class="more">Curious about the cost? <a href="/pricing">See pricing</a></p>
         <p class="more">Questions? We are here to help. Email us <a href="mailto:hello@foodnance.com">hello@foodnance.com</a></p>
@@ -598,7 +653,7 @@
       <div class="nav-spacer"></div>
       <span>&copy; 2026 Foodnance</span>
       <a href="/">Home</a>
-      <a href="/menu-pricing-calculator">Menu pricing calculator</a>
+      <a href="/food-cost-calculator">Food cost calculator</a>
       <a href="/food-cost-calculator-excel">Excel template</a>
       <a href="/pricing">Pricing</a>
       <a href="/login">Log in</a>
@@ -612,6 +667,6 @@
   <script src="/static/env-banner.js?v=20260807-2"></script>
   <script src="/static/analytics.js?v=20261008-1"></script>
   <script src="/static/request-access.js?v=20261003-1"></script>
-  <script src="/static/food-cost-calculator.js?v=20260921-2"></script>
+  <script src="/static/menu-pricing-calculator.js?v=20261008-2"></script>
 </body>
 </html>
