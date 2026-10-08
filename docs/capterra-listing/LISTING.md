@@ -10,7 +10,7 @@ Where to start: search "Capterra list your software" or go to capterra.com/vendo
 |---|---|
 | Product name | Foodnance |
 | Website | https://foodnance.com |
-| Tagline (short) | Food cost software for independent restaurants and bakeries |
+| Tagline (short) | Food costing software for independent restaurants and bakeries |
 | Logo | `logo/foodnance-icon.svg` or `logo/favicon-512.png` (square). The horizontal logo is `logo/foodnance-logo-horizontal.png` |
 | Deployment | Cloud, SaaS, web-based. Nothing to install; runs in a browser on a computer or phone |
 | Mobile | Works in a phone browser (no iOS or Android app) |
@@ -35,11 +35,11 @@ If a "Food Cost" category exists, make it the primary one.
 
 ## Short description (about 300 characters)
 
-Foodnance is food cost software for independent restaurants, bakeries and cafes. Photograph a supplier invoice and it reads every line, tracks ingredient prices, and updates the cost of every recipe and the margin on every dish. It also shows when a supplier raises a price.
+Foodnance is food costing software for independent restaurants, bakeries and cafes. Photograph a supplier invoice and it reads every line, tracks ingredient prices, and updates the cost of every recipe and the margin on every dish. It also shows when a supplier raises a price.
 
 ## Full description
 
-Foodnance is food cost software built for independent restaurants, bakeries, cafes and commissaries. It was made by a restaurant manager with over ten years of kitchen experience.
+Foodnance is food costing software built for independent restaurants, bakeries, cafes and commissaries. It was made by a restaurant manager with over ten years of kitchen experience.
 
 The idea is simple: your invoices already contain your real costs, so Foodnance reads them for you.
 
