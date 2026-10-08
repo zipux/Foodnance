@@ -1,5 +1,5 @@
 // Website analytics for the PUBLIC pages only (home, pricing, the food cost
-// calculator, refund policy, terms, privacy). Never loaded inside the signed-in
+// calculator, its Excel template page, refund policy, terms, privacy). Never loaded inside the signed-in
 // app — the Privacy Policy says so.
 //
 // Uses Plausible: no cookies, no personal data, totals only. Page views, the
@@ -80,6 +80,11 @@
     });
     io.observe(faq);
   }
+
+  // Excel template: that the file was downloaded.
+  Array.prototype.slice.call(document.querySelectorAll('.js-template-download')).forEach(function (el) {
+    el.addEventListener('click', function () { track('Template download'); });
+  });
 
   // Food cost calculator: that it was used, never what was entered. The result
   // box is only compared with its empty placeholder; no figure is sent.

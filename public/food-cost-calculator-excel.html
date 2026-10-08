@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en-CA">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Added 2026-10-08 for people searching "food cost calculator excel". See robots.txt. -->
+
+  <title>Food Cost Calculator Excel Template, Free Download</title>
+  <meta name="description" content="Free food cost calculator Excel template. Download the sheet or build it yourself with four formulas. Works out cost per portion and food cost percentage." />
+  <link rel="canonical" href="https://foodnance.com/food-cost-calculator-excel" />
+  <meta name="theme-color" content="#0369a1" />
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
+  <link rel="mask-icon" href="/favicon.svg?v=2" color="#0369a1" />
+  <link rel="icon" type="image/x-icon" sizes="48x48" href="/favicon.ico?v=2" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Foodnance" />
+  <meta property="og:locale" content="en_CA" />
+  <meta property="og:url" content="https://foodnance.com/food-cost-calculator-excel" />
+  <meta property="og:title" content="Food Cost Calculator Excel Template, Free Download" />
+  <meta property="og:description" content="A free Excel sheet that costs one dish from what you paid your suppliers. Download it, or build it yourself with four formulas." />
+  <meta property="og:image" content="https://foodnance.com/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Foodnance logo: a gold chef's hat with a bar chart. Food meets profit." />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:image" content="https://foodnance.com/og-image.png" />
+  <meta name="twitter:title" content="Food Cost Calculator Excel Template, Free Download" />
+  <meta name="twitter:description" content="A free Excel sheet that costs one dish from what you paid your suppliers. Download it, or build it yourself with four formulas." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560;9..144,620&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
+
+  <!-- Structured data, one @graph like the other pages, sharing their ids.
+       The FAQPage below must match the visible FAQ on this page word for word
+       (tests/food-cost-excel-page.test.mjs checks it): change both together. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebPage",
+        "@id": "https://foodnance.com/food-cost-calculator-excel#page",
+        "url": "https://foodnance.com/food-cost-calculator-excel",
+        "name": "Food cost calculator for Excel",
+        "description": "A free Excel template that works out the cost of a dish, the cost per portion and the food cost percentage, with the formulas explained.",
+        "inLanguage": "en-CA",
+        "dateModified": "2026-10-08",
+        "isPartOf": {
+          "@id": "https://foodnance.com/#website"
+        },
+        "publisher": {
+          "@id": "https://foodnance.com/#org"
+        },
+        "about": {
+          "@type": "Thing",
+          "name": "Food cost"
+        },
+        "breadcrumb": {
+          "@id": "https://foodnance.com/food-cost-calculator-excel#breadcrumb"
+        }
+      },
+      {
+        "@type": "BreadcrumbList",
+        "@id": "https://foodnance.com/food-cost-calculator-excel#breadcrumb",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Home",
+            "item": "https://foodnance.com/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "Food cost calculator",
+            "item": "https://foodnance.com/food-cost-calculator"
+          },
+          {
+            "@type": "ListItem",
+            "position": 3,
+            "name": "Excel template",
+            "item": "https://foodnance.com/food-cost-calculator-excel"
+          }
+        ]
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "https://foodnance.com/food-cost-calculator-excel#faq",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Is the Excel food cost template free?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Download it and use it as you like. We do not ask for your email address."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does it work in Google Sheets?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Upload the file to Google Drive and open it with Google Sheets. The formulas work the same way. It also opens in Apple Numbers."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How do I convert units in Excel?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Use the CONVERT function. Give it the amount, the unit it is in and the unit you want, so 300 with g and kg returns 0.3. Excel writes pounds as lbm and ounces as ozm. A weight cannot be converted to a volume without knowing the ingredient."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How often should I update the prices?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Each time a supplier invoice arrives with a different price. Until you type the new price, the sheet keeps showing the old cost."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I cost more than one dish?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Copy the Dish sheet once for each dish. An ingredient used in several dishes has to be updated on each copy when its price changes."
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --primary:    #0369a1;
+      --primary-d:  #075985;
+      --nav-bg:     #0f172a;
+      --nav-bg-d:   #1e293b;
+      --success:    #059669;
+      --danger:     #dc2626;
+      --warning:    #d97706;
+      --bg:         #faf9f6;
+      --bg-alt:     #f3f1ec;
+      --border:     #e4e0d8;
+      --text:       #171512;
+      --text-muted: #6b6659;
+      --radius:     12px;
+      --radius-sm:  6px;
+      --shadow:     0 2px 16px rgba(0,0,0,.06);
+      --maxw:       1080px;
+    }
+
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+      color: var(--text); background: var(--bg);
+      font-size: 16px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 1.25rem; }
+    .ic { height: 1em; fill: currentColor; vertical-align: -.125em; flex: none; }
+    .kicker { font-family: 'IBM Plex Mono', monospace; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+
+    /* ===== NAV (same as index.html) ===== */
+    header.nav {
+      position: sticky; top: 0; z-index: 50;
+      background: rgba(250,249,246,.88); backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: var(--maxw); margin: 0 auto; padding: .85rem 1.25rem;
+      display: flex; align-items: center; gap: 1rem;
+    }
+    .brand {
+      display: flex; align-items: center; gap: .55rem;
+      font-weight: 700; font-size: 1.15rem; letter-spacing: -.01em;
+      color: var(--text); text-decoration: none;
+    }
+    .brand .ic { color: var(--primary); }
+    .brand-logo { display: block; height: 52px; width: auto; }
+    @media (max-width: 430px) { .brand-logo { height: 38px; } }
+    .nav-spacer { flex: 1; }
+    .nav-link {
+      color: var(--text-muted); text-decoration: none; font-size: .92rem;
+      font-weight: 500; padding: .4rem .6rem; border-radius: 6px;
+      white-space: nowrap;
+    }
+    .nav-link:hover { color: var(--text); background: var(--bg-alt); }
+    .nav-link[aria-current="page"] { color: var(--text); font-weight: 600; }
+    .nav-toggle { display: none; }
+    .nav-menu { display: none; }
+
+    /* ===== BUTTONS ===== */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+      font-family: inherit; font-size: .93rem; font-weight: 600;
+      padding: .7rem 1.2rem; border-radius: var(--radius-sm);
+      text-decoration: none; border: 1px solid transparent; cursor: pointer;
+      transition: background .15s ease; white-space: nowrap;
+    }
+    .btn-primary { background: var(--nav-bg); color: #fff; }
+    .btn-primary:hover { background: var(--nav-bg-d); }
+    .btn-ghost { background: #fff; color: var(--text); border-color: var(--border); }
+    .btn-ghost:hover { background: var(--bg-alt); }
+    .btn-sm { font-size: .88rem; padding: .5rem .9rem; }
+    .btn-lg { font-size: .98rem; padding: .85rem 1.5rem; }
+    .btn:focus-visible, .nav-link:focus-visible, .brand:focus-visible,
+    .rm:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+    /* ===== HERO ===== */
+    .hero { padding: 3.5rem 0 1.8rem; text-align: center; }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: .5rem;
+      color: var(--primary); margin-bottom: 1.2rem;
+    }
+    .eyebrow .rule { width: 22px; height: 1px; background: var(--primary); display: inline-block; }
+    .eyebrow .kicker { font-size: .72rem; }
+    h1 {
+      font-family: 'Fraunces', Georgia, serif; font-weight: 600;
+      font-size: clamp(1.9rem, 4.6vw, 2.8rem); line-height: 1.14; letter-spacing: -.01em;
+      max-width: 22ch; margin: 0 auto 1rem;
+    }
+    h1 .accent { color: var(--primary); border-bottom: 3px solid #bae6fd; padding-bottom: 1px; }
+    .sub { font-size: clamp(.98rem, 2.2vw, 1.06rem); color: var(--text-muted); max-width: 58ch; margin: 0 auto; }
+
+    /* ===== SECTIONS ===== */
+    section { padding: 3.25rem 0; }
+    .section-alt { background: var(--bg-alt); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    .section-head { text-align: center; max-width: 60ch; margin: 0 auto 2rem; }
+    h2.section-title {
+      font-family: 'Fraunces', Georgia, serif; font-weight: 600;
+      font-size: clamp(1.45rem, 3.2vw, 2rem); letter-spacing: -.01em;
+      line-height: 1.2; margin-bottom: .6rem;
+    }
+    .section-head p { color: var(--text-muted); font-size: 1rem; }
+
+    /* ===== ARTICLE ===== */
+    .prose { max-width: 720px; margin: 0 auto; }
+    .prose h2 { font-family: 'Fraunces', Georgia, serif; font-size: clamp(1.35rem, 3vw, 1.7rem); letter-spacing: -.01em; font-weight: 600; line-height: 1.25; margin: 2.4rem 0 .8rem; }
+    .prose h2:first-child { margin-top: 0; }
+    .prose h3 { font-size: 1.08rem; font-weight: 600; margin: 1.5rem 0 .4rem; letter-spacing: -.005em; }
+    .prose p { color: var(--text-muted); margin-bottom: .9rem; }
+    .prose ol { margin: 0 0 1rem 1.3rem; color: var(--text-muted); }
+    .prose li { margin-bottom: .6rem; }
+    .formula {
+      display: block; background: #fff; border: 1px solid var(--border); border-left: 3px solid var(--primary);
+      border-radius: 6px; padding: .6rem .9rem; margin: .5rem 0; font-weight: 600; color: var(--text);
+    }
+    .table-wrap { overflow-x: auto; margin: 1rem 0 1.2rem; }
+    table.eg { width: 100%; border-collapse: collapse; font-size: .93rem; background: #fff; border: 1px solid var(--border); }
+    table.eg th, table.eg td { text-align: left; padding: .6rem .8rem; border-bottom: 1px solid var(--border); }
+    table.eg th { background: var(--bg-alt); font-size: .8rem; color: var(--text-muted); text-transform: none; }
+    table.eg td.num, table.eg th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    table.eg tr.total td { font-weight: 700; background: #f0f9ff; }
+
+    /* ===== FAQ ===== */
+    .faq { max-width: 720px; margin: 0 auto; display: grid; gap: .8rem; }
+    .faq .q { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 1.1rem 1.3rem; }
+    .faq h3 { font-size: 1.01rem; font-weight: 600; margin-bottom: .35rem; letter-spacing: -.005em; }
+    .faq p { color: var(--text-muted); font-size: .95rem; }
+
+    /* ===== FINAL CTA ===== */
+    .final {
+      background: var(--nav-bg);
+      color: #fff; border-radius: 14px; padding: 3rem 1.5rem; text-align: center;
+    }
+    .final h2 { font-family: 'Fraunces', Georgia, serif; font-size: clamp(1.45rem, 3.2vw, 2rem); letter-spacing: -.01em; font-weight: 600; line-height: 1.2; margin-bottom: .6rem; }
+    .final p { color: rgba(255,255,255,.82); max-width: 56ch; margin: 0 auto 1.6rem; }
+    .final .btn-primary { background: #fff; color: var(--nav-bg); }
+    .final .btn-primary:hover { background: #f1f5f9; }
+    .final .more { margin: 1rem 0 0; font-size: .88rem; }
+    .final .more a { color: #fff; font-weight: 600; }
+
+    /* ===== FOOTER ===== */
+    footer { border-top: 1px solid var(--border); padding: 2rem 0; font-size: .86rem; color: var(--text-muted); }
+    .foot-inner { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    footer a { color: var(--text-muted); text-decoration: none; }
+    footer a:hover { color: var(--text); text-decoration: underline; }
+
+    @media (max-width: 640px) {
+      .hero { padding: 2.6rem 0 1.2rem; }
+      section { padding: 2.2rem 0; }
+      .nav-inner { padding: .7rem 1rem; gap: .4rem; }
+      .brand { font-size: 1.05rem; }
+      .nav-anchor { display: none; }
+      .nav-inner .btn { padding: .5rem .85rem; font-size: .88rem; }
+
+      .nav-toggle {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 2.2rem; height: 2.2rem; margin-right: -.3rem;
+        background: none; border: none; border-radius: 6px;
+        color: var(--text); cursor: pointer; flex: none;
+      }
+      .nav-toggle:hover { background: var(--bg-alt); }
+      .nav-toggle .ic { width: 1.1rem; height: 1.1rem; }
+      .nav-toggle .ic-close { display: none; }
+      .nav-toggle[aria-expanded="true"] .ic-open { display: none; }
+      .nav-toggle[aria-expanded="true"] .ic-close { display: block; }
+
+      .nav-menu.open {
+        display: flex; flex-direction: column; gap: .1rem;
+        position: absolute; top: 100%; left: 0; right: 0;
+        background: #faf9f6; border-bottom: 1px solid var(--border);
+        padding: .5rem 1rem 1rem;
+        box-shadow: 0 16px 28px rgba(15,23,42,.1);
+      }
+      .nav-menu .nav-link { padding: .75rem .5rem; font-size: .98rem; }
+    }
+    @media (max-width: 359px) {
+      .nav-login { display: none; }
+    }
+
+    /* ===== EXCEL TEMPLATE PAGE ===== */
+    .hero .cta { display: flex; flex-wrap: wrap; gap: .7rem; justify-content: center; margin-top: 1.5rem; }
+    .hero .fine { color: var(--text-muted); font-size: .88rem; margin-top: .9rem; }
+    .prose ul { margin: 0 0 1rem 1.3rem; color: var(--text-muted); }
+    .formula.cell { font-family: 'IBM Plex Mono', monospace; font-size: .9rem; overflow-wrap: anywhere; }
+    table.eg td.rn, table.eg th.rn { color: var(--text-muted); font-size: .8rem; width: 2.6rem; }
+    table.eg td.calc { background: #f0f9ff; }
+    table.eg.cmp { min-width: 560px; }
+    table.eg.cmp td { vertical-align: top; }
+  </style>
+</head>
+<body>
+
+  <!-- Icons: Font Awesome Free 6.4.0 by @fontawesome, https://fontawesome.com/license/free
+       (icons CC BY 4.0). Inlined so the page loads no icon font. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="i-receipt" viewBox="0 0 384 512"><path d="M14 2.2C22.5-1.7 32.5-.3 39.6 5.8L80 40.4 120.4 5.8c9-7.7 22.3-7.7 31.2 0L192 40.4 232.4 5.8c9-7.7 22.3-7.7 31.2 0L304 40.4 344.4 5.8c7.1-6.1 17.1-7.5 25.6-3.6s14 12.4 14 21.8V488c0 9.4-5.5 17.9-14 21.8s-18.5 2.5-25.6-3.6L304 471.6l-40.4 34.6c-9 7.7-22.3 7.7-31.2 0L192 471.6l-40.4 34.6c-9 7.7-22.3 7.7-31.2 0L80 471.6 39.6 506.2c-7.1 6.1-17.1 7.5-25.6 3.6S0 497.4 0 488V24C0 14.6 5.5 6.1 14 2.2zM96 144c-8.8 0-16 7.2-16 16s7.2 16 16 16H288c8.8 0 16-7.2 16-16s-7.2-16-16-16H96zM80 352c0 8.8 7.2 16 16 16H288c8.8 0 16-7.2 16-16s-7.2-16-16-16H96c-8.8 0-16 7.2-16 16zM96 240c-8.8 0-16 7.2-16 16s7.2 16 16 16H288c8.8 0 16-7.2 16-16s-7.2-16-16-16H96z"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 448 512"><path d="M144 144v48H304V144c0-44.2-35.8-80-80-80s-80 35.8-80 80zM80 192V144C80 64.5 144.5 0 224 0s144 64.5 144 144v48h16c35.3 0 64 28.7 64 64V448c0 35.3-28.7 64-64 64H64c-35.3 0-64-28.7-64-64V256c0-35.3 28.7-64 64-64H80z"/></symbol>
+    <symbol id="i-bars" viewBox="0 0 448 512"><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></symbol>
+    <symbol id="i-xmark" viewBox="0 0 384 512"><path d="M342.6 150.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L192 210.7 86.6 105.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3L146.7 256 41.4 361.4c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L192 301.3 297.4 406.6c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L237.3 256 342.6 150.6z"/></symbol>
+  </svg>
+
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="/"><picture><source media="(max-width: 430px)" srcset="/logo/foodnance-icon.svg"><img class="brand-logo" src="/logo/foodnance-logo-horizontal-tagline.svg" width="219" height="52" alt="Foodnance, food meets profit"></picture></a>
+      <div class="nav-spacer"></div>
+      <a class="nav-link nav-anchor" href="/#features">Features</a>
+      <a class="nav-link nav-anchor" href="/#how">How it works</a>
+      <a class="nav-link nav-anchor" href="/food-cost-calculator">Food cost calculator</a>
+      <a class="nav-link nav-anchor" href="/pricing">Pricing</a>
+      <a class="nav-link nav-anchor" href="/#faq">FAQ</a>
+      <a class="nav-link nav-login" href="/login">Log in</a>
+      <button class="nav-toggle" id="navToggle" type="button" aria-expanded="false" aria-controls="navMenu" aria-label="Open menu">
+        <svg class="ic ic-open" aria-hidden="true" focusable="false"><use href="#i-bars"/></svg>
+        <svg class="ic ic-close" aria-hidden="true" focusable="false"><use href="#i-xmark"/></svg>
+      </button>
+      <a class="btn btn-primary js-request-access" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">Request access</a>
+    </div>
+    <nav class="nav-menu" id="navMenu" aria-label="Mobile">
+      <a class="nav-link" href="/#features">Features</a>
+      <a class="nav-link" href="/#how">How it works</a>
+      <a class="nav-link" href="/food-cost-calculator">Food cost calculator</a>
+      <a class="nav-link" href="/pricing">Pricing</a>
+      <a class="nav-link" href="/#faq">FAQ</a>
+      <a class="nav-link" href="/login">Log in</a>
+    </nav>
+  </header>
+
+  <script>
+    (function () {
+      var toggle = document.getElementById('navToggle');
+      var menu = document.getElementById('navMenu');
+      if (!toggle || !menu) return;
+      function close() { menu.classList.remove('open'); toggle.setAttribute('aria-expanded', 'false'); }
+      function open() { menu.classList.add('open'); toggle.setAttribute('aria-expanded', 'true'); }
+      toggle.addEventListener('click', function () {
+        if (menu.classList.contains('open')) close(); else open();
+      });
+      menu.addEventListener('click', function (e) { if (e.target.tagName === 'A') close(); });
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+      document.addEventListener('click', function (e) {
+        if (!menu.classList.contains('open')) return;
+        if (!menu.contains(e.target) && !toggle.contains(e.target)) close();
+      });
+      window.addEventListener('resize', function () { if (window.innerWidth > 640) close(); });
+    })();
+  </script>
+
+  <main>
+  <!-- ══ HERO ══ -->
+  <div class="hero wrap">
+    <div class="eyebrow"><span class="rule"></span><span class="kicker">Free template</span></div>
+    <h1>Food cost calculator <span class="accent">for Excel</span></h1>
+    <p class="sub">A spreadsheet that costs one dish from what you paid your suppliers. Type your ingredients and the selling price. The sheet gives you the cost per portion and the food cost percentage.</p>
+    <div class="cta">
+      <a class="btn btn-primary btn-lg js-template-download" href="/downloads/food-cost-calculator.xlsx" download>Download the Excel file</a>
+      <a class="btn btn-ghost btn-lg" href="/food-cost-calculator">Use the online calculator instead</a>
+    </div>
+    <p class="fine">Free. No email asked. Also opens in Google Sheets and Apple Numbers.</p>
+  </div>
+
+  <section class="section-alt" style="margin-top:1.4rem">
+    <div class="wrap">
+      <div class="prose">
+        <h2>What is in the file</h2>
+        <p>One sheet for one dish, with room for ten ingredients. White cells are yours to fill in. Blue cells are worked out for you.</p>
+        <div class="table-wrap">
+          <table class="eg" style="min-width:640px">
+            <thead><tr><th class="rn">Row</th><th>Ingredient</th><th class="num">Paid</th><th class="num">Bought</th><th>Unit</th><th class="num">Usable %</th><th class="num">Used</th><th>Unit</th><th class="num">Cost</th></tr></thead>
+            <tbody>
+              <tr><td class="rn">2</td><td>Beef</td><td class="num">$300.00</td><td class="num">10</td><td>kg</td><td class="num">100%</td><td class="num">300</td><td>g</td><td class="num calc">$9.00</td></tr>
+              <tr><td class="rn">3</td><td>Potatoes</td><td class="num">$32.00</td><td class="num">5</td><td>kg</td><td class="num">100%</td><td class="num">200</td><td>g</td><td class="num calc">$1.28</td></tr>
+              <tr class="total"><td class="rn">12</td><td colspan="7">Cost of the dish</td><td class="num">$10.28</td></tr>
+              <tr><td class="rn">13</td><td colspan="7">Portions</td><td class="num">1</td></tr>
+              <tr><td class="rn">14</td><td colspan="7">Cost per portion</td><td class="num calc">$10.28</td></tr>
+              <tr><td class="rn">15</td><td colspan="7">Selling price</td><td class="num">$34.00</td></tr>
+              <tr class="total"><td class="rn">16</td><td colspan="7">Food cost</td><td class="num">30.2%</td></tr>
+              <tr><td class="rn">17</td><td colspan="7">Gross profit per portion</td><td class="num calc">$23.72</td></tr>
+              <tr><td class="rn">18</td><td colspan="7">Target food cost</td><td class="num">30%</td></tr>
+              <tr><td class="rn">19</td><td colspan="7">Price needed for the target</td><td class="num calc">$34.27</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>The beef and potatoes are an example, the same one as on the <a href="/food-cost-calculator">online food cost calculator</a>, so both give $10.28 and 30.2 percent. Type over them with your own dish. Units are picked from a list: g, kg, oz, lb, ml, L and each.</p>
+
+        <h2>Build it yourself: the four formulas</h2>
+        <p>Start a blank sheet with these columns: A the ingredient, B what you paid, C how much you bought, D its unit, E the usable share, F how much the dish uses, G its unit, H the cost. Put your first ingredient in row 2.</p>
+        <ol>
+          <li><strong>Price per unit.</strong> What you paid, divided by what you bought. The usable share is the part you serve after trimming or cooking. Type 100% when nothing is lost.
+            <span class="formula cell">=B2/(C2*E2)</span></li>
+          <li><strong>Cost of each ingredient.</strong> The price per unit, times the amount the dish uses. CONVERT changes the amount used into the unit you bought in, for example grams into kilograms.
+            <span class="formula cell">=B2/(C2*E2)*CONVERT(F2,G2,D2)</span>
+            CONVERT needs Excel's own unit names: g, kg, lbm for pounds, ozm for ounces, l and ml. The file you download uses a small units table instead, so you can pick lb or oz from a list.</li>
+          <li><strong>Cost per portion.</strong> Add the ingredients, then divide by the number of portions. Here the ingredients are rows 2 to 11 and the portions are in H13.
+            <span class="formula cell">=SUM(H2:H11)/H13</span></li>
+          <li><strong>Food cost percentage.</strong> The cost per portion divided by the selling price. Here they are in H14 and H15.
+            <span class="formula cell">=H14/H15</span>
+            To go the other way and set a price for a target, divide the cost per portion by the target in H18.
+            <span class="formula cell">=H14/H18</span></li>
+        </ol>
+
+        <h2>Where a spreadsheet stops being enough</h2>
+        <ul>
+          <li><strong>Prices go out of date.</strong> The sheet uses the price you typed. When a supplier raises a price, nothing changes until you type the new one.</li>
+          <li><strong>Every dish is another sheet.</strong> An ingredient used in twenty dishes has to be updated in twenty places, or linked by hand.</li>
+          <li><strong>Units are typed by hand.</strong> A case of 6 cans, bought by the case and used by the kg, takes a formula most people get wrong once.</li>
+          <li><strong>It only costs dishes.</strong> It does not know your stock, your sales or your profit for the month.</li>
+        </ul>
+
+        <h2>Excel sheet, online calculator or Foodnance</h2>
+        <div class="table-wrap">
+          <table class="eg cmp">
+            <thead><tr><th></th><th>Excel sheet</th><th>Online calculator</th><th>Foodnance</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Cost</strong></td><td>Free</td><td>Free</td><td>From $79 CAD a month, with a 14-day free trial</td></tr>
+              <tr><td><strong>Prices come from</strong></td><td>You type them</td><td>You type them</td><td>A photo of the supplier invoice</td></tr>
+              <tr><td><strong>When a price changes</strong></td><td>You update each sheet</td><td>You run it again</td><td>Every dish is re-costed for you</td></tr>
+              <tr><td><strong>Keeps your dishes</strong></td><td>Yes, in your own files</td><td>No, nothing is saved</td><td>Yes</td></tr>
+              <tr><td><strong>Best for</strong></td><td>A first try on one or two dishes</td><td>One quick answer</td><td>A full menu with prices that move</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>See <a href="/pricing">what Foodnance costs</a>, or go back to the <a href="/food-cost-calculator">food cost calculator</a>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ FAQ ══ -->
+  <section id="faq">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 class="section-title">Excel template questions</h2>
+        <p>Short answers to what people usually ask.</p>
+      </div>
+      <div class="faq">
+        <div class="q"><h3>Is the Excel food cost template free?</h3><p>Yes. Download it and use it as you like. We do not ask for your email address.</p></div>
+        <div class="q"><h3>Does it work in Google Sheets?</h3><p>Yes. Upload the file to Google Drive and open it with Google Sheets. The formulas work the same way. It also opens in Apple Numbers.</p></div>
+        <div class="q"><h3>How do I convert units in Excel?</h3><p>Use the CONVERT function. Give it the amount, the unit it is in and the unit you want, so 300 with g and kg returns 0.3. Excel writes pounds as lbm and ounces as ozm. A weight cannot be converted to a volume without knowing the ingredient.</p></div>
+        <div class="q"><h3>How often should I update the prices?</h3><p>Each time a supplier invoice arrives with a different price. Until you type the new price, the sheet keeps showing the old cost.</p></div>
+        <div class="q"><h3>Can I cost more than one dish?</h3><p>Yes. Copy the Dish sheet once for each dish. An ingredient used in several dishes has to be updated on each copy when its price changes.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ FINAL CTA ══ -->
+  <section style="padding-top:0">
+    <div class="wrap">
+      <div class="final">
+        <h2>When the spreadsheet becomes a second job</h2>
+        <p>Foodnance is food cost software for independent Canadian restaurants and bakeries. Photograph a supplier invoice, and your recipe costs, margins and P&amp;L update themselves.</p>
+        <a class="btn btn-primary btn-lg js-request-access" href="mailto:hello@foodnance.com?subject=Foodnance%20—%20request%20access&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">Request access</a>
+        <p class="more">Curious about the cost? <a href="/pricing">See pricing</a></p>
+        <p class="more">Questions? We are here to help. Email us <a href="mailto:hello@foodnance.com">hello@foodnance.com</a></p>
+      </div>
+    </div>
+  </section>
+  </main>
+
+  <footer>
+    <div class="wrap foot-inner">
+      <a class="brand" href="/" style="font-size:1rem"><img class="brand-logo" src="/logo/foodnance-logo.svg" width="230" height="134" alt="Foodnance, food meets profit" style="width:230px;height:auto"></a>
+      <div class="nav-spacer"></div>
+      <span>&copy; 2026 Foodnance</span>
+      <a href="/">Home</a>
+      <a href="/food-cost-calculator">Food cost calculator</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/login">Log in</a>
+      <a href="/refund-policy">Refund policy</a>
+      <a href="/terms">Terms</a>
+      <a href="/privacy">Privacy</a>
+      <a href="mailto:hello@foodnance.com">Contact</a>
+    </div>
+  </footer>
+
+  <script src="/static/env-banner.js?v=20260807-2"></script>
+  <script src="/static/analytics.js?v=20261008-1"></script>
+  <script src="/static/request-access.js?v=20261003-1"></script>
+</body>
+</html>
