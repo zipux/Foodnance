@@ -4,7 +4,7 @@
 //
 //                     How is this made?   Produce Batch   Pack Run   Pack Sizes + Reorder Level   SKU/Expiry/Invoice Ref
 //   restaurant  Ess          hidden          hidden        hidden          hidden                       hidden
-//   restaurant  Pro          hidden          SHOWN         hidden          shown                        shown
+//   restaurant  Pro          hidden          SHOWN         hidden          shown                        shown (SKU hidden)
 //   commissary  Ess          shown           shown         shown           SHOWN                        shown
 //   commissary  Pro          shown           shown         shown           shown                        shown
 //
@@ -116,7 +116,8 @@ t.check('Essential: Invoice Ref hidden — /invoices holds the whole invoice, un
   restEss.entryInvoiceGroup === true);
 // Pro restaurants do count stock (/stock-take, /inventory), so a best-before
 // date and a way back to the source invoice both do real work again.
-t.check('Pro: SKU shown',         restPro.entrySkuGroup === false);
+// SKU is the exception: hidden for a restaurant on either plan (2026-10-12).
+t.check('Pro: SKU hidden too — a restaurant orders by name on either plan', restPro.entrySkuGroup === true);
 t.check('Pro: Expiry shown',      restPro.entryExpiryGroup === false);
 t.check('Pro: Invoice Ref shown', restPro.entryInvoiceGroup === false);
 

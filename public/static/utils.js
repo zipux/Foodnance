@@ -259,6 +259,8 @@ function stockDetailFieldsHidden() {
 // table) are warehouse paperwork a restaurant on Essential never does:
 //   - SKU is a vendor's own catalogue number. Useful when you reorder against a
 //     price list; a restaurant orders by name, over the phone or an app.
+//     (Since 2026-10-12 SKU is hidden for a restaurant on Pro as well, so it no
+//     longer rides on this predicate — see applyBatchWorkflowGating.)
 //   - Expiry / Best Before drives date rotation, which needs someone counting
 //     stock to act on it. On Essential nothing counts — /stock-take and
 //     /inventory are both the upgrade panel.
@@ -314,9 +316,11 @@ function applyBatchWorkflowGating() {
   // instead, not here: that table's body is rebuilt on every render, so header
   // and cells have to be decided by one call at one moment or a modal opened
   // during the async bootstrap ends up with a header the rows do not fill.
-  if (purchaseAdminFieldsHidden()) {
-    hide('entrySkuGroup'); hide('entryExpiryGroup'); hide('entryInvoiceGroup');
-  }
+  // SKU goes for EVERY restaurant, Pro included (the user's decision,
+  // 2026-10-12): a restaurant orders by name, on either plan. A commissary
+  // keeps it.
+  if (restaurantAccount()) hide('entrySkuGroup');
+  if (purchaseAdminFieldsHidden()) { hide('entryExpiryGroup'); hide('entryInvoiceGroup'); }
 }
 
 // The chip's markup and its actions (Settings, Sign out). Change password lives on the Settings page only. `email` is only known once the server
