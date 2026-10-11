@@ -87,6 +87,7 @@ function pnlMatchingPreset() {
 
 function pnlSetRange(from, to, { load = true } = {}) {
   pnlFrom = from; pnlTo = to;
+  pnlClearDays();                       // a month range leaves the exact-dates view
   document.getElementById('pnlFrom').value = from;
   document.getElementById('pnlTo').value   = to;
   pnlSetActivePreset(pnlMatchingPreset());
@@ -149,6 +150,11 @@ document.addEventListener('DOMContentLoaded', () => {
   ['laborTotal', 'laborStart', 'laborEnd'].forEach(id =>
     document.getElementById(id).addEventListener('input', updateLaborPreview));
 
+  document.getElementById('pnlDayApply').addEventListener('click', pnlApplyDays);
+  document.getElementById('pnlCountPick').addEventListener('change', pnlPickCounts);
+  pnlShowDatesBar();
+  window.addEventListener('dm:plan-known', pnlShowDatesBar);
+
   const start = pnlPresetRange('this-month');
   pnlSetRange(start.from, start.to);   // loads
 });
@@ -159,7 +165,7 @@ async function loadPnl() {
   body.innerHTML = `<div style="text-align:center;color:var(--text-muted);padding:2rem 1rem"><i class="fas fa-spinner fa-spin"></i> Loading…</div>`;
   try {
     const [costs, salesData, ohData, recData, spData, labData] = await Promise.all([
-      apiGet(`pnl?from=${pnlFrom}&to=${pnlTo}`),
+      apiGet(pnlDays ? `pnl?from=${pnlDays.from}&to=${pnlDays.to}` : `pnl?from=${pnlFrom}&to=${pnlTo}`),
       apiGet(`tables/sales_monthly?page=1&limit=500`),
       apiGet(`tables/operating_expenses?page=1&limit=1000`),
       apiGet(`tables/recurring_expenses?page=1&limit=500`),
@@ -363,6 +369,7 @@ function spreadRangeLabel(row) {
 }
 
 function render() {
+  if (pnlDays) return renderDays();
   const months   = monthsInRange(pnlFrom, pnlTo);
   const nMonths  = months.length;
   const single   = pnlFrom === pnlTo;     // month-scoped edits only make sense here
@@ -739,7 +746,7 @@ function render() {
     basisNote = `<div class="pnl-basis-note"><i class="fas fa-scale-balanced"></i>
       <span>True cost of what you <strong>used</strong>: purchases adjusted by your stock counts from
       <strong>${esc(niceDate(cogsData.opening_date))}</strong> to <strong>${esc(niceDate(cogsData.closing_date))}</strong>.
-      Counts the ingredients and the prep you had on hand.</span></div>`;
+      Counts the ingredients and the prep you had on hand.${pnlCarryNote(cogsData)}</span></div>`;
   } else if (cogsAvail) {
     basisNote = `<div class="pnl-basis-note"><i class="fas fa-circle-info"></i>
       <span>Showing what you <strong>bought</strong> this period. Switch to True COGS to adjust for stock you had on hand.</span></div>`;
@@ -750,9 +757,11 @@ function render() {
       <span>True COGS is part of <strong>Pro</strong>, which adds stock counting.
       Showing what you <strong>bought</strong> this period.</span></div>`;
   } else {
+    // A count is the shelf before opening that day: one on the 1st opens the
+    // month, and one on the 1st of the next month closes it.
     const need = cogsData.reason === 'no_opening_take'
-      ? `a submitted stock take dated before <strong>${esc(niceDate(pnlFrom + '-01'))}</strong>`
-      : `a submitted stock take dated within this period`;
+      ? `a submitted stock take dated on or before <strong>${esc(niceDate(pnlFrom + '-01'))}</strong>`
+      : `a submitted stock take dated after <strong>${esc(niceDate(pnlFrom + '-01'))}</strong> and no later than <strong>${esc(niceDate(addMonths(pnlTo, 1) + '-01'))}</strong>`;
     basisNote = `<div class="pnl-basis-note warn"><i class="fas fa-circle-info"></i>
       <span>True COGS needs ${need}. Showing purchases until then.</span></div>`;
   }
@@ -772,7 +781,7 @@ function render() {
   // COGS section heading + per-line detail reflect the active basis.
   const cogsHeading = useCogs ? 'Cost of goods sold — what you used' : 'Cost of goods — what you bought';
   const cogsSub = (bought, openV, closV) => useCogs
-    ? `Bought ${fmtMoney(bought)} + opening ${fmtMoney(openV)} − closing ${fmtMoney(closV)}`
+    ? `Bought ${fmtMoney(bought)} + opening ${fmtMoney(openV)}${cogsData.opening_estimate ? ' (estimated)' : ''} − closing ${fmtMoney(closV)}${cogsData.closing_estimate ? ' (estimated)' : ''}`
     : 'From invoices';
 
   document.getElementById('pnlBody').innerHTML = `
@@ -847,6 +856,275 @@ function render() {
       <span>${useCogs
         ? `Food &amp; drink costs are your <strong>true cost of goods sold</strong> — purchases adjusted by the change in raw-material stock between your counts. Other running costs are what you paid in ${periodWord}. Taxes and refundable deposits are excluded.`
         : `Costs are based on what you <strong>purchased</strong> in ${periodWord} (from your invoices), not a stock-take-adjusted cost of goods sold. Taxes and refundable deposits are excluded.`}</span>
+    </div>
+  `;
+}
+
+// ── Exact dates: the short view (Pro) ──────────────────────────
+// A week between two stock counts, or any two dates. It shows only what has its
+// own day: imported till sales, food and drinks, and wages (a pay period's share
+// by days). Sales typed per month, fixed monthly costs and one-offs are stored
+// per month and are never split into days, so they stay on the whole-month
+// statement above, which this does not change.
+//
+// A count is taken to be made BEFORE OPENING: counts on 7 and 14 Sep bracket
+// 7..13 Sep, so a "Between counts" choice runs from one count's day to the day
+// before the next. The server (/api/pnl with YYYY-MM-DD) follows the same rule.
+let pnlDays      = null;      // { from, to } 'YYYY-MM-DD' inclusive; null = whole months
+let pnlDayBasis  = 'cogs';    // this view shows what was USED whenever the counts allow
+let pnlCountDaysLoaded = false;
+
+function _ymdOfDayNum(n) { return new Date(n * 86400000).toISOString().slice(0, 10); }
+function pnlShiftDay(ymd, n) { return _ymdOfDayNum(_dayNum(ymd) + n); }
+function pnlNiceDay(ymd) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd || ''));
+  return m ? `${+m[3]} ${PNL_MON[+m[2] - 1]} ${m[1]}` : '?';
+}
+
+// A pay period's share of the days from..to (inclusive), by days: the same
+// sum spreadAllocation() does for a month. Returns { allocated, overlapDays, totalDays }.
+function dayAllocation(row, from, to) {
+  const startN = _dayNum(row.start_date), endN = _dayNum(row.end_date);
+  const total  = parseFloat(row.total_amount) || 0;
+  if (isNaN(startN) || isNaN(endN) || endN < startN) return { allocated: 0, overlapDays: 0, totalDays: 0 };
+  const oStart = Math.max(startN, _dayNum(from)), oEnd = Math.min(endN, _dayNum(to));
+  const overlapDays = oEnd >= oStart ? (oEnd - oStart + 1) : 0;
+  const totalDays   = endN - startN + 1;
+  return { allocated: total * overlapDays / totalDays, overlapDays, totalDays };
+}
+
+// How many of the days from..to at least one pay period covers.
+function daysWithWages(rows, from, to) {
+  let n = 0;
+  for (let d = _dayNum(from), end = _dayNum(to); d <= end; d++) {
+    if (rows.some(r => _dayNum(r.start_date) <= d && d <= _dayNum(r.end_date))) n++;
+  }
+  return n;
+}
+
+// Consecutive counts, newest first: [{ from, to, label }]. `days` are the count
+// days as the server lists them (any order).
+function countPeriods(days) {
+  const sorted = [...new Set(days)].sort();
+  const out = [];
+  for (let i = 1; i < sorted.length; i++) {
+    out.push({ from: sorted[i - 1], to: pnlShiftDay(sorted[i], -1),
+               label: `${pnlNiceDay(sorted[i - 1])} → ${pnlNiceDay(sorted[i])}` });
+  }
+  return out.reverse();
+}
+
+// When a count is not on the edge of the period (a Monday count, a month that
+// ends on a Wednesday), what the server did about it, in words. Either the shelf
+// on the edge was ESTIMATED (the count, plus what was bought since, less what
+// sales and recorded waste used since), or it could not be, because the till
+// sales for those days are not imported, and the count stands as it is.
+function pnlCarryNote(c) {
+  const today = new Date().toISOString().slice(0, 10);
+  const est = (e, what) => ` ${what} is <strong>estimated</strong> from your ${esc(pnlNiceDay(e.from))} count:
+    plus ${fmtMoney(e.bought)} bought since, less ${fmtMoney(e.used)} used by sales and recorded waste.`;
+  let out = '';
+  if (c.opening_estimate) out += est(c.opening_estimate, 'The stock at the start');
+  if (c.closing_estimate) out += est(c.closing_estimate, 'The stock at the end');
+  if (c.opening_estimate || c.closing_estimate) out += ` Stock lost with no record is not in an estimate; your next count picks it up.`;
+  if (c.opening_gap) out += ` The stock at the start is your ${esc(pnlNiceDay(c.opening_gap.from))} count as it was:
+    the till sales from then to the start are not imported, so it could not be brought up to the day.`;
+  if (c.closing_gap) out += c.closing_gap.to >= today
+    ? ` Food delivered after your ${esc(pnlNiceDay(c.closing_gap.from))} count is counted as used until your next count.`
+    : ` Food delivered from ${esc(pnlNiceDay(c.closing_gap.from))} on, after your last count, is counted as <strong>used</strong>:
+       the till sales for those days are not imported, so the stock at the end could not be estimated.`;
+  return out;
+}
+
+// The row is for Pro (stock counts and the till import are Pro). An operator
+// viewing a customer carries no plan of their own, so they are shown it too.
+function pnlShowDatesBar() {
+  const pro = String(window.__accountPlan || '').toLowerCase() === 'pro' || window.__isSuperAdmin === true;
+  const bar = document.getElementById('pnlDatesBar');
+  if (!bar) return;
+  bar.classList.toggle('hidden', !pro);
+  if (!pro || pnlCountDaysLoaded) return;
+  pnlCountDaysLoaded = true;
+  apiGet('pnl/count-days').then(r => {
+    const periods = countPeriods((r && r.data) || []);
+    const pick = document.getElementById('pnlCountPick');
+    pick.innerHTML = periods.length
+      ? `<option value="">Choose…</option>` + periods.map(p =>
+          `<option value="${esc(p.from)}|${esc(p.to)}">${esc(p.label)}</option>`).join('')
+      : `<option value="">Needs two stock counts</option>`;
+    pick.disabled = !periods.length;
+    if (pnlDays) pick.value = `${pnlDays.from}|${pnlDays.to}`;
+  }).catch(() => { pnlCountDaysLoaded = false; });
+}
+
+// Which of the two sections of the period box is in use.
+function pnlMarkPeriod() {
+  const months = document.getElementById('pnlSecMonths'), dates = document.getElementById('pnlDatesBar');
+  if (months) months.classList.toggle('active', !pnlDays);
+  if (dates)  dates.classList.toggle('active', !!pnlDays);
+}
+
+function pnlSetDays(from, to) {
+  pnlDays = { from, to };
+  pnlDayBasis = 'cogs';
+  document.getElementById('pnlDayFrom').value = from;
+  document.getElementById('pnlDayTo').value   = to;
+  const pick = document.getElementById('pnlCountPick');
+  pick.value = `${from}|${to}`;
+  if (pick.selectedIndex < 0) pick.value = '';     // dates that are not a count period
+  pnlSetActivePreset(null);
+  pnlMarkPeriod();
+  loadPnl();
+}
+
+function pnlClearDays() {
+  pnlDays = null;
+  pnlMarkPeriod();
+  for (const id of ['pnlDayFrom', 'pnlDayTo', 'pnlCountPick']) {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  }
+}
+
+function pnlApplyDays() {
+  const from = document.getElementById('pnlDayFrom').value;
+  const to   = document.getElementById('pnlDayTo').value;
+  if (isNaN(_dayNum(from)) || isNaN(_dayNum(to))) { showToast('Pick a From and To date.', 'error'); return; }
+  if (to < from) { showToast('The "To" date is before the "From" date.', 'error'); return; }
+  pnlSetDays(from, to);
+}
+
+function pnlPickCounts() {
+  const [from, to] = String(document.getElementById('pnlCountPick').value || '').split('|');
+  if (from && to) pnlSetDays(from, to);
+}
+
+function pnlSetDayBasis(basis) {
+  pnlDayBasis = (basis === 'cogs') ? 'cogs' : 'purchases';
+  render();
+}
+
+function renderDays() {
+  const { from, to } = pnlDays;
+  const nDays = _dayNum(to) - _dayNum(from) + 1;
+
+  // Sales: the till import only. A month's typed figure cannot be cut into days.
+  const byMonth   = (pnlCosts.sales && pnlCosts.sales.by_month) || {};
+  const saleLines = Object.values(byMonth).reduce((s, m) => s + (Number(m.lines) || 0), 0);
+  const sales     = parseFloat(pnlCosts.sales && pnlCosts.sales.imported_total) || 0;
+  const hasSales  = saleLines > 0 && sales > 0;
+  const pct = n => hasSales ? Math.round((n / sales) * 100) + '%' : '—';
+
+  const foodBought = parseFloat(pnlCosts.food_cost) || 0;
+  const bevBought  = parseFloat(pnlCosts.beverage_cost) || 0;
+  const cogsData   = pnlCosts.cogs || { available: false, reason: 'no_closing_take' };
+  const cogsAvail  = !!cogsData.available;
+  const useCogs    = pnlDayBasis === 'cogs' && cogsAvail;
+  const food     = useCogs ? (parseFloat(cogsData.food_cogs) || 0) : foodBought;
+  const beverage = useCogs ? (parseFloat(cogsData.beverage_cogs) || 0) : bevBought;
+
+  // Wages: each pay period's share of these days. Days no pay period covers are
+  // said out loud, never shown as $0 of wages.
+  const wageRows   = pnlLabor.map(r => ({ row: r, ...dayAllocation(r, from, to) })).filter(x => x.allocated > 0.0049);
+  const wages      = wageRows.reduce((s, x) => s + x.allocated, 0);
+  const wageDays   = daysWithWages(pnlLabor, from, to);
+  const wagesWhole = wageDays === nDays;
+
+  const row = (label, sub, amountText, pctText) => `
+    <div class="pnl-row">
+      <div><div class="pnl-label">${label}</div>${sub ? `<div class="pnl-sub">${sub}</div>` : ''}</div>
+      <div class="pnl-amount">${amountText}</div>
+      <div class="pnl-pct">${pctText}</div>
+    </div>`;
+  const cogsSub = (bought, openV, closV) => useCogs
+    ? `Bought ${fmtMoney(bought)} + opening ${fmtMoney(openV)}${cogsData.opening_estimate ? ' (estimated)' : ''} − closing ${fmtMoney(closV)}${cogsData.closing_estimate ? ' (estimated)' : ''}`
+    : 'From invoices';
+  let basisNote;
+  if (useCogs) {
+    basisNote = `<div class="pnl-basis-note"><i class="fas fa-scale-balanced"></i>
+      <span>True cost of what you <strong>used</strong>: purchases adjusted by your stock counts of
+      <strong>${esc(pnlNiceDay(cogsData.opening_date))}</strong> and <strong>${esc(pnlNiceDay(cogsData.closing_date))}</strong>,
+      each taken as counted before opening.${pnlCarryNote(cogsData)}</span></div>`;
+  } else if (cogsAvail) {
+    basisNote = `<div class="pnl-basis-note"><i class="fas fa-circle-info"></i>
+      <span>Showing what you <strong>bought</strong> in these dates. Switch to True COGS to adjust for stock you had on hand.</span></div>`;
+  } else if (cogsData.reason === 'upgrade_required') {
+    basisNote = `<div class="pnl-basis-note warn"><i class="fas fa-lock"></i>
+      <span>True COGS is part of <strong>Pro</strong>, which adds stock counting.
+      Showing what you <strong>bought</strong> in these dates.</span></div>`;
+  } else {
+    const need = cogsData.reason === 'no_opening_take'
+      ? `a submitted stock count dated on or before <strong>${esc(pnlNiceDay(from))}</strong>`
+      : `a submitted stock count dated after <strong>${esc(pnlNiceDay(from))}</strong> and no later than <strong>${esc(pnlNiceDay(pnlShiftDay(to, 1)))}</strong>`;
+    basisNote = `<div class="pnl-basis-note warn"><i class="fas fa-circle-info"></i>
+      <span>True COGS needs ${need}. Showing purchases until then.</span></div>`;
+  }
+
+  const pending = pnlCosts.pending_invoices || { count: 0, amount: 0 };
+  const pendingCount = Number(pending.count) || 0;
+  const pendingNote = pendingCount
+    ? `<div class="pnl-warn">
+         <i class="fas fa-triangle-exclamation"></i>
+         <span><strong>${pendingCount} invoice${pendingCount === 1 ? '' : 's'}</strong>
+         dated in these dates ${pendingCount === 1 ? 'is' : 'are'} still in review, so
+         ${pendingCount === 1 ? 'its' : 'their'} cost is not counted here yet${
+           pending.amount > 0 ? ` (about <strong>${fmtMoney(pending.amount)}</strong>)` : ''}.
+         <a href="/invoices.html">Finish them &rarr;</a></span>
+       </div>`
+    : '';
+
+  const wagesSub = !wageRows.length
+    ? `<span style="color:#b45309">Wages are not entered for these dates. Add the pay period on the monthly statement.</span>`
+    : wagesWhole
+    ? `Each pay period's share of these ${nDays} days`
+    : `<span style="color:#b45309">Entered for ${wageDays} of these ${nDays} days. The other days are not in yet.</span>`;
+
+  const together = food + beverage + wages;
+  const togetherRow = wageRows.length
+    ? `<div class="pnl-total">
+         <div class="pnl-label">Food + drinks + wages${wagesWhole ? '' : ' <span style="font-weight:400;font-size:.8rem;color:#b45309">(wages incomplete)</span>'}</div>
+         <div class="pnl-amount">${fmtMoney(together)}</div>
+         <div class="pnl-pct">${pct(together)}</div>
+       </div>`
+    : '';
+
+  document.getElementById('pnlBody').innerHTML = `
+    <div class="pnl-period-label">Showing: <strong>${esc(pnlNiceDay(from))} – ${esc(pnlNiceDay(to))}</strong> · ${nDays} day${nDays === 1 ? '' : 's'}</div>
+
+    <div class="pnl-row pnl-money-in">
+      <div><div class="pnl-label"><strong>Net sales</strong> (money in)</div>
+        <div class="pnl-sub">${saleLines
+          ? `<i class="fas fa-cash-register"></i> From POS import · ${saleLines} sales`
+          : `<span style="color:#b45309">No sales imported for these dates, so no percentages are shown.</span>`}</div></div>
+      <div style="grid-column:2/4;text-align:right"><div class="pnl-amount">${saleLines ? fmtMoney(sales) : '—'}</div></div>
+    </div>
+    ${pendingNote}
+
+    <div class="pnl-basis">
+      <span class="pnl-basis-label">Cost basis:</span>
+      <div class="pnl-basis-seg">
+        <button class="pnl-basis-btn ${!useCogs ? 'active' : ''}" onclick="pnlSetDayBasis('purchases')">Purchases</button>
+        <button class="pnl-basis-btn ${useCogs ? 'active' : ''}" ${cogsAvail ? '' : 'disabled'}
+                title="${cogsAvail ? 'Adjust purchases by stock-take inventory changes' : 'Needs bracketing stock takes'}"
+                onclick="pnlSetDayBasis('cogs')">True COGS</button>
+      </div>
+      ${basisNote}
+    </div>
+
+    <div class="pnl-section-head">${useCogs ? 'Food and drinks — what you used' : 'Food and drinks — what you bought'}</div>
+    ${row('Food (ingredients)', cogsSub(foodBought, cogsData.opening_food, cogsData.closing_food), fmtMoney(food), food ? pct(food) : '—')}
+    ${row('Drinks (beverage)', cogsSub(bevBought, cogsData.opening_beverage, cogsData.closing_beverage), fmtMoney(beverage), beverage ? pct(beverage) : '—')}
+    ${wasteBlocksHtml(pnlCosts.waste, useCogs, pct, sales)}
+
+    <div class="pnl-section-head">Wages</div>
+    ${row('Staff cost', wagesSub, wageRows.length ? fmtMoney(wages) : '—', wageRows.length ? pct(wages) : '—')}
+    ${togetherRow}
+
+    <div class="pnl-note">
+      <i class="fas fa-circle-info"></i>
+      <span>This is the short view for exact dates. Rent, supplies and your other costs are entered per month,
+      so they are shown for whole months only, with net profit: pick a month above. Sales here are the ones
+      imported from your till. Taxes and refundable deposits are excluded.</span>
     </div>
   `;
 }

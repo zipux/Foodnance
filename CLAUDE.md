@@ -469,6 +469,8 @@ npm run test:sub-unit-stock # case/can/weight stock: stock-take value + sales im
 npm run test:count-date     # stock count's local day + drinks sales split — needs the sandbox (0062 applied locally)
 npm run test:history        # past stock counts: list, sheet, note, isolation — needs the sandbox
 npm run test:waste          # Record waste + Recount, recount kept out of the P&L — needs the sandbox (0063 applied locally)
+npm run test:exact-dates    # P&L for exact dates / between counts — needs the sandbox
+npm run test:estimate       # count carried to the month end (estimate), before-opening rule — needs the sandbox
 npm run test:stock-log      # stock movement log: server filters, Stock after, links, history kept — needs the sandbox
 ```
 
@@ -555,6 +557,10 @@ survives on Pro because it is the only way to see prep mid-week and forgetting i
 now costs nothing; on Essential nothing would ever draw the bin down. A
 commissary keeps everything — pressing those buttons by hand *is* their stock
 workflow, and the dropdown is their only way to set a recipe back to `on_demand`.
+
+The supplier-entry form's **SKU** box is also hidden for every restaurant, Essential and Pro
+(the user's decision, 2026-10-12; Expiry and Invoice Ref stay Essential-only). The value is
+kept on save; a commissary still sees it.
 
 Unknown account type shows everything: the session bootstrap is async, and
 showing a control that is then hidden is recoverable where the reverse is not.
@@ -894,6 +900,56 @@ count line given a non-waste reason (kitchen usage, correction, transfer — the
 still offers those) appears in neither block; lines counted *over* are not netted off; a
 hand-recorded waste entry is dated by its UTC timestamp, while a count's lines use the count's
 own day (0062).
+
+### The P&L for exact dates — the short view (added 2026-10-12, no migration)
+
+Pro only. The P&L page's period box (`#pnlPeriod`) has two sections, **Whole months** and
+**Exact dates**; the one in use is marked (`pnlMarkPeriod`). Exact dates holds a **Between two
+stock counts** list and two date boxes (`#pnlDatesBar`, hidden until the plan is known to be
+Pro; an operator viewing as a customer sees it too). It opens a **short view**: imported till
+sales, food, drinks, waste / missing, wages, and food + drinks + wages. Nothing else. Typed
+monthly sales, fixed monthly costs, one-offs, supplies and net profit are stored per month and
+are **never split into days** (the user's decisions: no percentages when no sales were
+imported for the dates; wages not entered are said, never shown as $0). The month row is
+unchanged, and picking a month leaves the short view.
+
+`/api/pnl` takes `from`/`to` as `YYYY-MM-DD` for **both** ends (`byDay`); a mix is a 400.
+`GET /api/pnl/count-days` lists the full counts' days for the shortcut list (`countPeriods()`
+in `pnl.js`). The short view defaults to True COGS whenever the counts allow, whatever the
+monthly page's sticky choice. Wages are each pay period's share by days (`dayAllocation`).
+`tests/pnl-exact-dates.test.mjs` + `npm run test:exact-dates` (needs the sandbox).
+
+### A count is "before opening", and is carried to the edge of the period (2026-10-12, no migration)
+
+**One rule for whole months and exact dates** (the user's decisions): a count dated a day is
+the shelf at the **START** of that day (a Monday count, then a Monday to Sunday week). So in
+`/api/pnl` the opening count is the latest on or before the **first** day, and the closing
+count the latest on or before the day **after** the last day, and it must be later than the
+first day. Counts on 7 and 14 Sep bracket 7..13 Sep; a count on 1 Oct closes September and
+opens October. Before this, whole months read a count as the END of its day; the figures
+only differ for a count dated the 1st. The waste report reads counts one day on for the same
+reason (`countStart`/`countEnd` on `wasteReport`): what the count of 1 Oct found missing is
+September's.
+
+**When the count is not on the edge, the shelf there is estimated** (`carry()` inside
+`/api/pnl`): the count + what was bought since − what was recorded as used since
+(`stockUsedBetween`: stock taken off by committed, un-voided sales imports, and waste recorded
+by hand; never count lines). Both ends, so September's closing figure is October's opening
+figure and the months add up to count-to-count. This is the fix for the full-restaurant
+test's biggest finding: with Monday counts a month closed on its last Monday but carried all
+its purchases (September 26.6%, October 9.4%). **Only when the till sales for every one of
+those days are imported** (`salesCover`: inside one run of imports that took stock off day by
+day, files up to two days apart counting as one run): with no sales nothing says what was
+used, and the estimate would read every delivery as still on the shelf. Otherwise the count
+stands as it was (the old behaviour) and `cogs.opening_gap` / `closing_gap` let the page say
+so. `cogs.opening_estimate` / `closing_estimate` = `{ from, to, bought, used }`;
+`pnlCarryNote()` words both on the monthly statement and the short view, and the cost line
+says "(estimated)". `opening_date` / `closing_date` are still the counts' own days. Fail-soft:
+if the estimate throws, the counts stand. Known limits: stock lost with no record is not in an
+estimate until the next count; an import with unmapped items under-records what was used; a
+very large import whose movements were collapsed to one line per file does not count as
+cover; a month still running is never estimated to its end (no sales yet), so it reads as
+before. `npm run test:estimate` (needs the sandbox).
 
 ### The stock movement log (redone 2026-10-06, no migration)
 

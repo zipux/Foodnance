@@ -87,17 +87,21 @@ const none = await count(undefined);
 t.check('an old page that sends nothing still works', !!none && (await takeRow(none)).count_date === null);
 
 // ── the month it opens ──────────────────────────────────────────
-t.section('an evening count on the last day opens the next month');
-// Clear the decks: one count made "on the evening of the last day of last
-// month" (already the 1st in UTC), and one made today.
+// A count is the shelf BEFORE OPENING on its day (2026-10-12), so the latest
+// count on or before the 1st opens the month. The count here was made on the
+// evening of the 1st in the restaurant, already the 2nd in UTC: by its UTC day
+// it sits inside the month and opens nothing; by its own day it opens it.
+t.section('a count belongs to the restaurant\'s own day, not the UTC day');
+// Clear the decks: that count, and one made in the middle of the month.
 for (const id of [yesterday, garbage, farOff]) await call(u, 'DELETE', `/api/tables/stock_takes/${id}`);
 const now = new Date();
 const y = now.getUTCFullYear(), m = now.getUTCMonth();
 const period   = `${y}-${String(m + 1).padStart(2, '0')}`;
-const firstUtc = new Date(Date.UTC(y, m, 1, 4, 0, 0)).toISOString();          // the 1st, 04:00 UTC
-const lastPrev = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);      // the day before
+const firstUtc = new Date(Date.UTC(y, m, 2, 4, 0, 0)).toISOString();          // the 2nd, 04:00 UTC
+const lastPrev = `${period}-01`;                                              // the day before: the 1st
 const evening = await count(undefined);
-// `none` stays as the count made today, inside the month.
+// `none` becomes the count inside the month, on the 15th whatever today is.
+await call(u, 'PATCH', `/api/tables/stock_takes/${none}`, { count_date: `${period}-15`, submitted_at: `${period}-15T07:00:00.000Z` });
 await call(u, 'PATCH', `/api/tables/stock_takes/${evening}`, { submitted_at: firstUtc });
 const cogsOf = async () => (await call(u, 'GET', `/api/pnl?from=${period}&to=${period}`)).data?.cogs || {};
 

@@ -7329,6 +7329,9 @@ app.get('/api/spending-breakdown', async (c) => {
 // waste entry has only its UTC timestamp. Lines counted OVER are in neither list.
 async function wasteReport(
   db: D1Database, org: string | null, valuer: ReturnType<typeof stockValuer>, periodStart: string, periodEnd: string,
+  // The days whose COUNTS belong to the period. The P&L passes them one day on,
+  // because it takes a count to be made before opening.
+  countStart: string = periodStart, countEnd: string = periodEnd,
 ) {
   const codes = Object.keys(WASTE_REASONS)
   const logRows = await db.prepare(
@@ -7338,10 +7341,11 @@ async function wasteReport(
        LEFT JOIN stock_takes st ON st.id = l.stock_take_id AND st.org_id IS ?1
        LEFT JOIN inventory inv ON inv.id = l.inventory_id AND inv.org_id IS ?1
       WHERE l.org_id IS ?1 AND l.change < 0
-        AND l.reason_code IN (${codes.map((_, i) => `?${i + 4}`).join(',')})
-        AND COALESCE(st.count_date, date(st.submitted_at), date(l.moved_at)) BETWEEN ?2 AND ?3
+        AND l.reason_code IN (${codes.map((_, i) => `?${i + 6}`).join(',')})
+        AND ((st.id IS NULL     AND COALESCE(st.count_date, date(st.submitted_at), date(l.moved_at)) BETWEEN ?2 AND ?3)
+          OR (st.id IS NOT NULL AND COALESCE(st.count_date, date(st.submitted_at), date(l.moved_at)) BETWEEN ?4 AND ?5))
       ORDER BY d DESC, l.moved_at DESC LIMIT 500`,
-  ).bind(org, periodStart, periodEnd, ...codes).all<{
+  ).bind(org, periodStart, periodEnd, countStart, countEnd, ...codes).all<{
     item_id: string; item_type: string; item_name: string; change: number; reason_code: string; note: string | null
     d: string; unit: string | null; category: string | null
   }>()
@@ -7374,7 +7378,7 @@ async function wasteReport(
         AND COALESCE(i.reason_code, '') = ''
         AND COALESCE(t.count_date, date(t.submitted_at)) BETWEEN ?2 AND ?3
       ORDER BY d DESC, i.item_name COLLATE NOCASE LIMIT 500`,
-  ).bind(org, periodStart, periodEnd).all<{
+  ).bind(org, countStart, countEnd).all<{
     item_id: string; item_type: string; item_name: string; category: string | null; unit: string | null
     expected_qty: number; counted_qty: number; d: string
   }>()
@@ -7549,6 +7553,80 @@ function stockValuer(db: D1Database, org: string | null) {
   return { valueTake, valueRows }
 }
 
+// Are the till sales imported for every day a..b? True when the days sit inside
+// one run of committed, un-voided imports that took stock off day by day. Two
+// files up to two days apart count as one run (a day the restaurant is closed
+// has no sales, so a file starts after it). An import that moved no stock, or a
+// very large one whose movements were collapsed into one line for the whole
+// file, says nothing about a given day and is left out.
+async function salesCover(db: D1Database, org: string | null, a: string, b: string): Promise<boolean> {
+  const rows = await db.prepare(
+    `SELECT i.period_start AS s, i.period_end AS e FROM pos_imports i
+      WHERE i.org_id IS ?1 AND i.status = 'Closed' AND i.voided_at IS NULL
+        AND i.period_start != '' AND i.period_end >= ?2 AND i.period_start <= ?3
+        AND EXISTS (SELECT 1 FROM stock_log l
+                     WHERE l.pos_import_id = i.id AND l.org_id IS ?1 AND l.note LIKE 'Sold on %')
+      ORDER BY i.period_start`,
+  ).bind(org, shiftDay(a, -40), shiftDay(b, 3)).all<{ s: string; e: string }>()
+  let runStart = '', runEnd = ''
+  for (const r of (rows.results ?? [])) {
+    if (runEnd && r.s <= shiftDay(runEnd, 3)) { if (r.e > runEnd) runEnd = r.e }
+    else {
+      if (runStart && runStart <= a && runEnd >= b) return true
+      runStart = r.s; runEnd = r.e
+    }
+  }
+  return !!runStart && runStart <= a && runEnd >= b
+}
+
+// Stock recorded as leaving the shelf on the days a..b, per bin, as positive
+// quantities ready for stockValuer().valueRows: what committed sales imports
+// took off, and waste recorded by hand. Count lines are not in it (a count is
+// where the estimate starts from, or what will correct it).
+async function stockUsedBetween(db: D1Database, org: string | null, a: string, b: string) {
+  const codes = Object.keys(WASTE_REASONS)
+  const rows = await db.prepare(
+    `SELECT l.item_id, l.item_type, inv.unit AS unit, inv.category AS category, SUM(l.change) AS chg
+       FROM stock_log l
+       LEFT JOIN pos_imports i ON i.id = l.pos_import_id AND i.org_id IS ?1
+       LEFT JOIN inventory inv ON inv.id = l.inventory_id AND inv.org_id IS ?1
+      WHERE l.org_id IS ?1 AND date(l.moved_at) BETWEEN ?2 AND ?3
+        AND ((COALESCE(l.pos_import_id, '') != '' AND i.status = 'Closed' AND i.voided_at IS NULL)
+          OR (COALESCE(l.pos_import_id, '') = '' AND COALESCE(l.stock_take_id, '') = '' AND l.change < 0
+              AND l.reason_code IN (${codes.map((_, n) => `?${n + 4}`).join(',')})))
+      GROUP BY l.item_id, l.item_type, inv.unit, inv.category`,
+  ).bind(org, a, b, ...codes).all<{ item_id: string; item_type: string; unit: string | null; category: string | null; chg: number }>()
+  return (rows.results ?? []).map(r => ({
+    item_id: r.item_id, item_type: r.item_type, category: r.category || '', unit: r.unit || '',
+    counted_qty: -(Number(r.chg) || 0),
+  }))
+}
+
+// A real calendar day written YYYY-MM-DD (2026-02-30 is not one).
+function isRealDay(v: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false
+  const t = Date.parse(`${v}T00:00:00Z`)
+  return !isNaN(t) && new Date(t).toISOString().slice(0, 10) === v
+}
+
+// A YYYY-MM-DD day moved by n days.
+function shiftDay(ymd: string, n: number): string {
+  return new Date(Date.parse(`${ymd}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10)
+}
+
+// GET /api/pnl/count-days  →  { data: ['2026-09-14', '2026-09-07', …] }
+// The days of the submitted FULL counts, newest first: what the P&L page builds
+// its "Between counts" list from. Days only, so nothing is valued here.
+app.get('/api/pnl/count-days', async (c) => {
+  const org = orgOf(c)
+  const rows = await c.env.DB.prepare(
+    `SELECT DISTINCT ${STOCK_TAKE_DAY} AS d FROM stock_takes
+      WHERE status = 'submitted' AND kind = 'full' AND submitted_at IS NOT NULL AND org_id IS ?
+      ORDER BY d DESC LIMIT 120`,
+  ).bind(org).all<{ d: string }>()
+  return c.json({ data: (rows.results ?? []).map(r => r.d).filter(Boolean) })
+})
+
 // ─── P&L: invoice-derived cost side for a period ──────────────
 // Returns the cost figures the app can compute from data it owns (invoices),
 // split by category TYPE (food / beverage / supplies via the categories table).
@@ -7571,10 +7649,18 @@ app.get('/api/pnl', async (c) => {
   // single month) is still accepted: the Home tile uses it.
   const from = fromRaw || toRaw || monthRaw || currentMonth
   const to   = toRaw   || fromRaw || monthRaw || currentMonth
+  // Exact dates (YYYY-MM-DD for BOTH ends) are the one exception, added
+  // 2026-10-12 for the P&L's short view: a week between two stock counts, or any
+  // two dates. Only what has its own day is exact there (invoices, imported till
+  // sales, counts), and the page shows only that: the per-month figures (typed
+  // sales, fixed and one-off costs) are never split into days.
+  const byDay = isRealDay(from) && isRealDay(to)
   for (const [name, value] of [['from', from], ['to', to]] as const) {
-    if (!/^\d{4}-\d{2}$/.test(value))
-      return c.json({ error: `Invalid '${name}': "${value}". Use YYYY-MM.` }, 400)
+    if (!byDay && !/^\d{4}-\d{2}$/.test(value))
+      return c.json({ error: `Invalid '${name}': "${value}". Use YYYY-MM, or YYYY-MM-DD for both.` }, 400)
   }
+  // How much of a stored date the period is compared against: the month, or the day.
+  const dLen = byDay ? 10 : 7
   // 'YYYY-MM' sorts lexicographically, so a plain string compare orders months.
   if (to < from)
     return c.json({ error: `'to' (${to}) is before 'from' (${from}).` }, 400)
@@ -7585,7 +7671,7 @@ app.get('/api/pnl', async (c) => {
   // match, then the line's own category), map that category → its type,
   // defaulting an unknown/unmatched category to 'food' (same convention as the
   // Inventory buckets). Only Closed, non-voided invoices dated in the month.
-  const typeRows = await c.env.DB.prepare(`
+  const costRowsFor = (len: number, a: string, b: string) => c.env.DB.prepare(`
     WITH line_cats AS (
       SELECT
         il.line_total AS amt,
@@ -7606,7 +7692,7 @@ app.get('/api/pnl', async (c) => {
       JOIN invoices i ON il.invoice_id = i.id
       WHERE i.status = 'Closed'
         AND i.voided_at IS NULL
-        AND substr(i.invoice_date, 1, 7) BETWEEN ? AND ?
+        AND substr(i.invoice_date, 1, ${len}) BETWEEN ? AND ?
         AND i.org_id IS ? AND il.org_id IS ?
     )
     SELECT
@@ -7620,7 +7706,8 @@ app.get('/api/pnl', async (c) => {
       SUM(COALESCE(amt, 0)) AS amount
     FROM line_cats
     GROUP BY type, category
-  `).bind(org, org, org, org, from, to, org, org, org).all<{ type: string; category: string; amount: number }>()
+  `).bind(org, org, org, org, a, b, org, org, org).all<{ type: string; category: string; amount: number }>()
+  const typeRows = await costRowsFor(dLen, from, to)
 
   // Grouped by category as well as type so the statement can break the supplies
   // line down. Six built-in categories roll into it — packaging, disposables,
@@ -7666,7 +7753,7 @@ app.get('/api/pnl', async (c) => {
     SELECT SUM(COALESCE(delivery, 0) + COALESCE(fuel_surcharge, 0)) AS fees
     FROM invoices
     WHERE status = 'Closed' AND voided_at IS NULL
-      AND substr(invoice_date, 1, 7) BETWEEN ? AND ?
+      AND substr(invoice_date, 1, ${dLen}) BETWEEN ? AND ?
       AND org_id IS ?
   `).bind(from, to, org).first<{ fees: number }>()
 
@@ -7677,7 +7764,7 @@ app.get('/api/pnl', async (c) => {
            SUM(COALESCE(total, 0)) AS amount
     FROM invoices
     WHERE invoice_kind = 'expense' AND status = 'Closed' AND voided_at IS NULL
-      AND substr(invoice_date, 1, 7) BETWEEN ? AND ?
+      AND substr(invoice_date, 1, ${dLen}) BETWEEN ? AND ?
       AND org_id IS ?
     GROUP BY category
     ORDER BY amount DESC
@@ -7693,7 +7780,7 @@ app.get('/api/pnl', async (c) => {
     SELECT COUNT(*) AS n, SUM(COALESCE(total, 0)) AS amount
     FROM invoices
     WHERE status <> 'Closed' AND voided_at IS NULL
-      AND substr(invoice_date, 1, 7) BETWEEN ? AND ?
+      AND substr(invoice_date, 1, ${dLen}) BETWEEN ? AND ?
       AND org_id IS ?
   `).bind(from, to, org).first<{ n: number; amount: number }>()
 
@@ -7703,8 +7790,9 @@ app.get('/api/pnl', async (c) => {
   // Optional, "accurate mode" cost basis. Classic retail formula, per category
   // type: COGS = opening stock + purchases − closing stock. Turns lumpy
   // purchases into the cost of what was actually consumed.
-  //   opening = value of the latest submitted stock take BEFORE the period start
-  //   closing = value of the latest submitted stock take WITHIN/at the period end
+  //   opening = value of the latest submitted stock take on or before the first day
+  //   closing = value of the latest submitted stock take on or before the day after the last
+  //   (a count is the shelf before opening that day — see below)
   // A snapshot is valued from counted quantities × each product's cost per unit
   // as of that take's date (falling back to the latest known cost), with the
   // count converted into the unit that cost is quoted in — see valueTake.
@@ -7720,9 +7808,21 @@ app.get('/api/pnl', async (c) => {
   // a cutoff date would be permanent complexity guarding history that does not
   // exist. If real customers ever need their reported months frozen, the answer
   // is to store the valuation at submit time, not to special-case a date here.
-  const periodStart = `${from}-01`                             // first day of first month
+  const periodStart = byDay ? from : `${from}-01`              // first day of first month
   const [ty, tm] = to.split('-').map(Number)
-  const periodEnd = `${to}-${String(new Date(Date.UTC(ty, tm, 0)).getUTCDate()).padStart(2, '0')}`  // last day of last month
+  const periodEnd = byDay ? to : `${to}-${String(new Date(Date.UTC(ty, tm, 0)).getUTCDate()).padStart(2, '0')}`  // last day of last month
+
+  // Which counts bracket the period. A count is taken to be made BEFORE OPENING
+  // (the user's decision, 2026-10-12: a Monday count, then a Monday to Sunday
+  // week): the count of a day is the shelf at the START of that day. So the
+  // latest count on or before the FIRST day opens the period, and the latest
+  // count on or before the day AFTER the last day closes it. Counts on 7 and
+  // 14 Sep bracket 7..13 Sep exactly; a count on 1 Oct closes September and
+  // opens October. One rule for whole months and exact dates. (Until that day
+  // whole months took a count as the END of its day, which only differed for a
+  // count dated the 1st: it sat inside its month instead of opening it.)
+  const openBefore = shiftDay(periodStart, 1)
+  const closeLimit = shiftDay(periodEnd, 1)
 
   // Only FULL counts bracket a period (kind, 0063): a one-item recount from the
   // Inventory page is a count too, but of one shelf line, not of the stock.
@@ -7734,14 +7834,14 @@ app.get('/api/pnl', async (c) => {
     WHERE status = 'submitted' AND kind = 'full' AND submitted_at IS NOT NULL AND COALESCE(count_date, date(submitted_at)) <= ?
       AND org_id IS ?
     ORDER BY d DESC, submitted_at DESC LIMIT 1
-  `).bind(periodEnd, org).first<{ id: string; d: string }>()
+  `).bind(closeLimit, org).first<{ id: string; d: string }>()
 
   const openingTake = await c.env.DB.prepare(`
     SELECT id, COALESCE(count_date, date(submitted_at)) AS d FROM stock_takes
     WHERE status = 'submitted' AND kind = 'full' AND submitted_at IS NOT NULL AND COALESCE(count_date, date(submitted_at)) < ?
       AND org_id IS ?
     ORDER BY d DESC, submitted_at DESC LIMIT 1
-  `).bind(periodStart, org).first<{ id: string; d: string }>()
+  `).bind(openBefore, org).first<{ id: string; d: string }>()
 
   const valuer = stockValuer(c.env.DB, org)
   const { valueTake } = valuer
@@ -7758,13 +7858,15 @@ app.get('/api/pnl', async (c) => {
 
   // Available only when we have a beginning count (before the period) AND an
   // ending count that actually falls inside the period (not one from before it).
+  // (The closing count must be a later one than the opening count.)
+  const closingInPeriod = !!closingTake && closingTake.d > periodStart
   const cogsAvailable = trueCogsAllowed
-    && !!openingTake && !!closingTake && closingTake.d >= periodStart
+    && !!openingTake && closingInPeriod
   let cogs: Record<string, unknown> = {
     available: false,
     reason: !trueCogsAllowed
       ? 'upgrade_required'                      // Pro feature, not a missing count
-      : !closingTake || (closingTake && closingTake.d < periodStart)
+      : !closingInPeriod
       ? 'no_closing_take'                       // no stock take within the period
       : !openingTake ? 'no_opening_take'        // none before the period start
       : 'ok',
@@ -7772,16 +7874,60 @@ app.get('/api/pnl', async (c) => {
   if (cogsAvailable) {
     const opening = await valueTake(openingTake!.id, openingTake!.d)
     const closing = await valueTake(closingTake!.id, closingTake!.d)
+
+    // ── Carrying a count forward to the edge of the period (2026-10-12) ──
+    // A restaurant that counts on Mondays has no count on the 1st, so the month
+    // used to close on its last Monday while carrying ALL its purchases: food
+    // delivered after that count read as used (26.6% one month, 9.4% the next).
+    // When a count is not on the edge, the shelf there is estimated:
+    //     the count + what was bought since − what was recorded as used since
+    // "used" being the stock a sales import took off and waste recorded by hand.
+    // Only when the till sales for every one of those days are imported
+    // (salesCover): without them nothing says what was used, and the estimate
+    // would read every delivery as still on the shelf. Then the count stands as
+    // it is, as before, and `*_gap` tells the page to say so. Both ends follow
+    // the same rule, so one month's closing figure is the next month's opening.
+    // What it cannot see: stock lost with no record, until the next count.
+    const carry = async (take: { d: string }, value: { food: number; beverage: number }, edge: string) => {
+      if (take.d >= edge) return { value, estimate: null, gap: null }
+      const a = take.d, b = shiftDay(edge, -1)
+      if (!await salesCover(c.env.DB, org, a, b)) return { value, estimate: null, gap: { from: a, to: b } }
+      let boughtFood = 0, boughtBev = 0
+      for (const r of ((await costRowsFor(10, a, b)).results ?? [])) {
+        if (r.type === 'beverage') boughtBev += r.amount ?? 0
+        else if (r.type !== 'supplies') boughtFood += r.amount ?? 0
+      }
+      const used = await valuer.valueRows(await stockUsedBetween(c.env.DB, org, a, b), b)
+      return {
+        value: { food: value.food + boughtFood - used.food, beverage: value.beverage + boughtBev - used.beverage },
+        estimate: { from: a, to: b, bought: round2(boughtFood + boughtBev), used: round2(used.food + used.beverage) },
+        gap: null,
+      }
+    }
+    let open = { value: opening, estimate: null as any, gap: null as any }
+    let close = { value: closing, estimate: null as any, gap: null as any }
+    // Fail-soft: a statement on the counts as they stand is still a statement.
+    try {
+      open  = await carry(openingTake!, opening, periodStart)
+      close = await carry(closingTake!, closing, shiftDay(periodEnd, 1))
+    } catch (e) { console.error('count carry-forward failed', e); open = { value: opening, estimate: null, gap: null }; close = { value: closing, estimate: null, gap: null } }
+
     cogs = {
       available:     true,
       opening_date:  openingTake!.d,
       closing_date:  closingTake!.d,
-      opening_food:     round2(opening.food),
-      opening_beverage: round2(opening.beverage),
-      closing_food:     round2(closing.food),
-      closing_beverage: round2(closing.beverage),
-      food_cogs:     round2(food + opening.food - closing.food),
-      beverage_cogs: round2(beverage + opening.beverage - closing.beverage),
+      opening_food:     round2(open.value.food),
+      opening_beverage: round2(open.value.beverage),
+      closing_food:     round2(close.value.food),
+      closing_beverage: round2(close.value.beverage),
+      food_cogs:     round2(food + open.value.food - close.value.food),
+      beverage_cogs: round2(beverage + open.value.beverage - close.value.beverage),
+      // { from, to, bought, used } when that end was carried forward from its count.
+      opening_estimate: open.estimate,
+      closing_estimate: close.estimate,
+      // { from, to } when the count is not on the edge and could not be carried.
+      opening_gap: open.gap,
+      closing_gap: close.gap,
     }
   }
 
@@ -7791,8 +7937,11 @@ app.get('/api/pnl', async (c) => {
   // again would count it twice. Fail-soft: a P&L without this block is still a
   // P&L, a P&L that 500s because of it is not.
   let waste: Awaited<ReturnType<typeof wasteReport>> | null = null
+  // A count made before opening on the day after the period is the one that
+  // found what went missing during it, so its lines belong here, and the count
+  // that opened the period belongs to the days before: counts are read one day on.
   if (trueCogsAllowed) {
-    try { waste = await wasteReport(c.env.DB, org, valuer, periodStart, periodEnd) }
+    try { waste = await wasteReport(c.env.DB, org, valuer, periodStart, periodEnd, shiftDay(periodStart, 1), shiftDay(periodEnd, 1)) }
     catch (e) { console.error('waste report failed', e) }
   }
 
@@ -7821,7 +7970,7 @@ app.get('/api/pnl', async (c) => {
      WHERE l.voided_at IS NULL
        AND i.status = 'Closed'
        AND i.voided_at IS NULL
-       AND substr(l.sold_date, 1, 7) BETWEEN ? AND ?
+       AND substr(l.sold_date, 1, ${dLen}) BETWEEN ? AND ?
        AND l.org_id IS ?
        AND i.org_id IS ?
      GROUP BY period, l.pos_category, cat.type
@@ -7847,7 +7996,8 @@ app.get('/api/pnl', async (c) => {
   return c.json({
     from,
     to,
-    month: from === to ? from : undefined,
+    month: (!byDay && from === to) ? from : undefined,
+    by_day: byDay,
     sales: { by_month: salesByMonth, imported_total: round2(importedTotal) },
     food_cost:     round2(food),
     beverage_cost: round2(beverage),

@@ -94,7 +94,7 @@ t.check('missing = short at a submitted count with no reason', /ROUND\(i\.counte
 t.check('a count\'s lines are dated by the count\'s own day', (report.match(/COALESCE\((st|t)\.count_date, date\(/g) || []).length >= 4);
 t.check('priced by the same valuation as a stock count', /valuer\.valueRows\(/.test(report));
 t.check('every statement is scoped to the organization', (report.match(/org_id IS \?1/g) || []).length === 5);
-t.check('the P&L attaches it without touching the cost figures', /waste = await wasteReport\(c\.env\.DB, org, valuer, periodStart, periodEnd\)/.test(pnlRoute)
+t.check('the P&L attaches it without touching the cost figures', /waste = await wasteReport\(c\.env\.DB, org, valuer, periodStart, periodEnd, shiftDay\(periodStart, 1\), shiftDay\(periodEnd, 1\)\)/.test(pnlRoute)
   && !/food_cogs:[^\n]*waste/.test(pnlRoute) && !/food \+= [^\n]*waste/.test(pnlRoute));
 t.check('a failure there cannot break the P&L', /try \{ waste = await wasteReport[\s\S]{0,120}catch \(e\)/.test(pnlRoute));
 t.check('it is a Pro figure, like the counts it reads', /if \(trueCogsAllowed\) \{\s*try \{ waste = await wasteReport/.test(pnlRoute));

@@ -14,11 +14,28 @@
   <style>
     #pnl-page-marker { max-width: 780px; }
 
-    /* Period picker — presets + a whole-month From/To range (mirrors the
-       Home page's Spending Breakdown controls). */
-    .pnl-periodbar {
-      display: flex; flex-wrap: wrap; gap: .5rem .75rem;
-      align-items: flex-end; margin-bottom: 1.25rem;
+    /* Period picker: one box, a section per way of choosing. Each section has
+       its name on the left and its controls on the right; the one in use is
+       marked. "Exact dates" is the second section (Pro). */
+    .pnl-period {
+      background: #fff; border: 1px solid var(--border); border-radius: var(--radius);
+      margin-bottom: 1.25rem; overflow: hidden;
+    }
+    .pnl-period-sec {
+      display: grid; grid-template-columns: 170px 1fr; gap: .25rem 1.25rem;
+      padding: .85rem 1rem; border-left: 3px solid transparent;
+    }
+    .pnl-period-sec + .pnl-period-sec { border-top: 1px solid var(--border); }
+    .pnl-period-sec.active { border-left-color: var(--primary); background: #f8fbfd; }
+    .pnl-period-name { font-size: .85rem; font-weight: 600; color: var(--text-muted); }
+    .pnl-period-sec.active .pnl-period-name { color: var(--primary); }
+    .pnl-period-name span {
+      display: block; margin-top: .15rem; font-size: .74rem; font-weight: 400;
+      color: var(--text-muted); line-height: 1.3;
+    }
+    .pnl-period-ctl { display: flex; flex-direction: column; gap: .6rem; min-width: 0; }
+    @media (max-width: 640px) {
+      .pnl-period-sec { grid-template-columns: 1fr; }
     }
     .pnl-presets { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
     .pnl-preset-btn {
@@ -31,7 +48,7 @@
     .pnl-preset-btn.active { background: var(--primary); border-color: var(--primary); color: #fff; }
     .pnl-custom {
       display: flex; flex-wrap: wrap; gap: .4rem;
-      align-items: flex-end; margin-left: auto;
+      align-items: flex-end;
     }
     .pnl-custom .form-group { gap: .15rem; min-width: 0; }
     .pnl-custom .form-group label { font-size: .72rem; color: var(--text-muted); }
@@ -50,6 +67,14 @@
       white-space: nowrap; transition: var(--transition);
     }
     .pnl-apply-btn:hover { filter: brightness(1.08); }
+    .pnl-period input[type="date"], .pnl-period select {
+      padding: .28rem .55rem; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); font-family: inherit; font-size: .8rem;
+      color: var(--text); background: #fff;
+    }
+    .pnl-period input[type="date"]:focus, .pnl-period select:focus {
+      outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(3,105,161,.1);
+    }
     .pnl-nav-btn {
       width: 30px; height: 30px; border: 1px solid var(--border);
       border-radius: var(--radius-sm); background: #fff; color: var(--text-muted);
@@ -242,25 +267,56 @@
       <p>What you took in, what it cost you, and what you kept — for any period.</p>
     </div>
 
-    <div class="pnl-periodbar">
-      <div class="pnl-presets">
-        <button class="pnl-preset-btn" data-preset="this-month">This Month</button>
-        <button class="pnl-preset-btn" data-preset="last-month">Last Month</button>
-        <button class="pnl-preset-btn" data-preset="this-quarter">This Quarter</button>
-        <button class="pnl-preset-btn" data-preset="ytd">Year to Date</button>
+    <!-- Period: two ways to choose it, one box. "Whole months" opens the full
+         statement; "Exact dates" (Pro only, shown by pnl.js once the plan is
+         known) opens the short view. pnl.js marks the one in use. -->
+    <div class="pnl-period" id="pnlPeriod">
+      <div class="pnl-period-sec active" id="pnlSecMonths">
+        <div class="pnl-period-name">Whole months<span>The full P&amp;L, with rent and net profit</span></div>
+        <div class="pnl-period-ctl">
+          <div class="pnl-presets">
+            <button class="pnl-preset-btn" data-preset="this-month">This Month</button>
+            <button class="pnl-preset-btn" data-preset="last-month">Last Month</button>
+            <button class="pnl-preset-btn" data-preset="this-quarter">This Quarter</button>
+            <button class="pnl-preset-btn" data-preset="ytd">Year to Date</button>
+          </div>
+          <div class="pnl-custom">
+            <button class="pnl-nav-btn" id="pnlPrev" title="Previous period"><i class="fas fa-chevron-left"></i></button>
+            <div class="form-group">
+              <label>From</label>
+              <input type="month" id="pnlFrom" />
+            </div>
+            <div class="form-group">
+              <label>To</label>
+              <input type="month" id="pnlTo" />
+            </div>
+            <button class="pnl-apply-btn" id="pnlApply">Apply</button>
+            <button class="pnl-nav-btn" id="pnlNext" title="Next period"><i class="fas fa-chevron-right"></i></button>
+          </div>
+        </div>
       </div>
-      <div class="pnl-custom">
-        <button class="pnl-nav-btn" id="pnlPrev" title="Previous period"><i class="fas fa-chevron-left"></i></button>
-        <div class="form-group">
-          <label>From</label>
-          <input type="month" id="pnlFrom" />
+
+      <div class="pnl-period-sec hidden" id="pnlDatesBar">
+        <div class="pnl-period-name">Exact dates<span>Sales, food, drinks and wages only</span></div>
+        <div class="pnl-period-ctl">
+          <div class="pnl-custom">
+            <div class="form-group">
+              <label>Between two stock counts</label>
+              <select id="pnlCountPick"><option value="">Choose…</option></select>
+            </div>
+          </div>
+          <div class="pnl-custom">
+            <div class="form-group">
+              <label>Or from</label>
+              <input type="date" id="pnlDayFrom" />
+            </div>
+            <div class="form-group">
+              <label>To</label>
+              <input type="date" id="pnlDayTo" />
+            </div>
+            <button class="pnl-apply-btn" id="pnlDayApply">Apply</button>
+          </div>
         </div>
-        <div class="form-group">
-          <label>To</label>
-          <input type="month" id="pnlTo" />
-        </div>
-        <button class="pnl-apply-btn" id="pnlApply">Apply</button>
-        <button class="pnl-nav-btn" id="pnlNext" title="Next period"><i class="fas fa-chevron-right"></i></button>
       </div>
     </div>
 
@@ -355,7 +411,7 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="/static/env-banner.js?v=20260807-2"></script>
-  <script src="/static/utils.js?v=20261006-3"></script>
-  <script src="/static/pnl.js?v=20261006-2"></script>
+  <script src="/static/utils.js?v=20261012-1"></script>
+  <script src="/static/pnl.js?v=20261012-3"></script>
 </body>
 </html>
