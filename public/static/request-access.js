@@ -84,6 +84,7 @@
             '<option>Restaurant</option><option>Bakery</option><option>Commissary</option><option>Other</option>' +
           '</select></label>' +
           '<label>Invoices per week, roughly <span class="ra-opt">(optional)</span><input type="text" name="invoices_per_week" maxlength="60" placeholder="e.g. 10"></label>' +
+          '<label>Till / POS you use <span class="ra-opt">(optional)</span><input type="text" name="till" maxlength="60" placeholder="e.g. Square"></label>' +
           '<label>Anything else? <span class="ra-opt">(optional)</span><textarea name="message" rows="3" maxlength="2000" placeholder="What would you like Foodnance to help with?"></textarea></label>' +
           '<div class="ra-honeypot" aria-hidden="true">' +
             '<label>Leave blank<input type="text" name="website" tabindex="-1" autocomplete="off"></label>' +
@@ -155,7 +156,8 @@
       business_name: get('business_name'),
       business_type: get('business_type'),
       invoices_per_week: get('invoices_per_week'),
-      message: get('message'),
+      // The till has no column of its own; it travels at the top of the message.
+      message: (get('till') ? 'Till / POS: ' + get('till') + '\n' : '') + get('message'),
       plan: get('plan'),
       website: get('website'),
       source_page: location.pathname,

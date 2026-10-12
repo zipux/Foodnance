@@ -11,7 +11,7 @@
        tells crawlers to ignore. See robots.txt. -->
 
   <title>Foodnance | Food Cost Software for Canadian Restaurants</title>
-  <meta name="description" content="Food costing software for independent Canadian restaurants and bakeries. Photograph a supplier invoice; recipe costs, margins and your P&amp;L update themselves." />
+  <meta name="description" content="Food costing software for independent Canadian restaurants and bakeries. Photograph a supplier invoice; your recipe costs and margins update themselves." />
   <link rel="canonical" href="https://foodnance.com/" />
   <meta name="theme-color" content="#0369a1" />
 
@@ -29,7 +29,7 @@
   <meta property="og:locale" content="en_CA" />
   <meta property="og:url" content="https://foodnance.com/" />
   <meta property="og:title" content="Foodnance | Food Cost Software for Canadian Restaurants" />
-  <meta property="og:description" content="Food costing software for independent Canadian restaurants and bakeries. Photograph an invoice; your recipe costs, margins and P&amp;L update themselves." />
+  <meta property="og:description" content="Food costing software for independent Canadian restaurants and bakeries. Photograph an invoice; your recipe costs and margins update themselves." />
   <meta property="og:image" content="https://foodnance.com/og-image.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
@@ -39,7 +39,7 @@
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:image" content="https://foodnance.com/og-image.png" />
   <meta name="twitter:title" content="Foodnance | Food Cost Software for Canadian Restaurants" />
-  <meta name="twitter:description" content="Food costing software for independent Canadian restaurants and bakeries. Photograph an invoice; your recipe costs, margins and P&amp;L update themselves." />
+  <meta name="twitter:description" content="Food costing software for independent Canadian restaurants and bakeries. Photograph an invoice; your recipe costs and margins update themselves." />
 
   <!-- Google Fonts is on the critical render path; warm the connection early. -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -101,7 +101,7 @@
             "name": "What is Foodnance?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "<p>Foodnance is food costing software for independent restaurants, bakeries and cafés. You photograph a supplier invoice, and Foodnance updates your recipe costs, dish margins and P&amp;L automatically. It was built by a restaurant manager with over ten years of kitchen experience.</p>"
+              "text": "<p>Foodnance is food costing software for independent restaurants, bakeries and cafés. You photograph a supplier invoice, and Foodnance updates your recipe costs and dish margins, and adds the purchase to your P&amp;L. It was built by a restaurant manager with over ten years of kitchen experience.</p>"
             }
           },
           {
@@ -214,6 +214,14 @@
             "acceptedAnswer": {
               "@type": "Answer",
               "text": "<p>No. Foodnance is a website, not an app to download. It works in a browser on your computer or your phone. On a phone, signing in takes you straight to the invoice camera, since that's what you're usually there to do.</p>"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does Foodnance connect to my POS?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "<p>Not directly. Foodnance does not pull sales from your till on its own. On Pro, you export your item sales from your till as a file and upload it. Foodnance then takes the ingredients you sold off your stock and adds the sales to your P&amp;L. Every till's file is laid out differently, so tell us which till you use and we will make sure Foodnance reads yours. On Essentials, you type your sales total for each month. If you would like Foodnance to connect to your till directly, tell us which one you use and we can talk about it.</p>"
             }
           },
           {
@@ -362,11 +370,6 @@
     .hero-preview { flex: 1 1 380px; max-width: 420px; padding-left: 1.6rem; border-left: 1px solid var(--border); margin-top: .3rem; }
     .hp-head { display: flex; align-items: center; gap: .5rem; margin-bottom: 1.1rem; }
     .hp-head .kicker { font-size: .7rem; color: var(--text-muted); }
-    .hp-head .example-tag {
-      margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: .62rem; font-weight: 600;
-      letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted);
-      border: 1px solid var(--border); border-radius: 4px; padding: .1rem .4rem;
-    }
     .hp-shot { display: block; width: 100%; height: auto; border-radius: 7px; box-shadow: var(--shadow); }
 
     .pill {
@@ -543,7 +546,7 @@
         <svg class="ic ic-open" aria-hidden="true" focusable="false"><use href="#i-bars"/></svg>
         <svg class="ic ic-close" aria-hidden="true" focusable="false"><use href="#i-xmark"/></svg>
       </button>
-      <a class="btn btn-primary js-request-access" href="mailto:hello@foodnance.com?subject=Request%20access%20to%20Foodnance&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
+      <a class="btn btn-primary js-request-access" href="mailto:hello@foodnance.com?subject=Request%20access%20to%20Foodnance&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0ATill%20%2F%20POS%20you%20use%3A%20%0A%0AThanks!">
         Request access
       </a>
     </div>
@@ -596,7 +599,7 @@
         </p>
 
         <div class="cta-row">
-          <a class="btn btn-primary btn-lg js-request-access" href="mailto:hello@foodnance.com?subject=Request%20access%20to%20Foodnance&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
+          <a class="btn btn-primary btn-lg js-request-access" href="mailto:hello@foodnance.com?subject=Request%20access%20to%20Foodnance&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0ATill%20%2F%20POS%20you%20use%3A%20%0A%0AThanks!">
             <svg class="ic" style="width:1em" aria-hidden="true" focusable="false"><use href="#i-envelope"/></svg> Request access
           </a>
           <a class="btn btn-outline btn-lg" href="/food-cost-calculator">Try the free food cost calculator</a>
@@ -613,7 +616,6 @@
         <div class="hp-head">
           <svg class="ic" style="width:.9em;color:var(--primary)" aria-hidden="true" focusable="false"><use href="#i-chart-line"/></svg>
           <span class="kicker">Price Movers</span>
-          <span class="example-tag">Example</span>
         </div>
         <img class="hp-shot" src="/screens/price-history-840.webp"
              srcset="/screens/price-history-840.webp 840w, /screens/price-history-1125.webp 1125w"
@@ -734,7 +736,7 @@
         <details class="faq-item">
           <summary>What is Foodnance?</summary>
           <div class="faq-answer">
-            <p>Foodnance is food costing software for independent restaurants, bakeries and cafés. You photograph a supplier invoice, and Foodnance updates your recipe costs, dish margins and P&amp;L automatically. It was built by a restaurant manager with over ten years of kitchen experience.</p>
+            <p>Foodnance is food costing software for independent restaurants, bakeries and cafés. You photograph a supplier invoice, and Foodnance updates your recipe costs and dish margins, and adds the purchase to your P&amp;L. It was built by a restaurant manager with over ten years of kitchen experience.</p>
           </div>
         </details>
         <details class="faq-item">
@@ -833,6 +835,12 @@
           </div>
         </details>
         <details class="faq-item">
+          <summary>Does Foodnance connect to my POS?</summary>
+          <div class="faq-answer">
+            <p>Not directly. Foodnance does not pull sales from your till on its own. On Pro, you export your item sales from your till as a file and upload it. Foodnance then takes the ingredients you sold off your stock and adds the sales to your P&amp;L. Every till's file is laid out differently, so tell us which till you use and we will make sure Foodnance reads yours. On Essentials, you type your sales total for each month. If you would like Foodnance to connect to your till directly, tell us which one you use and we can talk about it.</p>
+          </div>
+        </details>
+        <details class="faq-item">
           <summary>Can my whole team use it?</summary>
           <div class="faq-answer">
             <p>Yes. Once you're signed in, go to Settings → Team to invite staff by email. Each person gets their own login.</p>
@@ -855,7 +863,7 @@
         <h2>Find out what your food actually costs</h2>
         <p>We're onboarding the first businesses now, hands-on. Tell us a little about your
            operation and we'll set you up.</p>
-        <a class="btn btn-primary btn-lg js-request-access" href="mailto:hello@foodnance.com?subject=Request%20access%20to%20Foodnance&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0A%0AThanks!">
+        <a class="btn btn-primary btn-lg js-request-access" href="mailto:hello@foodnance.com?subject=Request%20access%20to%20Foodnance&body=Hi%20Simone%2C%0A%0AI%27d%20like%20early%20access%20to%20Foodnance.%0A%0ABusiness%20name%3A%20%0AType%20(restaurant%20%2F%20bakery%20%2F%20commissary)%3A%20%0ARough%20number%20of%20invoices%20per%20week%3A%20%0ATill%20%2F%20POS%20you%20use%3A%20%0A%0AThanks!">
           <svg class="ic" style="width:1em" aria-hidden="true" focusable="false"><use href="#i-envelope"/></svg> Request access
         </a>
         <p class="cta-note" style="margin-top:1rem">Questions? We are here to help. Email us <a href="mailto:hello@foodnance.com">hello@foodnance.com</a></p>
@@ -882,6 +890,6 @@
 
   <script src="/static/env-banner.js?v=20260807-2"></script>
   <script src="/static/analytics.js?v=20261008-1"></script>
-  <script src="/static/request-access.js?v=20261003-1"></script>
+  <script src="/static/request-access.js?v=20261012-1"></script>
 </body>
 </html>
