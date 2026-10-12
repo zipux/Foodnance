@@ -1,7 +1,7 @@
-// The Home strip's profit comes from monthProfitSummary() in utils.js: the P&L
-// page's sum written once. The P&L page still does its own (pnl.js render), so
-// this file holds the two together: the shared pieces must give what pnl.js's
-// own give, and the Home page must not grow a private sum again.
+// The P&L arithmetic is written once: periodProfitSummary() in utils.js. The
+// P&L page (pnl.js render) draws it and the Home strip (home.js) shows one
+// month of it. This file checks the sum itself and that neither page grows a
+// private copy again.
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,40 +11,37 @@ import { loadBrowserModule } from './helpers/browser-module.mjs';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const t = suite('month-profit');
 
-const { monthProfitSummary, monthProfitShare, monthProfitFixedRuns, spreadAllocation, recurringActiveIn } =
+const { monthProfitSummary, periodProfitSummary, monthProfitAllocation, monthProfitFixedDated,
+        spreadAllocation, spreadAllocationRange, recurringActiveIn } =
   loadBrowserModule(['utils.js', 'pnl.js'],
-    ['monthProfitSummary', 'monthProfitShare', 'monthProfitFixedRuns', 'spreadAllocation', 'recurringActiveIn']);
+    ['monthProfitSummary', 'periodProfitSummary', 'monthProfitAllocation', 'monthProfitFixedDated',
+     'spreadAllocation', 'spreadAllocationRange', 'recurringActiveIn']);
 
-// ── the pieces agree with the P&L page's own ───────────────────
-t.section('shares by days — same as the P&L page');
-const bills = [
-  { start_date: '2026-09-20', end_date: '2026-10-05', total_amount: 1600 },   // straddles a month end
-  { start_date: '2026-10-01', end_date: '2026-10-31', total_amount: 310 },    // exactly the month
-  { start_date: '2025-11-15', end_date: '2027-02-14', total_amount: 9999.99 },// crosses two year ends
-  { start_date: '2026-11-01', end_date: '2026-11-30', total_amount: 500 },    // next month only
-  { start_date: '2026-10-10', end_date: '2026-10-09', total_amount: 500 },    // ends before it starts
-  { start_date: '', end_date: '2026-10-09', total_amount: 500 },              // no start
-  { start_date: '2028-02-01', end_date: '2028-02-29', total_amount: 290 },    // leap February
-];
-for (const m of ['2026-09', '2026-10', '2026-11', '2026-12', '2027-01', '2028-02']) {
-  for (const b of bills) {
-    const mine = monthProfitShare(b, m), theirs = spreadAllocation(b, m).allocated;
-    t.check(`${b.start_date || '(none)'}..${b.end_date} in ${m}`, Math.abs(mine - theirs) < 1e-9, `${mine} vs ${theirs}`);
-  }
-}
+// ── shares by days ─────────────────────────────────────────────
+t.section('a bill is shared by days');
+const share = (row, m) => monthProfitAllocation(row, m).allocated;
+const straddle = { start_date: '2026-09-20', end_date: '2026-10-05', total_amount: 1600 };   // 16 days
+t.check('11 of 16 days in September', t.near(share(straddle, '2026-09'), 1100));
+t.check('5 of 16 days in October', t.near(share(straddle, '2026-10'), 500));
+t.check('nothing in November', share(straddle, '2026-11') === 0);
+t.check('a bill for exactly the month is whole', t.near(share({ start_date: '2026-10-01', end_date: '2026-10-31', total_amount: 310 }, '2026-10'), 310));
+t.check('leap February is 29 days', monthProfitAllocation({ start_date: '2028-02-01', end_date: '2028-02-29', total_amount: 290 }, '2028-02').overlapDays === 29);
+t.check('ends before it starts: nothing', share({ start_date: '2026-10-10', end_date: '2026-10-09', total_amount: 500 }, '2026-10') === 0);
+t.check('no start date: nothing', share({ start_date: '', end_date: '2026-10-09', total_amount: 500 }, '2026-10') === 0);
+const long = { start_date: '2025-11-15', end_date: '2027-02-14', total_amount: 9999.99 };
+const months16 = []; for (let y = 2025, m = 11; !(y === 2027 && m === 3); m === 12 ? (y++, m = 1) : m++) months16.push(`${y}-${String(m).padStart(2, '0')}`);
+t.check('across two year ends the shares add back to the bill',
+  t.near(months16.reduce((s, m) => s + share(long, m), 0), 9999.99, 1e-6));
+t.check('the P&L page\'s own names are the same functions',
+  spreadAllocation(straddle, '2026-09').allocated === share(straddle, '2026-09')
+  && spreadAllocationRange(straddle, '2026-09', '2026-10').allocated === share(straddle, '2026-09') + share(straddle, '2026-10'));
 
-t.section('fixed costs by month — same as the P&L page');
-const fixed = [
-  {}, { start_period: '2026-10' }, { end_period: '2026-09' }, { start_period: '2026-11' },
-  { start_period: '2026-08', end_period: '2026-10' }, { start_period: ' ', end_period: '' },
-];
-for (const m of ['2026-09', '2026-10', '2026-11']) {
-  for (const f of fixed) {
-    t.check(`${JSON.stringify(f)} in ${m}`, monthProfitFixedRuns(f, m) === recurringActiveIn(f, m));
-  }
-}
-t.check('a switched-off fixed cost never runs', monthProfitFixedRuns({ active: 0 }, '2026-10') === false);
-t.check('active = 1 runs', monthProfitFixedRuns({ active: 1 }, '2026-10') === true);
+t.section('a fixed cost runs only in its months');
+t.check('no dates: every month', monthProfitFixedDated({}, '2026-10') === true);
+t.check('starts next month: not yet', monthProfitFixedDated({ start_period: '2026-11' }, '2026-10') === false);
+t.check('ended last month: no longer', monthProfitFixedDated({ end_period: '2026-09' }, '2026-10') === false);
+t.check('both ends are inclusive', monthProfitFixedDated({ start_period: '2026-10', end_period: '2026-10' }, '2026-10') === true);
+t.check('the P&L page\'s own name is the same function', recurringActiveIn({ end_period: '2026-09' }, '2026-10') === false && recurringActiveIn({}, '2026-10') === true);
 
 // ── the sum ─────────────────────────────────────────────────────
 t.section('the month sum');
@@ -85,13 +82,34 @@ t.check('no import: the typed figure', noImport.sales === 5000);
 const empty = monthProfitSummary('2026-10', {}, 'purchases');
 t.check('an empty account is all zeros, no sales', empty.costs === 0 && empty.sales === 0 && empty.has_sales === false);
 
-// ── the Home page keeps no private sum ─────────────────────────
-t.section('the Home strip uses the shared sum');
+// ── a period of several months ─────────────────────────────────
+t.section('a period of several months');
+const two = periodProfitSummary(['2026-09', '2026-10'], d, 'purchases');
+t.check('a fixed cost counts once per month it runs: rent twice, the ended insurance once',
+  t.near(two.fixedTotal, 6500 * 2 + 380), `${two.fixedTotal}`);
+t.check('a switched-off fixed cost is never counted', two.fixedAlloc.length === 2);
+t.check('one-offs of both months', t.near(two.ohTotal, 40 + 999), `${two.ohTotal}`);
+t.check('the pay period is whole across both months', t.near(two.laborTotal, 1400), `${two.laborTotal}`);
+t.check('September has no sales and is named as missing', two.missingSales.join() === '2026-09', two.missingSales.join());
+t.check('net = sales - food and drinks - running costs', t.near(two.net, two.sales - two.cogsTotal - two.running));
+t.check('prime cost = food + drinks + wages', t.near(two.prime, two.cogsTotal + two.laborTotal));
+
+// ── neither page keeps a private sum ───────────────────────────
+t.section('one copy of the sum');
 const home = readFileSync(join(ROOT, 'public', 'static', 'home.js'), 'utf8');
+const pnl  = readFileSync(join(ROOT, 'public', 'static', 'pnl.js'), 'utf8');
 t.check('home.js calls monthProfitSummary', /monthProfitSummary\(/.test(home));
-t.check('and no longer adds the costs up itself', !/costs\.food_cost|purchase_pst|sales_total/.test(home));
-const homeHtml = readFileSync(join(ROOT, 'public', 'home.html'), 'utf8');
-t.check('utils.js is loaded before home.js',
-  homeHtml.indexOf('/static/utils.js') > 0 && homeHtml.indexOf('/static/utils.js') < homeHtml.indexOf('/static/home.js'));
+t.check('and does not add the costs up itself', !/costs\.food_cost|purchase_pst|sales_total/.test(home));
+const renderSrc = pnl.slice(pnl.indexOf('function render() {'), pnl.indexOf('function _ymdOfDayNum'));
+t.check('the P&L page asks periodProfitSummary', /periodProfitSummary\(months,/.test(renderSrc));
+t.check('and does not add the costs up itself',
+  !/const (running|net|gross|cogsTotal|fixedTotal|spreadTotal|laborTotal|ohTotal)\s*=/.test(renderSrc)
+  && !/pnlCosts\.(food_cost|beverage_cost|supplies_cost|invoice_fees|purchase_pst)/.test(renderSrc));
+for (const page of ['home.html', 'pnl.html']) {
+  const html = readFileSync(join(ROOT, 'public', page), 'utf8');
+  const own = page === 'home.html' ? '/static/home.js' : '/static/pnl.js';
+  t.check(`${page} loads utils.js before its own script`,
+    html.indexOf('/static/utils.js') > 0 && html.indexOf('/static/utils.js') < html.indexOf(own));
+}
 
 t.done();

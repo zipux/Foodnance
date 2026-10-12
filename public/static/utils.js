@@ -2140,83 +2140,162 @@ function pkBoxesHtml({ key, pack, unit, state, inputClass = 'pk-pack-input' }) {
     </div>`;
 }
 
-// ── One month's profit, in one place (2026-10-13) ─────────────────
-// The Home strip used to carry its own copy of the P&L page's sum, and the copy
-// had drifted three ways: it ignored imported till sales, always counted food
-// as bought, and charged a fixed cost outside its start/end months. This is the
-// sum written once. The Home strip uses it today; the P&L page still does its
-// own (pnl.js render) and is meant to move here later, behind a character-by-
-// character comparison of the page. Until then tests/month-profit.test.mjs
-// checks the pieces below against pnl.js's own.
+// ── The P&L sum, in one place (2026-10-13) ────────────────────────
+// The P&L page and the Home strip each had their own copy of this arithmetic,
+// and the strip's had drifted three ways (it ignored imported till sales, always
+// counted food as bought, and charged a fixed cost outside its start/end
+// months). This is the only copy now: pnl.js render() and home.js loadPnlTile()
+// both call periodProfitSummary(). The body was moved here from render() word
+// for word, and the page was compared before and after, character by character.
+// The exact-dates short view (renderDays in pnl.js) is separate and not here.
 //
-//   month — 'YYYY-MM'
-//   d     — { costs: the /api/pnl answer for that month, sales_rows, one_offs,
-//             fixed, spread, labor: the rows of sales_monthly, operating_expenses,
-//             recurring_expenses, spread_expenses, labor_periods }
+//   months — ['YYYY-MM', …], the whole months of the period, in order
+//   d      — { costs: the /api/pnl answer for the period, sales_rows, one_offs,
+//              fixed, spread, labor: the rows of sales_monthly,
+//              operating_expenses, recurring_expenses, spread_expenses,
+//              labor_periods }. Rows outside the period, and fixed costs that
+//              are switched off, are left out here, so a caller may pass every
+//              row it has (the Home strip does) or only the period's (the page).
 //   basisChoice — 'cogs' | 'purchases', the P&L page's own remembered choice
 
+// Whole-day number for a 'YYYY-MM-DD' string (UTC-based, DST-safe).
 function monthProfitDayNum(ymd) {
   const [y, m, d] = String(ymd || '').split('-').map(Number);
   if (!y || !m || !d) return NaN;
   return Math.floor(Date.UTC(y, m - 1, d) / 86400000);
 }
 
-// The month's share of a bill or pay period that covers start_date..end_date,
-// by days. Same arithmetic as spreadAllocation() in pnl.js.
-function monthProfitShare(row, month) {
-  const a = monthProfitDayNum(row.start_date), b = monthProfitDayNum(row.end_date);
-  if (isNaN(a) || isNaN(b) || b < a) return 0;
-  const [y, m] = String(month).split('-').map(Number);
-  const mStart = Math.floor(Date.UTC(y, m - 1, 1) / 86400000);
-  const mEnd   = Math.floor(Date.UTC(y, m, 1) / 86400000) - 1;
-  const overlap = Math.max(0, Math.min(b, mEnd) - Math.max(a, mStart) + 1);
-  return (parseFloat(row.total_amount) || 0) * overlap / (b - a + 1);
+// Fair share of a spread cost (or a pay period) that falls inside `month`
+// ('YYYY-MM'): the total prorated by how many days of [start_date, end_date]
+// land in that month. Returns { allocated, overlapDays, totalDays }.
+function monthProfitAllocation(row, month) {
+  const startN = monthProfitDayNum(row.start_date);
+  const endN   = monthProfitDayNum(row.end_date);
+  const total  = parseFloat(row.total_amount) || 0;
+  if (isNaN(startN) || isNaN(endN) || endN < startN) return { allocated: 0, overlapDays: 0, totalDays: 0 };
+
+  const [y, m]  = month.split('-').map(Number);
+  const mStartN = Math.floor(Date.UTC(y, m - 1, 1) / 86400000);
+  const mEndN   = Math.floor(Date.UTC(y, m, 1) / 86400000) - 1;   // last day of month
+
+  const oStart = Math.max(startN, mStartN);
+  const oEnd   = Math.min(endN, mEndN);
+  const overlapDays = oEnd >= oStart ? (oEnd - oStart + 1) : 0;
+  const totalDays   = endN - startN + 1;
+  return { allocated: totalDays > 0 ? total * overlapDays / totalDays : 0, overlapDays, totalDays };
 }
 
-// Is a fixed monthly cost being paid in this month? Same rule as
-// recurringActiveIn() in pnl.js, plus the "switched off" flag its loader applies.
-function monthProfitFixedRuns(row, month) {
-  if (!(row.active == null || Number(row.active) === 1)) return false;
+// Its share of a whole period = the sum of its monthly shares.
+function monthProfitAllocationRange(row, months) {
+  let allocated = 0, overlapDays = 0, totalDays = 0;
+  for (const m of months) {
+    const a = monthProfitAllocation(row, m);
+    allocated += a.allocated; overlapDays += a.overlapDays; totalDays = a.totalDays;
+  }
+  return { allocated, overlapDays, totalDays };
+}
+
+// Is a fixed monthly cost being paid in month `m` ('YYYY-MM')? Both bounds are
+// inclusive and either may be absent, which means "no boundary".
+function monthProfitFixedDated(row, m) {
   const start = (row.start_period || '').trim();
   const end   = (row.end_period   || '').trim();
-  if (start && month < start) return false;
-  if (end   && month > end)   return false;
+  if (start && m < start) return false;
+  if (end   && m > end)   return false;
   return true;
 }
 
+function periodProfitSummary(months, d, basisChoice) {
+  const nMonths   = months.length;
+  const costs     = (d && d.costs) || {};
+  const salesRows = (d && d.sales_rows) || [];
+  const oneOffs   = ((d && d.one_offs) || []).filter(r => months.includes(r.period));
+  const fixed     = ((d && d.fixed) || []).filter(r => r.active == null || Number(r.active) === 1);
+  const spread    = (d && d.spread) || [];
+  const labor     = (d && d.labor) || [];
+
+  // ── Revenue: imported wins, unless the month was explicitly overridden ──
+  // Resolved PER MONTH, not for the period as a whole, so a range where some
+  // months were imported and others typed in still totals correctly.
+  const imported = (costs.sales && costs.sales.by_month) || {};
+  const salesFor = (m) => {
+    const row  = salesRows.find(r => r.period === m);
+    const typed = parseFloat(row && row.sales_total) || 0;
+    const imp   = parseFloat(imported[m] && imported[m].imported_net) || 0;
+    const overridden = !!row && row.revenue_source === 'manual';
+    if (imp > 0 && !overridden) return { amount: imp, source: 'pos', typed, imported: imp, row };
+    return { amount: typed, source: overridden && imp > 0 ? 'manual-override' : 'manual',
+             typed, imported: imp, row };
+  };
+  const salesByMonth = months.map(m => ({ month: m, ...salesFor(m) }));
+  const sales = salesByMonth.reduce((s, x) => s + x.amount, 0);
+  const foodBought = parseFloat(costs.food_cost) || 0;
+  const bevBought  = parseFloat(costs.beverage_cost) || 0;
+  const supplies = parseFloat(costs.supplies_cost) || 0;
+
+  // Cost basis: purchases (what you bought) vs stock-take-adjusted true COGS.
+  const cogsData  = costs.cogs || { available: false, reason: 'no_closing_take' };
+  const cogsAvail = !!cogsData.available;
+  const useCogs   = basisChoice === 'cogs' && cogsAvail;
+  const food     = useCogs ? (parseFloat(cogsData.food_cogs) || 0) : foodBought;
+  const beverage = useCogs ? (parseFloat(cogsData.beverage_cogs) || 0) : bevBought;
+  const fees     = parseFloat(costs.invoice_fees) || 0;
+  // PST paid on supplier invoices: not claimed back (GST/HST is), so a cost.
+  const pst      = parseFloat(costs.purchase_pst) || 0;
+  const ohTotal  = oneOffs.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+  // Fixed costs are per month, so a 3-month period carries 3× the rent — but
+  // only for the months each one was actually being paid in. A row with no
+  // start month still means "every month, forever", which is what every row
+  // meant before they had dates.
+  const fixedAlloc = fixed.map(r => {
+    const active = months.filter(m => monthProfitFixedDated(r, m));
+    const amount = parseFloat(r.amount) || 0;
+    return { row: r, months: active.length, total: amount * active.length };
+  });
+  const fixedTotal    = fixedAlloc.reduce((s, x) => s + x.total, 0);
+  // What a full month of the current line-up costs — only meaningful as a
+  // "× n months" summary when every row really does run the whole period.
+  const fixedPerMonth = fixedAlloc.reduce((s, x) => s + (parseFloat(x.row.amount) || 0), 0);
+  const fixedAllMonths = fixedAlloc.every(x => x.months === nMonths);
+  // Spread costs: the period's fair share of each multi-month bill.
+  const spreadThisMonth = spread
+    .map(r => ({ row: r, ...monthProfitAllocationRange(r, months) }))
+    .filter(x => x.allocated > 0.0049);
+  const spreadTotal = spreadThisMonth.reduce((s, x) => s + x.allocated, 0);
+  // Months with no revenue at all — a period total silently understates without
+  // this. A month covered by a POS import is not missing, however it got there.
+  const missingSales = salesByMonth.filter(x => x.amount <= 0).map(x => x.month);
+  // Expense invoices (utilities/rent/etc.) uploaded and classified as expenses.
+  const expenseInv = costs.expense_invoices || [];
+  const expenseInvTotal = expenseInv.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+
+  // Labour: each pay period's fair share of this period, prorated by days —
+  // the same treatment as a spread bill, because payroll runs (20 Aug – 5 Sep)
+  // straddle month ends just like a quarterly invoice does.
+  const laborThisPeriod = labor
+    .map(r => ({ row: r, ...monthProfitAllocationRange(r, months) }))
+    .filter(x => x.allocated > 0.0049);
+  const laborTotal = laborThisPeriod.reduce((s, x) => s + x.allocated, 0);
+
+  const cogsTotal = food + beverage;
+  const gross   = sales - cogsTotal;
+  // Labour is subtracted here, ONCE. Prime cost below re-uses the same figure to
+  // display a subtotal; it is not a second deduction.
+  const running = supplies + fees + pst + expenseInvTotal + fixedTotal + spreadTotal + ohTotal + laborTotal;
+  const net     = gross - running;
+  const prime   = cogsTotal + laborTotal;
+  const hasSales = sales > 0;
+
+  return { imported, salesByMonth, sales, foodBought, bevBought, supplies, cogsData, cogsAvail, useCogs, food, beverage, fees, pst, ohTotal, fixedAlloc, fixedTotal, fixedPerMonth, fixedAllMonths, spreadThisMonth, spreadTotal, missingSales, expenseInv, expenseInvTotal, laborThisPeriod, laborTotal, cogsTotal, gross, running, net, prime, hasSales };
+}
+
+// One month, for the Home strip.
 function monthProfitSummary(month, d, basisChoice) {
-  const num   = v => parseFloat(v) || 0;
-  const costs = (d && d.costs) || {};
-  const sum   = (rows, f) => (rows || []).reduce((s, r) => s + f(r), 0);
-
-  // Sales: imported till sales win, unless the month was set to the typed figure.
-  const row      = ((d && d.sales_rows) || []).find(r => r.period === month);
-  const typed    = num(row && row.sales_total);
-  const by       = (costs.sales && costs.sales.by_month) || {};
-  const imported = num(by[month] && by[month].imported_net);
-  const overridden = !!row && row.revenue_source === 'manual';
-  const fromTill = imported > 0 && !overridden;
-  const sales    = fromTill ? imported : typed;
-
-  // Food and drinks: what was used (from the stock counts) when that is the
-  // P&L page's choice and the counts allow it, else what was bought.
-  const cogs    = costs.cogs || {};
-  const useCogs = basisChoice === 'cogs' && !!cogs.available;
-  const food     = useCogs ? num(cogs.food_cogs)     : num(costs.food_cost);
-  const beverage = useCogs ? num(cogs.beverage_cogs) : num(costs.beverage_cost);
-
-  const running =
-      num(costs.supplies_cost) + num(costs.invoice_fees) + num(costs.purchase_pst)
-    + sum(costs.expense_invoices, r => num(r.amount))
-    + sum(((d && d.fixed) || []).filter(r => monthProfitFixedRuns(r, month)), r => num(r.amount))
-    + sum(d && d.spread, r => monthProfitShare(r, month))
-    + sum(((d && d.one_offs) || []).filter(r => r.period === month), r => num(r.amount))
-    + sum(d && d.labor, r => monthProfitShare(r, month));
-
-  const total = food + beverage + running;
+  const p = periodProfitSummary([month], d, basisChoice);
   return {
-    month, sales, sales_source: fromTill ? 'pos' : 'manual', has_sales: sales > 0,
-    basis: useCogs ? 'cogs' : 'purchases', food, beverage, running,
-    costs: total, profit: sales - total,
+    month, sales: p.sales, sales_source: p.salesByMonth[0].source === 'pos' ? 'pos' : 'manual',
+    has_sales: p.hasSales, basis: p.useCogs ? 'cogs' : 'purchases',
+    food: p.food, beverage: p.beverage, running: p.running,
+    costs: p.cogsTotal + p.running, profit: p.net,
   };
 }

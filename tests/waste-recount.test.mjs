@@ -101,7 +101,7 @@ t.check('it is a Pro figure, like the counts it reads', /if \(trueCogsAllowed\) 
 const blocks = pnlJs.slice(pnlJs.indexOf('function wasteBlocksHtml'), pnlJs.indexOf('function fmtMoney'));
 t.check('the page shows both blocks and says they are already in the cost',
   /Waste, stock lost outside a sale/.test(blocks) && /Missing at the count, no reason given/.test(blocks) && /Already inside the food cost above/.test(blocks));
-t.check('gross profit is still sales less food and drinks, nothing else', /const cogsTotal = food \+ beverage;\s*const gross   = sales - cogsTotal;/.test(pnlJs));
+t.check('gross profit is still sales less food and drinks, nothing else', /const cogsTotal = food \+ beverage;\s*const gross   = sales - cogsTotal;/.test(readFileSync(join(ROOT, 'public/static/utils.js'), 'utf8')));
 t.check('server text is escaped', !/\$\{e\.item_name\}|\$\{e\.note\}|\$\{r\.label\}|\$\{e\.reason\}/.test(blocks));
 t.check('nothing shows when there is nothing to show', /if \(!\(w\.entries \|\| \[\]\)\.length && !\(missing\.entries \|\| \[\]\)\.length\) return ''/.test(blocks));
 

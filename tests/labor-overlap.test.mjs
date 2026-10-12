@@ -15,7 +15,7 @@ import { suite } from './helpers/assert.mjs';
 import { loadBrowserModule } from './helpers/browser-module.mjs';
 
 const fe = loadBrowserModule(
-  ['pnl.js'],
+  ['utils.js', 'pnl.js'],
   ['pnlOverlappingLabor', 'pnlLaborClashNote', '_isSameLaborRun', 'pnlLabor'],
 );
 const t = suite('labor-overlap');

@@ -10,7 +10,7 @@
 import { suite } from './helpers/assert.mjs';
 import { loadBrowserModule } from './helpers/browser-module.mjs';
 
-const fe = loadBrowserModule(['pnl.js'], ['spreadAllocation', 'spreadAllocationRange']);
+const fe = loadBrowserModule(['utils.js', 'pnl.js'], ['spreadAllocation', 'spreadAllocationRange']);
 const t = suite('labor-prime');
 
 // $17,000 over 17 days = $1,000/day, so the split is readable by eye.

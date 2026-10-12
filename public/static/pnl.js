@@ -288,41 +288,17 @@ function fmtMoney(n) {
   return (num < 0 ? '-$' : '$') + Math.abs(num).toFixed(2);
 }
 
-// Whole-day number for a 'YYYY-MM-DD' string (UTC-based, DST-safe).
-function _dayNum(ymd) {
-  const [y, m, d] = String(ymd || '').split('-').map(Number);
-  if (!y || !m || !d) return NaN;
-  return Math.floor(Date.UTC(y, m - 1, d) / 86400000);
-}
+// The day number and the by-days shares are the shared ones in utils.js (see
+// periodProfitSummary there); these names are kept for the rest of this file.
+function _dayNum(ymd) { return monthProfitDayNum(ymd); }
 
-// Fair share of a spread cost that falls inside `month` ('YYYY-MM'): the total
-// prorated by how many days of [start_date, end_date] land in that month.
+// Fair share of a spread cost that falls inside `month` ('YYYY-MM').
 // Returns { allocated, overlapDays, totalDays }.
-function spreadAllocation(row, month) {
-  const startN = _dayNum(row.start_date);
-  const endN   = _dayNum(row.end_date);
-  const total  = parseFloat(row.total_amount) || 0;
-  if (isNaN(startN) || isNaN(endN) || endN < startN) return { allocated: 0, overlapDays: 0, totalDays: 0 };
-
-  const [y, m]  = month.split('-').map(Number);
-  const mStartN = Math.floor(Date.UTC(y, m - 1, 1) / 86400000);
-  const mEndN   = Math.floor(Date.UTC(y, m, 1) / 86400000) - 1;   // last day of month
-
-  const oStart = Math.max(startN, mStartN);
-  const oEnd   = Math.min(endN, mEndN);
-  const overlapDays = oEnd >= oStart ? (oEnd - oStart + 1) : 0;
-  const totalDays   = endN - startN + 1;
-  return { allocated: totalDays > 0 ? total * overlapDays / totalDays : 0, overlapDays, totalDays };
-}
+function spreadAllocation(row, month) { return monthProfitAllocation(row, month); }
 
 // A spread cost's share of a whole period = the sum of its monthly shares.
 function spreadAllocationRange(row, from, to) {
-  let allocated = 0, overlapDays = 0, totalDays = 0;
-  for (const m of monthsInRange(from, to)) {
-    const a = spreadAllocation(row, m);
-    allocated += a.allocated; overlapDays += a.overlapDays; totalDays = a.totalDays;
-  }
-  return { allocated, overlapDays, totalDays };
+  return monthProfitAllocationRange(row, monthsInRange(from, to));
 }
 
 // Short human range label, e.g. "13 Jun – 18 Sep 2026".
@@ -336,13 +312,7 @@ function spreadAllocationRange(row, from, to) {
 // The point of this: rent applied to every month forever, including months
 // before the business existed, so an empty January reported a $9,670 loss and
 // Year to Date carried thousands against no sales.
-function recurringActiveIn(row, m) {
-  const start = (row.start_period || '').trim();
-  const end   = (row.end_period   || '').trim();
-  if (start && m < start) return false;
-  if (end   && m > end)   return false;
-  return true;
-}
+function recurringActiveIn(row, m) { return monthProfitFixedDated(row, m); }
 
 // The note beside a fixed cost's month boxes. It deliberately never repeats the
 // dates — the two inputs are right there showing them — and says only what the
@@ -373,77 +343,18 @@ function render() {
   const months   = monthsInRange(pnlFrom, pnlTo);
   const nMonths  = months.length;
   const single   = pnlFrom === pnlTo;     // month-scoped edits only make sense here
-  // ── Revenue: imported wins, unless the month was explicitly overridden ──
-  // Resolved PER MONTH, not for the period as a whole, so a range where some
-  // months were imported and others typed in still totals correctly.
-  const imported = (pnlCosts.sales && pnlCosts.sales.by_month) || {};
-  const salesFor = (m) => {
-    const row  = pnlSalesRows.find(r => r.period === m);
-    const typed = parseFloat(row && row.sales_total) || 0;
-    const imp   = parseFloat(imported[m] && imported[m].imported_net) || 0;
-    const overridden = !!row && row.revenue_source === 'manual';
-    if (imp > 0 && !overridden) return { amount: imp, source: 'pos', typed, imported: imp, row };
-    return { amount: typed, source: overridden && imp > 0 ? 'manual-override' : 'manual',
-             typed, imported: imp, row };
-  };
-  const salesByMonth = months.map(m => ({ month: m, ...salesFor(m) }));
-  const sales = salesByMonth.reduce((s, x) => s + x.amount, 0);
-  const foodBought = parseFloat(pnlCosts.food_cost) || 0;
-  const bevBought  = parseFloat(pnlCosts.beverage_cost) || 0;
-  const supplies = parseFloat(pnlCosts.supplies_cost) || 0;
-
-  // Cost basis: purchases (what you bought) vs stock-take-adjusted true COGS.
-  const cogsData  = pnlCosts.cogs || { available: false, reason: 'no_closing_take' };
-  const cogsAvail = !!cogsData.available;
-  const useCogs   = pnlBasis === 'cogs' && cogsAvail;
-  const food     = useCogs ? (parseFloat(cogsData.food_cogs) || 0) : foodBought;
-  const beverage = useCogs ? (parseFloat(cogsData.beverage_cogs) || 0) : bevBought;
-  const fees     = parseFloat(pnlCosts.invoice_fees) || 0;
-  // PST paid on supplier invoices: not claimed back (GST/HST is), so a cost.
-  const pst      = parseFloat(pnlCosts.purchase_pst) || 0;
-  const ohTotal  = pnlOverheads.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-  // Fixed costs are per month, so a 3-month period carries 3× the rent — but
-  // only for the months each one was actually being paid in. A row with no
-  // start month still means "every month, forever", which is what every row
-  // meant before they had dates.
-  const fixedAlloc = pnlRecurring.map(r => {
-    const active = months.filter(m => recurringActiveIn(r, m));
-    const amount = parseFloat(r.amount) || 0;
-    return { row: r, months: active.length, total: amount * active.length };
-  });
-  const fixedTotal    = fixedAlloc.reduce((s, x) => s + x.total, 0);
-  // What a full month of the current line-up costs — only meaningful as a
-  // "× n months" summary when every row really does run the whole period.
-  const fixedPerMonth = fixedAlloc.reduce((s, x) => s + (parseFloat(x.row.amount) || 0), 0);
-  const fixedAllMonths = fixedAlloc.every(x => x.months === nMonths);
-  // Spread costs: the period's fair share of each multi-month bill.
-  const spreadThisMonth = pnlSpread
-    .map(r => ({ row: r, ...spreadAllocationRange(r, pnlFrom, pnlTo) }))
-    .filter(x => x.allocated > 0.0049);
-  const spreadTotal = spreadThisMonth.reduce((s, x) => s + x.allocated, 0);
-  // Months with no revenue at all — a period total silently understates without
-  // this. A month covered by a POS import is not missing, however it got there.
-  const missingSales = salesByMonth.filter(x => x.amount <= 0).map(x => x.month);
-  // Expense invoices (utilities/rent/etc.) uploaded and classified as expenses.
-  const expenseInv = pnlCosts.expense_invoices || [];
-  const expenseInvTotal = expenseInv.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-
-  // Labour: each pay period's fair share of this period, prorated by days —
-  // the same treatment as a spread bill, because payroll runs (20 Aug – 5 Sep)
-  // straddle month ends just like a quarterly invoice does.
-  const laborThisPeriod = pnlLabor
-    .map(r => ({ row: r, ...spreadAllocationRange(r, pnlFrom, pnlTo) }))
-    .filter(x => x.allocated > 0.0049);
-  const laborTotal = laborThisPeriod.reduce((s, x) => s + x.allocated, 0);
-
-  const cogsTotal = food + beverage;
-  const gross   = sales - cogsTotal;
-  // Labour is subtracted here, ONCE. Prime cost below re-uses the same figure to
-  // display a subtotal; it is not a second deduction.
-  const running = supplies + fees + pst + expenseInvTotal + fixedTotal + spreadTotal + ohTotal + laborTotal;
-  const net     = gross - running;
-  const prime   = cogsTotal + laborTotal;
-  const hasSales = sales > 0;
+  // The arithmetic lives in utils.js (periodProfitSummary), shared with the
+  // Home strip so the two can never disagree. This page only draws it.
+  const { imported, salesByMonth, sales, foodBought, bevBought, supplies,
+          cogsData, cogsAvail, useCogs, food, beverage, fees,
+          pst, ohTotal, fixedAlloc, fixedTotal, fixedPerMonth, fixedAllMonths,
+          spreadThisMonth, spreadTotal, missingSales, expenseInv, expenseInvTotal, laborThisPeriod,
+          laborTotal, cogsTotal, gross, running, net, prime,
+          hasSales } =
+    periodProfitSummary(months, {
+      costs: pnlCosts, sales_rows: pnlSalesRows, one_offs: pnlOverheads,
+      fixed: pnlRecurring, spread: pnlSpread, labor: pnlLabor,
+    }, pnlBasis);
 
   const pct = n => hasSales ? Math.round((n / sales) * 100) + '%' : '—';
 

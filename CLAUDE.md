@@ -991,23 +991,31 @@ amount the day this shipped. **Known limit:** the reader files Quebec's QST in `
 QST is claimed back; a Quebec account would need a per-account switch (not built, no Quebec
 customers). `npm run test:taxes` (needs the sandbox).
 
-### The Home strip's profit is the P&L page's (2026-10-13, no migration)
+### The P&L sum is written once (2026-10-13, no migration)
 
 The Net Sales / Costs / Profit strip on the Home page had its own copy of the P&L sum, and
 the copy had drifted three ways: it ignored imported till sales (so a Pro restaurant saw
 "Net Sales: —"), always counted food as bought, and charged a fixed cost outside its
-start/end months. The sum is now written once, `monthProfitSummary(month, d, basisChoice)`
-in `utils.js`, and `loadPnlTile()` uses it: imported sales unless the month was set to the
-typed figure; food bought or used as **this browser's** P&L page is set
-(`localStorage['pnlBasis']`, used only when the counts allow it); fixed costs only in the
-months they run. A small line under the figures says which food cost it is and "No sales
-for this month yet". **Step 1 of 2, by the user's decision: `pnl.js` was not touched** and
-still does its own sum in `render()`. Step 2 (not agreed yet) moves the page onto the shared
-sum, and must be proven by comparing the page's full text before and after, character by
-character, over many months and accounts. Until then `tests/month-profit.test.mjs` holds
-the two together (the shared day-share and fixed-cost rules against `spreadAllocation` /
-`recurringActiveIn`) and fails if `home.js` grows a private sum again. **A change to the
-P&L's arithmetic must be made in both places.**
+start/end months. **There is one copy now: `periodProfitSummary(months, d, basisChoice)` in
+`utils.js`.** `render()` in `pnl.js` calls it and only draws; `loadPnlTile()` in `home.js`
+shows one month of it through `monthProfitSummary()`. The by-days shares and the fixed-cost
+month rule live there too (`monthProfitAllocation`, `monthProfitAllocationRange`,
+`monthProfitFixedDated`, `monthProfitDayNum`); `spreadAllocation`, `spreadAllocationRange`,
+`recurringActiveIn` and `_dayNum` in `pnl.js` are one-line names for them, so **a test that
+loads `pnl.js` must load `utils.js` first**. The strip follows **this browser's** P&L choice
+of bought or used (`localStorage['pnlBasis']`, used only when the counts allow) and says
+which in small print, plus "No sales for this month yet".
+
+Done in two steps at the user's request. The body was moved out of `render()` **word for
+word**, then proven by drawing the page with the old and the new code on the same data and
+comparing every character: 1,120 cases over 40 local data sets (7.4 million characters) and
+18 cases on Trattoria Aurora's real staging data, all identical; the tool was checked by
+breaking the new code four ways on purpose. **Not in the shared sum:** the exact-dates short
+view (`renderDays`), which keeps its own smaller arithmetic. `tests/month-profit.test.mjs`
+checks the sum and fails if either page grows a private one again. Because `utils.js` is
+cached by its `?v=`, a change to the shared sum needs the `?v=` bumped on **every** page
+(`tests` enforce one version everywhere): a page served an old `utils.js` with a new
+`pnl.js` would have no P&L at all.
 
 ### The stock movement log (redone 2026-10-06, no migration)
 
