@@ -4809,7 +4809,7 @@ app.post('/api/suppliers/match', async (c) => {
 // A name already resolving exactly is reported 'none' — nothing to suggest,
 // the existing exact-match path in bulk/upsert-products will find it anyway.
 app.post('/api/products/match', async (c) => {
-  const body = await c.req.json() as { names?: string[] }
+  const body = await c.req.json() as { names?: string[]; vendor_name?: string }
   const names = [...new Set((Array.isArray(body.names) ? body.names : []).map(n => (n || '').trim()).filter(Boolean))]
   if (!names.length) return c.json({ results: {} })
 
@@ -4819,13 +4819,65 @@ app.post('/api/products/match', async (c) => {
   ).bind(org).all<{ id: string; name: string }>()
   const products = all.results || []
 
-  const results: Record<string, SupplierMatch> = {}
+  // The supplier this invoice is from, found the way the import finds it (exact
+  // name, else a near-identical one) but never created here: this route only reads.
+  const vendorName = (body.vendor_name || '').trim()
+  let supplierId = ''
+  if (vendorName) {
+    let sup = await c.env.DB.prepare(
+      `SELECT id, name FROM suppliers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND org_id IS ?`
+    ).bind(vendorName, org).first<{ id: string; name: string }>()
+    if (!sup) {
+      const allSup = await c.env.DB.prepare(`SELECT id, name FROM suppliers WHERE org_id IS ?`)
+        .bind(org).all<{ id: string; name: string }>()
+      const m = classifyNameMatch(vendorName, allSup.results || [])
+      if (m.decision === 'auto' && m.match) sup = m.match
+    }
+    if (sup) supplierId = sup.id
+  }
+
+  const results: Record<string, any> = {}
   for (const name of names) {
     const exact = products.find(p => p.name.trim().toLowerCase() === name.toLowerCase())
-    results[name] = exact ? { decision: 'none', match: null, score: 1 } : classifyProductNameMatch(name, products)
+    if (exact) { results[name] = { decision: 'none', match: null, score: 1 }; continue }
+    // A wording the customer already answered for. The import files it under
+    // that product by itself (see /api/bulk/upsert-products, step 1b), so asking
+    // "Same as…?" again was a question whose answer nothing read. Say where it
+    // goes instead. SAME TWO LOOKUPS, SAME ORDER as the import — this supplier's
+    // wording first, then one remembered for every supplier — keep them in step.
+    const remembered = await rememberedProductFor(c.env.DB, org, name, supplierId)
+    results[name] = remembered
+      ? { decision: 'remembered', match: remembered, score: 1 }
+      : classifyProductNameMatch(name, products)
   }
   return c.json({ results })
 })
+
+// The product a supplier's wording was remembered as, or null. Read only.
+async function rememberedProductFor(
+  db: D1Database, org: string | null, name: string, supplierId: string
+): Promise<{ id: string; name: string } | null> {
+  if (supplierId) {
+    const scoped = await db.prepare(
+      `SELECT pa.generic_product_id AS id, gp.name AS name FROM product_aliases pa
+       JOIN generic_products gp ON gp.id = pa.generic_product_id
+       WHERE LOWER(TRIM(pa.alias_name)) = LOWER(TRIM(?))
+         AND pa.supplier_id = ?
+         AND gp.deleted_at IS NULL
+         AND pa.org_id IS ? AND gp.org_id IS ?`
+    ).bind(name, supplierId, org, org).first<{ id: string; name: string }>()
+    if (scoped) return scoped
+  }
+  const global = await db.prepare(
+    `SELECT pa.generic_product_id AS id, gp.name AS name FROM product_aliases pa
+     JOIN generic_products gp ON gp.id = pa.generic_product_id
+     WHERE LOWER(TRIM(pa.alias_name)) = LOWER(TRIM(?))
+       AND pa.supplier_id IS NULL
+       AND gp.deleted_at IS NULL
+       AND pa.org_id IS ? AND gp.org_id IS ?`
+  ).bind(name, org, org).first<{ id: string; name: string }>()
+  return global || null
+}
 
 // PUT /api/suppliers/:id
 // Update a supplier and, when the name changes, cascade it to every place the

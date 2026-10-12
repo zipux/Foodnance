@@ -847,7 +847,10 @@ async function checkProductMatches() {
   if (!names.length) return;
   let res;
   try {
-    res = await apiPost('products/match', { names });
+    // The supplier is sent too: a wording already answered for THIS supplier is
+    // not asked again, it is shown as remembered.
+    const vendor = (document.getElementById('detailVendorInput')?.value || '').trim();
+    res = await apiPost('products/match', { names, vendor_name: vendor });
   } catch (_) { return; }
   const results = res?.results || {};
   let changed = false;
@@ -855,6 +858,12 @@ async function checkProductMatches() {
     const m = results[(l.product_name || '').trim()];
     if (m && m.decision === 'suggest' && m.match && !l._link_product_id) {
       l._nameMatch = m.match;
+      changed = true;
+    }
+    // Display only: the import files a remembered wording by itself, so this
+    // sets nothing that Save or Confirm reads.
+    if (m && m.decision === 'remembered' && m.match && !l._link_product_id) {
+      l._remembered = m.match;
       changed = true;
     }
   });
@@ -1316,13 +1325,18 @@ function renderLinesTable() {
                     style="border:none;background:none;color:#94a3b8;cursor:pointer;padding:0 .1rem">
               <i class="fas fa-times"></i>
             </button>
+          </div>` : (l._remembered ? `
+          <div class="line-remembered" style="font-size:.68rem;color:#475569;margin-top:.15rem;display:flex;align-items:center;gap:.25rem;flex-wrap:wrap"
+               title="You answered this on an earlier invoice from this supplier. To file it somewhere else, use the link button; to forget it, remove the wording from the product's Vendor Names.">
+            <i class="fas fa-arrow-turn-up" style="transform:rotate(90deg)"></i>
+            <span>Files under <strong>${esc(l._remembered.name)}</strong> · remembered</span>
           </div>` : (l._nameMatch ? `
           <div style="font-size:.68rem;color:#b45309;margin-top:.15rem;display:flex;align-items:center;gap:.25rem;flex-wrap:wrap">
             <i class="fas fa-circle-question"></i>
             <span>Same as <strong>${esc(l._nameMatch.name)}</strong>?</span>
             <a href="#" onclick="acceptProductMatch(${i});return false" style="font-weight:600">Use it</a>
             <a href="#" onclick="dismissProductMatch(${i});return false">No</a>
-          </div>` : '')}
+          </div>` : ''))}
         ${l._pack_was ? `
           <div class="pack-changed" style="font-size:.68rem;color:#92400e;margin-top:.15rem;display:flex;align-items:center;gap:.25rem;flex-wrap:wrap">
             <i class="fas fa-box-open"></i>
@@ -1391,6 +1405,11 @@ function renderLinesTable() {
         delete currentLines[idx]._nameMatch;
         const row = tbody.querySelector(`tr[data-idx="${idx}"]`);
         row?.querySelector('td .fa-circle-question')?.closest('div')?.remove();
+      }
+      // Same for a remembered wording: the label was about the old text.
+      if (f === 'product_name' && currentLines[idx]._remembered) {
+        delete currentLines[idx]._remembered;
+        tbody.querySelector(`tr[data-idx="${idx}"]`)?.querySelector('.line-remembered')?.remove();
       }
       // Refresh line total cell (only price/qty affect it)
       const row   = tbody.querySelector(`tr[data-idx="${idx}"]`);

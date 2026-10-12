@@ -449,6 +449,23 @@ Saving is not blocked; ignoring the flag keeps the printed pack. The cost, accep
 user: a pack the AI misreads every time (bottled drinks) is no longer corrected silently, it
 is flagged each time and takes one click. `tests/pack-size-change.test.mjs`.
 
+### "Same as…?" is asked once (2026-10-13, no migration)
+
+The review screen asks "Same as Ground Beef? Use it / No" when a line's name is close to an
+existing product. "Use it" was always remembered (approval saves the supplier's wording in
+`product_aliases`, and `/api/bulk/upsert-products` step 1b files the next one by itself), but
+`POST /api/products/match` only compared names with product **names**, so it asked again on
+every delivery, and answering "No" the second time changed nothing. Now the route takes
+`vendor_name`, finds the supplier the way the import does (exact, else the `'auto'` tier;
+never creates one) and, through `rememberedProductFor()`, answers
+`{ decision: 'remembered', match }` for a wording already answered. **Same two lookups in the
+same order as the import** (this supplier's wording, then one with no supplier): the import's
+own code was deliberately not touched, so the two are separate copies — keep them in step;
+`npm run test:same-as` files a line and checks it lands where the route said. On the screen
+a remembered line shows "Files under **X** · remembered" (`l._remembered`, **display only**:
+nothing Save or Confirm reads). "No" needed no fix: approving creates a product with that
+name, which then matches exactly. Without `vendor_name` the route behaves as before.
+
 ### Tests
 
 ```bash
@@ -473,6 +490,7 @@ npm run test:exact-dates    # P&L for exact dates / between counts — needs the
 npm run test:estimate       # count carried to the month end (estimate), before-opening rule — needs the sandbox
 npm run test:taxes          # P&L taxes: PST line, expense bills without GST — needs the sandbox
 npm run test:stock-log      # stock movement log: server filters, Stock after, links, history kept — needs the sandbox
+npm run test:same-as        # "Same as…?" asked once: remembered wordings, per supplier — needs the sandbox
 ```
 
 **The account purge** (`DELETE /api/admin/organizations/:id`, admin-screen button) is
