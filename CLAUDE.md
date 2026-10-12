@@ -734,6 +734,25 @@ bin's unit with the product's sub-unit and can weight, then folded into one move
 ingredient per day. `tests/sub-unit-stock.test.mjs` pins both; the sandbox test sells one
 product by the can and twice by weight on the same day.
 
+**A refund takes its money off sales and moves no stock (2026-10-13, no migration).** The
+reader used to drop refund rows and the page never showed its own "Ignored 1 row" message,
+so sales read higher than the till's net sales. Now a row whose Event Type is `Refund`
+becomes a line with **quantity 0** and every amount **negative** (`posAsRefund()` in
+`pos-parse.js`, whichever sign the till wrote). Quantity 0 is what keeps stock out of it:
+`explodeSale` returns nothing for it, with no server change. The user's rule: a refunded
+dish was already made, so its ingredients stay used. The review screen says "N refunds in
+this file ($X)", an item's row carries a "1 refund" tag, and an item with only a refund in
+the file is a "Refund only" row with nothing to link (`posItemState` → `'refund'`); the
+linked / not-linked percentages are worked out from the items that sold. A refund lands in
+the month of the refund, not of the sale, as the till reports it. Other event types and
+non-item lines are still dropped; a file with no sale at all is still refused.
+`tests/pos-parse.test.mjs` + `npm run test:pos`.
+
+**The Void confirmation says the stock stays** (same day): voiding an invoice never touches
+the shelf (a count since the delivery may already have corrected it), and the prompt now
+says so and points at Recount, except on Essential. Taking the stock back was considered
+and left out by decision: the user never voided an invoice in seven years.
+
 ### Costing is derived, never stored
 Cost flows one way — `product_entries` → product → recipe → finished product —
 and every level is computed **at read time** from current invoice prices.
@@ -971,6 +990,24 @@ Computed at read time, so bills saved earlier with a GST the reader found droppe
 amount the day this shipped. **Known limit:** the reader files Quebec's QST in `tax_pst`, and
 QST is claimed back; a Quebec account would need a per-account switch (not built, no Quebec
 customers). `npm run test:taxes` (needs the sandbox).
+
+### The Home strip's profit is the P&L page's (2026-10-13, no migration)
+
+The Net Sales / Costs / Profit strip on the Home page had its own copy of the P&L sum, and
+the copy had drifted three ways: it ignored imported till sales (so a Pro restaurant saw
+"Net Sales: —"), always counted food as bought, and charged a fixed cost outside its
+start/end months. The sum is now written once, `monthProfitSummary(month, d, basisChoice)`
+in `utils.js`, and `loadPnlTile()` uses it: imported sales unless the month was set to the
+typed figure; food bought or used as **this browser's** P&L page is set
+(`localStorage['pnlBasis']`, used only when the counts allow it); fixed costs only in the
+months they run. A small line under the figures says which food cost it is and "No sales
+for this month yet". **Step 1 of 2, by the user's decision: `pnl.js` was not touched** and
+still does its own sum in `render()`. Step 2 (not agreed yet) moves the page onto the shared
+sum, and must be proven by comparing the page's full text before and after, character by
+character, over many months and accounts. Until then `tests/month-profit.test.mjs` holds
+the two together (the shared day-share and fixed-cost rules against `spreadAllocation` /
+`recurringActiveIn`) and fails if `home.js` grows a private sum again. **A change to the
+P&L's arithmetic must be made in both places.**
 
 ### The stock movement log (redone 2026-10-06, no migration)
 

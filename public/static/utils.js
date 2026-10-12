@@ -2139,3 +2139,84 @@ function pkBoxesHtml({ key, pack, unit, state, inputClass = 'pk-pack-input' }) {
       <div class="st-pack-total">= <strong data-pack-total="${esc(key)}">${total === null ? '0' : pkFmtQty(total)}</strong> ${esc(unit || pack.base_unit)}</div>
     </div>`;
 }
+
+// ── One month's profit, in one place (2026-10-13) ─────────────────
+// The Home strip used to carry its own copy of the P&L page's sum, and the copy
+// had drifted three ways: it ignored imported till sales, always counted food
+// as bought, and charged a fixed cost outside its start/end months. This is the
+// sum written once. The Home strip uses it today; the P&L page still does its
+// own (pnl.js render) and is meant to move here later, behind a character-by-
+// character comparison of the page. Until then tests/month-profit.test.mjs
+// checks the pieces below against pnl.js's own.
+//
+//   month — 'YYYY-MM'
+//   d     — { costs: the /api/pnl answer for that month, sales_rows, one_offs,
+//             fixed, spread, labor: the rows of sales_monthly, operating_expenses,
+//             recurring_expenses, spread_expenses, labor_periods }
+//   basisChoice — 'cogs' | 'purchases', the P&L page's own remembered choice
+
+function monthProfitDayNum(ymd) {
+  const [y, m, d] = String(ymd || '').split('-').map(Number);
+  if (!y || !m || !d) return NaN;
+  return Math.floor(Date.UTC(y, m - 1, d) / 86400000);
+}
+
+// The month's share of a bill or pay period that covers start_date..end_date,
+// by days. Same arithmetic as spreadAllocation() in pnl.js.
+function monthProfitShare(row, month) {
+  const a = monthProfitDayNum(row.start_date), b = monthProfitDayNum(row.end_date);
+  if (isNaN(a) || isNaN(b) || b < a) return 0;
+  const [y, m] = String(month).split('-').map(Number);
+  const mStart = Math.floor(Date.UTC(y, m - 1, 1) / 86400000);
+  const mEnd   = Math.floor(Date.UTC(y, m, 1) / 86400000) - 1;
+  const overlap = Math.max(0, Math.min(b, mEnd) - Math.max(a, mStart) + 1);
+  return (parseFloat(row.total_amount) || 0) * overlap / (b - a + 1);
+}
+
+// Is a fixed monthly cost being paid in this month? Same rule as
+// recurringActiveIn() in pnl.js, plus the "switched off" flag its loader applies.
+function monthProfitFixedRuns(row, month) {
+  if (!(row.active == null || Number(row.active) === 1)) return false;
+  const start = (row.start_period || '').trim();
+  const end   = (row.end_period   || '').trim();
+  if (start && month < start) return false;
+  if (end   && month > end)   return false;
+  return true;
+}
+
+function monthProfitSummary(month, d, basisChoice) {
+  const num   = v => parseFloat(v) || 0;
+  const costs = (d && d.costs) || {};
+  const sum   = (rows, f) => (rows || []).reduce((s, r) => s + f(r), 0);
+
+  // Sales: imported till sales win, unless the month was set to the typed figure.
+  const row      = ((d && d.sales_rows) || []).find(r => r.period === month);
+  const typed    = num(row && row.sales_total);
+  const by       = (costs.sales && costs.sales.by_month) || {};
+  const imported = num(by[month] && by[month].imported_net);
+  const overridden = !!row && row.revenue_source === 'manual';
+  const fromTill = imported > 0 && !overridden;
+  const sales    = fromTill ? imported : typed;
+
+  // Food and drinks: what was used (from the stock counts) when that is the
+  // P&L page's choice and the counts allow it, else what was bought.
+  const cogs    = costs.cogs || {};
+  const useCogs = basisChoice === 'cogs' && !!cogs.available;
+  const food     = useCogs ? num(cogs.food_cogs)     : num(costs.food_cost);
+  const beverage = useCogs ? num(cogs.beverage_cogs) : num(costs.beverage_cost);
+
+  const running =
+      num(costs.supplies_cost) + num(costs.invoice_fees) + num(costs.purchase_pst)
+    + sum(costs.expense_invoices, r => num(r.amount))
+    + sum(((d && d.fixed) || []).filter(r => monthProfitFixedRuns(r, month)), r => num(r.amount))
+    + sum(d && d.spread, r => monthProfitShare(r, month))
+    + sum(((d && d.one_offs) || []).filter(r => r.period === month), r => num(r.amount))
+    + sum(d && d.labor, r => monthProfitShare(r, month));
+
+  const total = food + beverage + running;
+  return {
+    month, sales, sales_source: fromTill ? 'pos' : 'manual', has_sales: sales > 0,
+    basis: useCogs ? 'cogs' : 'purchases', food, beverage, running,
+    costs: total, profit: sales - total,
+  };
+}

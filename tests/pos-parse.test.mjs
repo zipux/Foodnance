@@ -117,6 +117,37 @@ const allRefunds = parsePosCsv(
   'r.csv');
 t.check('a file of nothing but refunds is refused', allRefunds.error === 'no_usable_rows', allRefunds.error);
 
+// ── refunds: money back, stock untouched ─────────────────────
+t.section('parsePosCsv — a refund takes its money off sales and no stock');
+
+const withRefund = parsePosCsv([
+  'Date,Item,Qty,Gross Sales,Discounts,Net Sales,Tax,Event Type,Itemization Type',
+  '2026-07-20,Pizza,2,$40.00,$4.00,$36.00,$1.80,Payment,ITEM',
+  '2026-07-21,Pizza,1,$20.00,$2.00,$18.00,$0.90,Refund,ITEM',
+  '2026-07-21,Veal,-1,-$26.00,$0.00,($26.00),-$1.30,Refund,ITEM',
+  '2026-07-21,Gift Card,1,$50.00,$0.00,$50.00,$0.00,Refund,GIFT_CARD',
+  '2026-07-21,Pizza,1,$20.00,$0.00,$20.00,$1.00,Exchange,ITEM',
+].join('\n'), 'r.csv');
+t.check('the file is accepted', withRefund.ok === true, withRefund.error);
+t.check('sale + two refunds are kept, the rest dropped', withRefund.lines.length === 3, withRefund.lines.length);
+const rf = withRefund.lines.filter(l => l.refund);
+t.check('a refund line has quantity 0', rf.length === 2 && rf.every(l => l.qty === 0), JSON.stringify(rf.map(l => l.qty)));
+t.check('its money is negative whichever sign the till used',
+  rf[0].net_sales === -18 && rf[0].gross_sales === -20 && rf[0].discounts === -2 && rf[0].tax === -0.9 &&
+  rf[1].net_sales === -26 && rf[1].gross_sales === -26 && rf[1].tax === -1.3, JSON.stringify(rf));
+t.check('net sales = 36 - 18 - 26', withRefund.totals.net === -8, withRefund.totals.net);
+t.check('units sold are not reduced', withRefund.totals.qty === 2, withRefund.totals.qty);
+t.check('the refunds are totalled for the screen',
+  withRefund.totals.refunds === 44 && withRefund.totals.refund_lines === 2, JSON.stringify(withRefund.totals));
+const pz = withRefund.items.find(i => i.pos_item_name === 'Pizza');
+const vl = withRefund.items.find(i => i.pos_item_name === 'Veal');
+t.check('an item nets its refund and counts it', pz.qty === 2 && pz.net_sales === 18 && pz.refund_lines === 1, JSON.stringify(pz));
+t.check('a refund with no sale beside it is its own item, quantity 0', vl.qty === 0 && vl.net_sales === -26 && vl.refund_lines === 1, JSON.stringify(vl));
+t.check('the dropped rows are still reported',
+  withRefund.warnings.some(w => /non-item line/.test(w)) && withRefund.warnings.some(w => /adjustment/.test(w)),
+  JSON.stringify(withRefund.warnings));
+t.check('no private field survives', withRefund.lines.every(l => !Object.keys(l).some(k => k[0] === '_')));
+
 // ── the real fixture ─────────────────────────────────────────
 t.section('parsePosCsv — the Square fixture, end to end');
 

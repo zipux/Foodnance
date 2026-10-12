@@ -64,7 +64,7 @@ async function loadPosImports() {
     const period = r.period_start === r.period_end
       ? fmtDate(r.period_start)
       : `${fmtDate(r.period_start)} – ${fmtDate(r.period_end)}`;
-    const cov = r.net_total > 0 ? Math.round((r.mapped_net / r.net_total) * 100) : 0;
+    const cov = r.net_total > 0 ? Math.min(100, Math.round((r.mapped_net / r.net_total) * 100)) : 0;
     return `<tr>
       <td>${esc(period)}</td>
       <td>${esc(posSourceLabel(r.source))}</td>
@@ -207,6 +207,9 @@ async function openPosReview(id) {
 function posItemState(it) {
   if (it.target_type === 'ignore') return 'ignored';
   if (it.target_type && it.target_id) return 'mapped';
+  // Refunds only, no sale of it in this file: the money comes off sales and
+  // nothing comes off stock, so there is nothing to link.
+  if (it.refund_lines && !(it.qty > 0)) return 'refund';
   if (it.suggested_id) return 'suggested';
   return 'unmapped';
 }
@@ -217,7 +220,11 @@ function renderPosReview() {
 
   const mappedNet = items.filter(i => posItemState(i) === 'mapped')
                          .reduce((s, i) => s + (Number(i.net_sales) || 0), 0);
-  const coverage  = net > 0 ? Math.round((mappedNet / net) * 100) : 0;
+  // Shares are of the items that sold. A refund with no sale beside it lowers
+  // the file's total but belongs to no item here, and would push them past 100%.
+  const soldNet   = items.filter(i => posItemState(i) !== 'refund')
+                         .reduce((s, i) => s + (Number(i.net_sales) || 0), 0);
+  const coverage  = soldNet > 0 ? Math.round((mappedNet / soldNet) * 100) : 0;
   const covClass  = coverage >= 90 ? 'good' : coverage >= 60 ? 'part' : 'bad';
 
   const period = posDraft.period_start === posDraft.period_end
@@ -239,16 +246,27 @@ function renderPosReview() {
   // trivial, "$54.00, 24% of sales" does not.
   const unmapped = items.filter(i => ['unmapped', 'suggested'].includes(posItemState(i)));
   const unmappedNet = unmapped.reduce((s, i) => s + (Number(i.net_sales) || 0), 0);
-  const pct = net > 0 ? Math.round((unmappedNet / net) * 100) : 0;
+  const pct = soldNet > 0 ? Math.round((unmappedNet / soldNet) * 100) : 0;
 
-  document.getElementById('posReviewBanner').innerHTML = unmapped.length
+  // Refunds are said out loud: before 2026-10-13 they were dropped in silence.
+  const refundN   = Number(posDraft.totals?.refund_lines) || 0;
+  const refundAmt = Number(posDraft.totals?.refunds) || 0;
+  const refundNote = refundN
+    ? `<div class="pos-banner pos-banner-info"><i class="fas fa-rotate-left"></i><div>
+         <strong>${refundN} ${refundN === 1 ? 'refund' : 'refunds'} in this file
+         (${fmt(refundAmt)})</strong>, already taken off the net sales above.
+         Stock is not changed by a refund: the dish was made, so its ingredients stay used.
+       </div></div>`
+    : '';
+
+  document.getElementById('posReviewBanner').innerHTML = refundNote + (unmapped.length
     ? `<div class="pos-banner"><i class="fas fa-triangle-exclamation"></i><div>
          <strong>${unmapped.length} ${unmapped.length === 1 ? 'item isn\'t' : 'items aren\'t'}
          linked to a finished product</strong> (${fmt(unmappedNet)} — ${pct}% of sales).
          Their revenue will still be counted, but no ingredients come off stock,
          so your food cost will look lower than it really is.
        </div></div>`
-    : '';
+    : '');
 
   document.getElementById('posMapBody').innerHTML = items.map((it, i) => {
     const state = posItemState(it);
@@ -261,6 +279,8 @@ function renderPosReview() {
     } else if (state === 'suggested') {
       target = `<span class="pos-pill suggested"><i class="fas fa-lightbulb"></i> ${esc(it.suggested_name)}</span>
                 <span class="pos-type-badge">${it.suggested_score}% match</span>`;
+    } else if (state === 'refund') {
+      target = `<span class="pos-pill ignored"><i class="fas fa-rotate-left"></i> Refund only</span>`;
     } else if (state === 'ignored') {
       target = `<span class="pos-pill ignored"><i class="fas fa-ban"></i> Not tracked</span>`;
     } else {
@@ -268,8 +288,19 @@ function renderPosReview() {
     }
 
     const name = it.pos_item_name + (it.price_point ? ` · ${it.price_point}` : '');
+    const refundBadge = it.refund_lines && state !== 'refund'
+      ? ` <span class="pos-type-badge">${it.refund_lines} ${it.refund_lines === 1 ? 'refund' : 'refunds'}</span>` : '';
+    if (state === 'refund') {
+      return `<tr>
+        <td>${esc(name)}</td>
+        <td>${it.qty}</td>
+        <td>-${fmt(Math.abs(Number(it.net_sales) || 0))}</td>
+        <td><div class="pos-map-target">${target}</div></td>
+        <td class="pos-row-actions"></td>
+      </tr>`;
+    }
     return `<tr>
-      <td>${esc(name)}</td>
+      <td>${esc(name)}${refundBadge}</td>
       <td>${it.qty}</td>
       <td>${fmt(it.net_sales)}</td>
       <td><div class="pos-map-target">${target}</div></td>

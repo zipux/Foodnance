@@ -412,6 +412,44 @@ t.check('on_demand ignores a stocked bin entirely — the reason the flip exists
 
 await call(u, 'DELETE', `/api/pos-imports/${pestoDraft.data.import_id}`);
 
+// ── refunds ─────────────────────────────────────────────────────
+// A refund gives the money back and moves no stock: the dish was made. Its own
+// month (August), so the July figures asserted above are not disturbed.
+t.section('a refund takes its money off sales and leaves the stock alone');
+
+const refundCsv = [
+  'Date,Item,Qty,Gross Sales,Discounts,Net Sales,Tax,Event Type,Itemization Type,Record ID',
+  `2026-08-10,Margherita Pizza,2,$24.00,$0.00,$24.00,$1.20,Payment,ITEM,rf-${STAMP}-1`,
+  `2026-08-11,Margherita Pizza,-1,-$12.00,$0.00,-$12.00,-$0.60,Refund,ITEM,rf-${STAMP}-2`,
+].join('\n');
+const refundParsed = parsePosCsv(refundCsv, 'refund.csv');
+t.check('the file parses with one refund', refundParsed.ok && refundParsed.totals.refund_lines === 1
+  && t.near(refundParsed.totals.refunds, 12) && t.near(refundParsed.totals.net, 12),
+  JSON.stringify(refundParsed.totals || refundParsed.error));
+
+const flourBefore = await qtyOf('Flour');
+const mozzBefore  = await qtyOf('Mozzarella');
+const refundDraft = await call(u, 'POST', '/api/pos-imports', { parsed: refundParsed, content_hash: 'rf-' + STAMP });
+t.check('draft created', refundDraft.status === 200, `${refundDraft.status}`);
+const refundCommit = await call(u, 'POST', `/api/pos-imports/${refundDraft.data.import_id}/commit`,
+  { items: refundDraft.data.items, deplete: true });
+t.check('commit succeeded, both lines written',
+  refundCommit.status === 200 && refundCommit.data.lines_written === 2,
+  `${refundCommit.status} ${refundCommit.data?.lines_written}`);
+t.check('flour came off for the 2 pizzas sold only (0.5 kg)',
+  t.near(flourBefore - await qtyOf('Flour'), 0.5), `${flourBefore - await qtyOf('Flour')}`);
+t.check('mozzarella came off for the 2 pizzas sold only (0.3 kg)',
+  t.near(mozzBefore - await qtyOf('Mozzarella'), 0.3), `${mozzBefore - await qtyOf('Mozzarella')}`);
+
+const pnlAug = await call(u, 'GET', '/api/pnl?from=2026-08&to=2026-08');
+const aug = pnlAug.data?.sales?.by_month?.['2026-08'];
+t.check('August sales are $24 less the $12 refund', t.near(aug?.imported_net, 12), `${aug?.imported_net}`);
+
+await call(u, 'POST', `/api/pos-imports/${refundDraft.data.import_id}/void`, { reason: 'refund check' });
+t.check('undoing the import puts back exactly what it took',
+  t.near(await qtyOf('Flour'), flourBefore) && t.near(await qtyOf('Mozzarella'), mozzBefore),
+  `${await qtyOf('Flour')} / ${await qtyOf('Mozzarella')}`);
+
 // ── isolation ───────────────────────────────────────────────────
 t.section('another business cannot touch it');
 const other = { name: `POS IT B ${STAMP}`, email: `pos-it-b-${STAMP}@test.local`, password: 'pos-it-b-password-1' };

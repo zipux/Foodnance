@@ -174,17 +174,34 @@ const POS_FORMATS = [
       _event:        String(get('Event Type') || '').trim(),
       _itemization:  String(get('Itemization Type') || '').trim(),
     }),
-    // v1 counts sales only. Refunds, comps and non-item lines (gift cards,
-    // service charges) are dropped and reported — half-handling a refund is
-    // worse than not handling it, because a wrong stock figure looks right.
+    // Sales and refunds. Comps, other adjustments and non-item lines (gift
+    // cards, service charges) are dropped and reported.
     skip: (r) => {
       if (r._itemization && r._itemization.toUpperCase() !== 'ITEM') return 'non-item line';
-      if (r._event && r._event.toLowerCase() !== 'payment') return 'refund or adjustment';
+      const ev = (r._event || '').toLowerCase();
+      if (ev === 'refund') return r.pos_item_name ? '' : 'refund with no item name';
+      if (ev && ev !== 'payment') return 'adjustment';
       if (!(r.qty > 0)) return 'zero or negative quantity';
       return '';
     },
+    // A refund gives the money back and nothing else: a refunded dish was
+    // already cooked, so its ingredients stay off the shelf (the user's rule,
+    // 2026-10-13). See posAsRefund().
+    refund: (r) => (r._event || '').toLowerCase() === 'refund',
   },
 ];
+
+// Turn a refund row into a line that takes its money off sales and moves no
+// stock: quantity 0 (stock follows quantity everywhere downstream) and every
+// amount negative, whichever sign the till wrote it with.
+function posAsRefund(row) {
+  row.refund = true;
+  row.qty = 0;
+  for (const k of ['gross_sales', 'discounts', 'net_sales', 'tax']) {
+    row[k] = -Math.abs(Number(row[k]) || 0);
+  }
+  return row;
+}
 
 function posNormHeader(s) {
   return String(s == null ? '' : s).replace(/\s+/g, ' ').trim().toLowerCase();
@@ -260,6 +277,7 @@ function parsePosCsv(text, fileName) {
     const row = format.map(get);
     const why = format.skip(row);
     if (why) { skipped[why] = (skipped[why] || 0) + 1; continue; }
+    if (format.refund && format.refund(row)) posAsRefund(row);
     if (!row.sold_date) badDates++;
     if (!row.pos_item_name) continue;      // nothing to map; not worth a warning
 
@@ -270,7 +288,7 @@ function parsePosCsv(text, fileName) {
     lines.push(row);
   }
 
-  if (!lines.length) {
+  if (!lines.some(l => l.qty > 0)) {
     return { ok: false, error: 'no_usable_rows',
              message: 'Every row in that file was a refund, an adjustment or a non-item line — there are no sales to import.' };
   }
@@ -281,7 +299,10 @@ function parsePosCsv(text, fileName) {
   }
 
   // Totals and the per-item roll-up, in one pass.
-  const totals = { gross: 0, discounts: 0, net: 0, tax: 0, qty: 0, lines: lines.length };
+  // `refunds` is the money given back, as a positive figure. It is already
+  // inside gross / net (refund lines are negative); it is here to be shown.
+  const totals = { gross: 0, discounts: 0, net: 0, tax: 0, qty: 0, lines: lines.length,
+                   refunds: 0, refund_lines: 0 };
   const itemMap = new Map();
   let periodStart = '', periodEnd = '';
 
@@ -291,6 +312,7 @@ function parsePosCsv(text, fileName) {
     totals.net       += l.net_sales;
     totals.tax       += l.tax;
     totals.qty       += l.qty;
+    if (l.refund) { totals.refunds -= l.net_sales; totals.refund_lines++; }
 
     if (l.sold_date) {
       if (!periodStart || l.sold_date < periodStart) periodStart = l.sold_date;
@@ -301,12 +323,13 @@ function parsePosCsv(text, fileName) {
     if (!it) {
       it = { pos_item_key: l.pos_item_key, pos_item_name: l.pos_item_name,
              price_point: l.price_point, pos_category: l.pos_category,
-             qty: 0, net_sales: 0, line_count: 0 };
+             qty: 0, net_sales: 0, line_count: 0, refund_lines: 0 };
       itemMap.set(l.pos_item_key, it);
     }
     it.qty       += l.qty;
     it.net_sales += l.net_sales;
     it.line_count++;
+    if (l.refund) it.refund_lines++;
   }
 
   for (const k of Object.keys(totals)) totals[k] = Math.round(totals[k] * 1e6) / 1e6;
@@ -338,7 +361,7 @@ function parsePosCsv(text, fileName) {
 }
 
 window.posParse = {
-  parseCsv, detectPosFormat, parsePosCsv,
+  parseCsv, detectPosFormat, parsePosCsv, posAsRefund,
   posItemKey, posAnySizeKey, posNormKeyPart,
   posMoney, posNum, posNormDate,
   POS_FORMATS,

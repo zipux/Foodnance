@@ -1217,8 +1217,10 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── P&L summary tile ───────────────────────────────────────────
-// Current-month snapshot: Net sales (manual) − Costs (invoices + overheads) = Profit.
-// Mirrors the P&L page math; links there for the full statement.
+// Current-month snapshot: Net sales − Costs = Profit, linked to the P&L page.
+// The sum is monthProfitSummary() in utils.js, the P&L page's own rules written
+// once: imported till sales, food bought or used as that page is set, fixed
+// costs only in the months they run.
 async function loadPnlTile() {
   const statsEl = document.getElementById('pnlTileStats');
   const monthEl = document.getElementById('pnlTileMonth');
@@ -1239,39 +1241,14 @@ async function loadPnlTile() {
       apiGet(`tables/spread_expenses?page=1&limit=500`),
       apiGet(`tables/labor_periods?page=1&limit=500`),
     ]);
-    // This month's fair share of each multi-month "spread" bill (prorated by days).
-    const dayNum = ymd => { const [y, m, d] = String(ymd || '').split('-').map(Number); return (y && m && d) ? Math.floor(Date.UTC(y, m - 1, d) / 86400000) : NaN; };
-    const [yy, mm] = month.split('-').map(Number);
-    const mStart = Math.floor(Date.UTC(yy, mm - 1, 1) / 86400000);
-    const mEnd   = Math.floor(Date.UTC(yy, mm, 1) / 86400000) - 1;
-    const monthShare = rows => (rows || []).reduce((s, r) => {
-      const a = dayNum(r.start_date), b = dayNum(r.end_date);
-      if (isNaN(a) || isNaN(b) || b < a) return s;
-      const overlap = Math.max(0, Math.min(b, mEnd) - Math.max(a, mStart) + 1);
-      return s + (parseFloat(r.total_amount) || 0) * overlap / (b - a + 1);
-    }, 0);
-    const spreadTotal = monthShare(spData.data);
-    // Labour is prorated by days the same way (labor_periods, same columns), and
-    // it has to be here: this tile and the P&L page show the same month's
-    // profit, so a cost counted in one and not the other reads as a bug in
-    // whichever screen the user checked second.
-    const laborTotal = monthShare(labData.data);
-
-    const salesRow = (salesData.data || []).find(r => r.period === month);
-    const sales    = parseFloat(salesRow?.sales_total) || 0;
-    const costTotal = (parseFloat(costs.food_cost) || 0)
-      + (parseFloat(costs.beverage_cost) || 0)
-      + (parseFloat(costs.supplies_cost) || 0)
-      + (parseFloat(costs.invoice_fees) || 0)
-      + (parseFloat(costs.purchase_pst) || 0)
-      + (costs.expense_invoices || []).reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
-      + (ohData.data || []).filter(r => r.period === month)
-          .reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
-      + (recData.data || []).filter(r => r.active == null || Number(r.active) === 1)
-          .reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
-      + spreadTotal
-      + laborTotal;
-    const profit = sales - costTotal;
+    // The P&L page remembers "bought or used" in this browser; show the same.
+    let basisChoice = 'purchases';
+    try { if (localStorage.getItem('pnlBasis') === 'cogs') basisChoice = 'cogs'; } catch (_) {}
+    const p = monthProfitSummary(month, {
+      costs, sales_rows: salesData.data, one_offs: ohData.data,
+      fixed: recData.data, spread: spData.data, labor: labData.data,
+    }, basisChoice);
+    const sales = p.sales, costTotal = p.costs, profit = p.profit;
 
     const stat = (label, value, color) =>
       `<span style="display:flex;flex-direction:column">
@@ -1280,10 +1257,16 @@ async function loadPnlTile() {
        </span>`;
 
     const money = n => (n < 0 ? '-$' : '$') + Math.abs(n).toFixed(2);
+    // Small print: which food cost this is, and why profit may be blank.
+    const noteBits = [p.basis === 'cogs'
+      ? 'Food and drinks: what was used, from your stock counts.'
+      : 'Food and drinks: what was bought.'];
+    if (!p.has_sales) noteBits.push('No sales for this month yet.');
     statsEl.innerHTML =
       stat('Net Sales', sales ? money(sales) : '—', 'var(--text)') +
       stat('Costs', money(costTotal), 'var(--text)') +
-      stat('Profit', sales ? money(profit) : '—', profit >= 0 ? '#15803d' : '#b91c1c');
+      stat('Profit', sales ? money(profit) : '—', profit >= 0 ? '#15803d' : '#b91c1c') +
+      `<span id="pnlTileNote" style="flex-basis:100%;font-size:.72rem;color:var(--text-muted)">${noteBits.join(' ')}</span>`;
   } catch (e) {
     statsEl.innerHTML = `<span style="color:var(--text-muted);font-size:.85rem">P&amp;L unavailable</span>`;
   }

@@ -1733,8 +1733,12 @@ async function voidInvoice() {
   const id  = document.getElementById('detailInvId').value;
   const inv = allInvoices.find(i => i.id === id);
   if (!inv) return;
+  // Voiding never touches the shelf (a count since the delivery may already
+  // have corrected it), so say so. Essential has no stock screens to act on.
+  const stockNote = window.__accountPlan === 'essential' ? ''
+    : `\n\nAny stock it added stays on your shelf. If the goods are not there, recount those items on the Inventory page.`;
   const reason = prompt(
-    `Void invoice "${inv.invoice_number || id}"?\n\nIt will be removed from your P&L and the active list, but kept and restorable.\n\nReason (optional):`,
+    `Void invoice "${inv.invoice_number || id}"?\n\nIt will be removed from your P&L and the active list, but kept and restorable.${stockNote}\n\nReason (optional):`,
     ''
   );
   if (reason === null) return;  // cancelled
