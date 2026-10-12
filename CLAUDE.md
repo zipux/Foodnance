@@ -471,6 +471,7 @@ npm run test:history        # past stock counts: list, sheet, note, isolation �
 npm run test:waste          # Record waste + Recount, recount kept out of the P&L — needs the sandbox (0063 applied locally)
 npm run test:exact-dates    # P&L for exact dates / between counts — needs the sandbox
 npm run test:estimate       # count carried to the month end (estimate), before-opening rule — needs the sandbox
+npm run test:taxes          # P&L taxes: PST line, expense bills without GST — needs the sandbox
 npm run test:stock-log      # stock movement log: server filters, Stock after, links, history kept — needs the sandbox
 ```
 
@@ -527,7 +528,7 @@ Product names are copied into `product_entries`, `invoice_lines`, `product_mappi
 ### AI invoice/recipe parsing
 `/api/ai/parse-invoice` and `/api/ai/parse-recipe` call the Anthropic API directly (`fetch` to `api.anthropic.com/v1/messages`, model `claude-opus-4-8`) — there is no SDK dependency. They return JSON matching an inline schema. Supplier dedup (`classifySupplierMatch` + Levenshtein) and `parsePackSize`/`inferCategory` heuristics in `src/index.ts` clean up extracted data before it hits the DB. Outages come from the key, not the code — see "Secrets" above.
 
-**Monthly parse cap (migration `0041`).** Invoice parsing is metered per organization per calendar month; recipe parsing is deliberately not (it's a one-time onboarding cost). `PLAN_INVOICE_CAPS` sets the plan defaults (Essential 150, Pro uncapped) and `organizations.invoice_cap` overrides it per account — **NULL** = plan default, **0** = uncapped, **N** = capped at N. `effectiveInvoiceCap()` resolves the two. The check runs at the top of `/api/ai/parse-invoice` *before* the Anthropic call, so a blocked parse costs nothing; it returns 403 `{ upgrade_required: true, cap, used }`, which `callClaudeParse` in `public/static/invoice.js` turns into an amber `showCapBlocker` panel rather than a red error.
+**Monthly parse cap (migration `0041`).** Invoice parsing is metered per organization per calendar month; recipe parsing is deliberately not (it's a one-time onboarding cost). `PLAN_INVOICE_CAPS` sets the plan defaults (**Essential 80, Pro 200** since 2026-10-12, as the pricing page says; an account created before `NEW_INVOICE_CAPS_FROM`, 11 Oct 2026 UTC, keeps `PLAN_INVOICE_CAPS_BEFORE` = Essential 150, Pro uncapped — the user's decision, "only new accounts"; `planInvoiceCap()` picks the table from `organizations.created_at`, so every query that reads the cap must select `created_at`) and `organizations.invoice_cap` overrides it per account — **NULL** = plan default, **0** = uncapped, **N** = capped at N. `effectiveInvoiceCap()` resolves the two. The check runs at the top of `/api/ai/parse-invoice` *before* the Anthropic call, so a blocked parse costs nothing; it returns 403 `{ upgrade_required: true, cap, used }`, which `callClaudeParse` in `public/static/invoice.js` turns into an amber `showCapBlocker` panel rather than a red error.
 
 Usage is counted from **`ai_parse_log`** (one row per API call, written server-side), *not* from `invoices.ai_cost` — the latter is accumulated client-side and saved only when the invoice is saved, so abandoned parses would be invisible and multi-page invoices would count once. `invoices.ai_cost` remains the per-invoice figure shown on the invoice screen. Refusals are logged to `ai_cap_blocks`, because a hard block hides the demand it blocks and that demand is the evidence for whether paid overage is worth building. Both tables are org-scoped and covered by `tests/org-scoping.test.mjs`.
 
@@ -950,6 +951,26 @@ estimate until the next count; an import with unmapped items under-records what 
 very large import whose movements were collapsed to one line per file does not count as
 cover; a month still running is never estimated to its end (no sales yet), so it reads as
 before. `npm run test:estimate` (needs the sandbox).
+
+### Taxes on the P&L: PST counts, GST/HST does not (2026-10-12, no migration)
+
+The user's decision, from note 6 and 18 of the full-restaurant test. **GST/HST is claimed
+back, so it is never a cost; PST is not, so it is one.** (General understanding, not tax
+advice.) Two changes in `/api/pnl`:
+- **`purchase_pst`**: the sum of `invoices.tax_pst` over Closed, un-voided **supplier**
+  invoices in the period. The page shows it as its own running-cost line, "Provincial sales
+  tax (PST)", and the Home tile adds it too (the two profits must agree). Never inside food
+  cost: ingredients mostly carry none, and it would move the food cost % for a reason that is
+  not food. It is not in the exact-dates short view (a running cost, like supplies).
+- **An expense bill counts as its total less its GST** (`total − tax_gst`, never below zero).
+  Any PST on the bill stays inside that amount, which is why expense bills are left out of
+  `purchase_pst`. The invoice screen's expense box now shows **GST / HST on this bill**
+  (`#detailExpenseGst`, prefilled from what the reader found) and `confirmExpenseInvoice`
+  saves it as `tax_gst`; before, the box holding it was hidden in expense mode.
+Computed at read time, so bills saved earlier with a GST the reader found dropped by that
+amount the day this shipped. **Known limit:** the reader files Quebec's QST in `tax_pst`, and
+QST is claimed back; a Quebec account would need a per-account switch (not built, no Quebec
+customers). `npm run test:taxes` (needs the sandbox).
 
 ### The stock movement log (redone 2026-10-06, no migration)
 

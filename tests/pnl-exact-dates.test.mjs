@@ -73,4 +73,14 @@ t.check('the page says "estimated", from which count, and what it cannot see',
 t.check('and says when it could not estimate', /the till sales for those days are not imported/.test(note));
 t.check('both statements carry the note', (js.match(/\$\{pnlCarryNote\(cogsData\)\}/g) || []).length === 2);
 
+t.section('taxes: PST is a cost, GST/HST is not');
+t.check('PST comes from supplier invoices only, closed and not voided', /SUM\(COALESCE\(tax_pst, 0\)\) AS pst[\s\S]{0,160}status = 'Closed' AND voided_at IS NULL[\s\S]{0,80}COALESCE\(invoice_kind, ''\) != 'expense'/.test(pnl));
+t.check('an expense bill is counted less its GST, never below zero', /SUM\(COALESCE\(total, 0\) - MIN\(MAX\(COALESCE\(tax_gst, 0\), 0\), MAX\(COALESCE\(total, 0\), 0\)\)\) AS amount/.test(pnl));
+t.check('the page adds PST to the running costs once', /const running = supplies \+ fees \+ pst \+ expenseInvTotal/.test(js) && (js.match(/costRow\('Provincial sales tax \(PST\)'/g) || []).length === 1);
+const homeJs = readFileSync(new URL('../public/static/home.js', import.meta.url), 'utf8');
+t.check('the Home tile counts it too, so the two profits agree', /\+ \(parseFloat\(costs\.purchase_pst\) \|\| 0\)/.test(homeJs));
+const invJs = readFileSync(new URL('../public/static/invoices.js', import.meta.url), 'utf8');
+t.check('the expense bill shows its GST and saves it', /id="detailExpenseGst"/.test(readFileSync(new URL('../public/invoices.html', import.meta.url), 'utf8'))
+  && /tax_gst:          gst,/.test(invJs) && /if \(gst < 0 \|\| gst >= total\)/.test(invJs));
+
 t.done();

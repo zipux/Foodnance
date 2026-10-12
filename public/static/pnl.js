@@ -399,6 +399,8 @@ function render() {
   const food     = useCogs ? (parseFloat(cogsData.food_cogs) || 0) : foodBought;
   const beverage = useCogs ? (parseFloat(cogsData.beverage_cogs) || 0) : bevBought;
   const fees     = parseFloat(pnlCosts.invoice_fees) || 0;
+  // PST paid on supplier invoices: not claimed back (GST/HST is), so a cost.
+  const pst      = parseFloat(pnlCosts.purchase_pst) || 0;
   const ohTotal  = pnlOverheads.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
   // Fixed costs are per month, so a 3-month period carries 3× the rent — but
   // only for the months each one was actually being paid in. A row with no
@@ -438,7 +440,7 @@ function render() {
   const gross   = sales - cogsTotal;
   // Labour is subtracted here, ONCE. Prime cost below re-uses the same figure to
   // display a subtotal; it is not a second deduction.
-  const running = supplies + fees + expenseInvTotal + fixedTotal + spreadTotal + ohTotal + laborTotal;
+  const running = supplies + fees + pst + expenseInvTotal + fixedTotal + spreadTotal + ohTotal + laborTotal;
   const net     = gross - running;
   const prime   = cogsTotal + laborTotal;
   const hasSales = sales > 0;
@@ -653,7 +655,7 @@ function render() {
   // refurbishment still pays its rent, and silently excluding it would understate
   // the year. The customer knows which of the two it was; the app does not, and
   // now has somewhere for them to say it.
-  const nothingRecorded = sales <= 0 && cogsTotal <= 0 && fees <= 0 &&
+  const nothingRecorded = sales <= 0 && cogsTotal <= 0 && fees <= 0 && pst <= 0 &&
                           expenseInvTotal <= 0 && ohTotal <= 0 &&
                           spreadTotal <= 0 && laborTotal <= 0;
   const emptyPeriodNote = (nothingRecorded && fixedTotal > 0)
@@ -816,7 +818,8 @@ function render() {
 
     ${suppliesRow}
     ${fees ? costRow('Delivery &amp; surcharges', 'From invoices', fees) : ''}
-    ${expenseInv.map(r => costRow(esc(r.category), 'From an uploaded bill', parseFloat(r.amount) || 0)).join('')}
+    ${pst ? costRow('Provincial sales tax (PST)', 'From invoices. It is not claimed back, so it is a cost', pst) : ''}
+    ${expenseInv.map(r => costRow(esc(r.category), 'From an uploaded bill, without its GST/HST', parseFloat(r.amount) || 0)).join('')}
 
     <div class="pnl-sub" style="margin:.9rem .25rem .1rem;font-weight:600;color:var(--text)">Fixed monthly costs <span style="font-weight:400;color:var(--text-muted)">— every month, unless you say when they start or stop</span></div>
     <div>${fixedRowsHtml || '<div class="pnl-sub" style="padding:.25rem">None set yet — add rent, wages, insurance…</div>'}</div>
@@ -854,8 +857,8 @@ function render() {
     <div class="pnl-note">
       <i class="fas fa-circle-info"></i>
       <span>${useCogs
-        ? `Food &amp; drink costs are your <strong>true cost of goods sold</strong> — purchases adjusted by the change in raw-material stock between your counts. Other running costs are what you paid in ${periodWord}. Taxes and refundable deposits are excluded.`
-        : `Costs are based on what you <strong>purchased</strong> in ${periodWord} (from your invoices), not a stock-take-adjusted cost of goods sold. Taxes and refundable deposits are excluded.`}</span>
+        ? `Food &amp; drink costs are your <strong>true cost of goods sold</strong> — purchases adjusted by the change in raw-material stock between your counts. Other running costs are what you paid in ${periodWord}. GST/HST and refundable deposits are left out; PST is counted.`
+        : `Costs are based on what you <strong>purchased</strong> in ${periodWord} (from your invoices), not a stock-take-adjusted cost of goods sold. GST/HST and refundable deposits are left out; PST is counted.`}</span>
     </div>
   `;
 }

@@ -602,7 +602,8 @@
             <br>
             <strong>Cap</strong> is how many AI invoice reads they get per calendar
             month. Leave it blank to follow their plan
-            (Essential ${planCaps.essential || 0}, Pro unlimited), type a number to
+            (Essential ${planCaps.essential || 0}, Pro ${planCaps.pro || 'unlimited'}; an account
+            from before 11 Oct 2026 keeps Essential 150, Pro unlimited), type a number to
             override it for this account, or 0 for unlimited. Usage under it is
             always the <em>current</em> month, whatever date range is selected —
             a monthly allowance can't be read over any other window. Over the cap,
@@ -884,7 +885,7 @@
     function capCell(o, planCaps) {
       const plan = (o.plan || 'essential').toLowerCase();
       const override = o.invoice_cap;
-      const planDefault = Number(planCaps[plan] ?? 0);
+      const planDefault = Number(o.plan_cap ?? planCaps[plan] ?? 0);
       const effective = (override === null || override === undefined)
         ? planDefault : Number(override) || 0;
       const used = Number(o.parses_this_month) || 0;

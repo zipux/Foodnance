@@ -40,6 +40,7 @@
     "test:waste": "node tests/integration/waste-recount.test.mjs",
     "test:exact-dates": "node tests/integration/pnl-exact-dates.test.mjs",
     "test:estimate": "node tests/integration/pnl-estimate.test.mjs",
+    "test:taxes": "node tests/integration/pnl-taxes.test.mjs",
     "test:stock-log": "node tests/integration/stock-log.test.mjs",
     "test:line-product": "node tests/integration/invoice-line-product.test.mjs"
   },

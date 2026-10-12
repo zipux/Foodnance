@@ -191,8 +191,8 @@ t.check('resend is refused once the address is at its cap', capped.status === 42
 
 t.section('Plan & usage');
 const planA = await fetchPlan(A);
-t.check('an Essential account reads as Essential with the 150 default cap',
-  planA.status === 200 && planA.data.plan === 'essential' && planA.data.label === 'Essential' && planA.data.invoice_reads.cap === 150, JSON.stringify(planA.data));
+t.check('a new Essential account reads as Essential with the 80 default cap',
+  planA.status === 200 && planA.data.plan === 'essential' && planA.data.label === 'Essential' && planA.data.invoice_reads.cap === 80, JSON.stringify(planA.data));
 t.check('usage starts at 0 and the reset date is the 1st of next month',
   planA.data.invoice_reads.used === 0 && /^\d{4}-\d{2}-01$/.test(planA.data.invoice_reads.resets_on));
 t.check('Essential is shown what Pro would add', planA.data.pro_features.includes('inventory_tools') && planA.data.pro_features.length >= 5);
@@ -211,7 +211,13 @@ sql(`UPDATE organizations SET invoice_cap = 0 WHERE id = '${A.orgId}'`);
 t.check('cap 0 means no limit', (await fetchPlan(A)).data.invoice_reads.cap === 0);
 sql(`UPDATE organizations SET invoice_cap = NULL, plan = 'pro' WHERE id = '${A.orgId}'`);
 const pro = await fetchPlan(A);
-t.check('Pro is uncapped and has nothing to upsell', pro.data.plan === 'pro' && pro.data.label === 'Pro' && pro.data.invoice_reads.cap === 0 && pro.data.pro_features.length === 0, JSON.stringify(pro.data));
+t.check('a new Pro account reads 200 a month and has nothing to upsell', pro.data.plan === 'pro' && pro.data.label === 'Pro' && pro.data.invoice_reads.cap === 200 && pro.data.pro_features.length === 0, JSON.stringify(pro.data));
+// Only new accounts: one created before the limits changed keeps what it was sold.
+sql(`UPDATE organizations SET created_at = '2026-10-06 05:00:00' WHERE id = '${A.orgId}'`);
+t.check('an account from before keeps Pro with no limit', (await fetchPlan(A)).data.invoice_reads.cap === 0);
+sql(`UPDATE organizations SET plan = 'essential' WHERE id = '${A.orgId}'`);
+t.check('and Essential at 150', (await fetchPlan(A)).data.invoice_reads.cap === 150);
+sql(`UPDATE organizations SET plan = 'pro' WHERE id = '${A.orgId}'`);
 sql(`UPDATE organizations SET account_type = 'commissary' WHERE id = '${A.orgId}'`);
 t.check('a commissary is labelled Production', (await fetchPlan(A)).data.label === 'Production');
 t.check('signed out gets 401', (await fetch(`${BASE}/api/account/plan`)).status === 401);

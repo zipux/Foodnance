@@ -21,7 +21,7 @@ Where to start: search "Capterra list your software" or go to capterra.com/vendo
 | Free trial | Yes, 14 days (card required up front; nothing charged if cancelled before it ends) |
 | Free version | No |
 | Pricing model | Per location, per month. Billed monthly, no annual contract, no setup fee |
-| Starting price | CAD $79 per location per month (Essentials). Pro is CAD $150 per location per month |
+| Starting price | CAD $79 per location per month (Essentials). Pro is CAD $159 per location per month |
 | Support | Email (hello@foodnance.com) and hands-on onboarding. **[YOU]** Confirm support hours |
 | Company founded | 2026 |
 | Company HQ / address | **[YOU]** See "Questions for you" below |
@@ -57,7 +57,7 @@ The idea is simple: your invoices already contain your real costs, so Foodnance 
 - **Pro plan extras:** inventory, stock counts by storage area (works on a phone, even offline), the cost of any variance, true cost of goods based on stock counts, and staff food-safety certification tracking.
 
 **Pricing**
-Two plans, priced in Canadian dollars per location per month, with no setup fee and no annual contract. Essentials is $79 a month. Pro is $150 a month. Both start with a 14-day free trial.
+Two plans, priced in Canadian dollars per location per month, with no setup fee and no annual contract. Essentials is $79 a month and reads up to 80 invoices a month. Pro is $159 a month and reads up to 200. Both start with a 14-day free trial.
 
 **Good to know**
 The AI reads each invoice line and can make mistakes, so every invoice waits for someone at your kitchen to confirm it. We are onboarding our first businesses hands-on, so you get help setting up.

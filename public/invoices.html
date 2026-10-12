@@ -364,6 +364,12 @@
             </select>
             <span style="font-size:.78rem;color:#92400e">→ counts in the P&amp;L for the invoice date's month</span>
           </div>
+          <div id="expenseGstWrap" class="hidden" style="margin-top:.6rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+            <label for="detailExpenseGst" style="font-size:.82rem;color:#92400e;font-weight:600">GST / HST on this bill:</label>
+            <input type="number" id="detailExpenseGst" step="0.01" min="0" placeholder="0.00"
+                   style="width:110px;padding:.35rem .6rem;border:1px solid var(--border);border-radius:6px;font-size:.85rem;background:#fff" />
+            <span style="font-size:.78rem;color:#92400e">→ left out of the P&amp;L, because you claim it back</span>
+          </div>
         </div>
 
         <!-- ── Line items table ── -->
@@ -561,6 +567,6 @@
   <script src="/static/utils.js?v=20261012-1"></script>
   <script src="/static/image-preproc.js?v=20260806-1"></script>
   <script src="/static/inventory.js?v=20261006-2"></script>
-  <script src="/static/invoices.js?v=20261006-2"></script>
+  <script src="/static/invoices.js?v=20261012-1"></script>
 </body>
 </html>

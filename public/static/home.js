@@ -1263,6 +1263,7 @@ async function loadPnlTile() {
       + (parseFloat(costs.beverage_cost) || 0)
       + (parseFloat(costs.supplies_cost) || 0)
       + (parseFloat(costs.invoice_fees) || 0)
+      + (parseFloat(costs.purchase_pst) || 0)
       + (costs.expense_invoices || []).reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
       + (ohData.data || []).filter(r => r.period === month)
           .reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)

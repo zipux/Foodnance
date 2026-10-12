@@ -70,7 +70,8 @@ includes on **30 days'** notice, but will not remove a materially
 significant feature from your current paid term without notice.
 
 **Usage limits.** Some features are metered — for example, automated invoice
-extraction is limited per organization per calendar month on lower plans.
+extraction is limited per organization per calendar month, to the number of
+invoices stated for your plan when you subscribe.
 Reaching a limit blocks further use of that feature until the next period; it
 does not affect data you have already saved.
 

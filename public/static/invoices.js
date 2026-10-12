@@ -590,6 +590,9 @@ async function openInvDetail(id) {
 
   document.getElementById('detailTaxPst').value     = taxPst    || '';
   document.getElementById('detailTaxGst').value     = taxGst    || '';
+  // The same GST, shown in the expense-bill box (where the costs section above
+  // is hidden) so it can be seen and corrected before it is left out of the P&L.
+  { const g = document.getElementById('detailExpenseGst'); if (g) { g.value = taxGst || ''; g.disabled = !isActionRequired; } }
   document.getElementById('detailDelivery').value   = delivery  || '';
   document.getElementById('detailDeposit').value    = deposit   || '';
   document.getElementById('detailCredit').value     = credit    || '';
@@ -2054,6 +2057,7 @@ function _initInvImgZoom() {
 function toggleExpenseMode() {
   const on = !!document.getElementById('detailIsExpense')?.checked;
   document.getElementById('expenseCategoryWrap')?.classList.toggle('hidden', !on);
+  document.getElementById('expenseGstWrap')?.classList.toggle('hidden', !on);
   document.getElementById('goodsLineItems')?.classList.toggle('hidden', on);
   document.getElementById('goodsAdditionalCosts')?.classList.toggle('hidden', on);
 }
@@ -2061,7 +2065,8 @@ window.toggleExpenseMode = toggleExpenseMode;
 
 // Save path for expense bills: record vendor/date/total/category and post to
 // Closed. Creates NO line items, products, or inventory. The P&L reads the total
-// by expense_category for the invoice_date's month.
+// LESS ITS GST/HST (claimed back, so not a cost) by expense_category for the
+// invoice_date's month.
 async function confirmExpenseInvoice(id, inv) {
   const vendor      = (document.getElementById('detailVendorInput').value || '').trim();
   const invoiceNum  = (document.getElementById('detailNumberInput').value || '').trim();
@@ -2069,9 +2074,11 @@ async function confirmExpenseInvoice(id, inv) {
   const total       = parseFloat(document.getElementById('detailTotalInput').value) || 0;
   const notes       = (document.getElementById('detailNotes').value || '').trim();
   const category    = document.getElementById('detailExpenseCategory').value || 'Other';
+  const gst         = parseFloat(document.getElementById('detailExpenseGst')?.value) || 0;
 
   if (!invoiceDate) { showToast('Enter the bill date so it lands in the right month.', 'error'); return; }
   if (total <= 0)   { showToast('Enter the bill total.', 'error'); return; }
+  if (gst < 0 || gst >= total) { showToast('The GST / HST must be less than the bill total.', 'error'); return; }
 
   const btn = document.getElementById('confirmInvSaveBtn');
   btn.disabled = true;
@@ -2082,13 +2089,14 @@ async function confirmExpenseInvoice(id, inv) {
       invoice_number:   invoiceNum,
       invoice_date:     invoiceDate,
       total,
+      tax_gst:          gst,
       notes,
       status:           'Closed',
       parsed_data:      '',
       invoice_kind:     'expense',
       expense_category: category,
     });
-    showToast(`Expense bill saved — ${category} $${total.toFixed(2)} added to the P&L.`, 'success');
+    showToast(`Expense bill saved — ${category} $${(total - gst).toFixed(2)} added to the P&L${gst ? `, without the $${gst.toFixed(2)} GST / HST` : ''}.`, 'success');
     _cleanInvImgZoom();
     closeModal('invDetailModal');
     await loadInvoices();

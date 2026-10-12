@@ -1333,7 +1333,7 @@ async function invoiceStartDate(db: D1Database, orgId: string | null): Promise<s
 // (tests/terms-acceptance.test.mjs fails if they drift). Bumping it does NOT
 // ask anyone again — Terms §17 covers changes by notice — it only means later
 // sign-ups are recorded against the new date.
-const TERMS_VERSION = '2026-10-04'
+const TERMS_VERSION = '2026-10-12'
 const TERMS_REQUIRED = 'Please tick the box to agree to the Terms of Service and Privacy Policy.'
 
 // Has this person still to agree (migration 0061)? Asked by /api/auth/me only,
@@ -1765,8 +1765,8 @@ app.get('/api/account/plan', async (c) => {
   if (!org) return c.json({ error: 'No organization.' }, 400)
 
   const row = await c.env.DB.prepare(
-    'SELECT plan, account_type, invoice_cap FROM organizations WHERE id = ?',
-  ).bind(org).first() as { plan: string | null; account_type: string | null; invoice_cap: number | null } | null
+    'SELECT plan, account_type, invoice_cap, created_at FROM organizations WHERE id = ?',
+  ).bind(org).first() as { plan: string | null; account_type: string | null; invoice_cap: number | null; created_at: string | null } | null
   if (!row) return c.json({ error: 'No organization.' }, 404)
 
   const plan = (row.plan || 'essential').toLowerCase()
@@ -2185,6 +2185,8 @@ app.get('/api/admin/organizations', async (c) => {
   // same function the upload uses, so the admin screen can't disagree with it.
   const rows = (results || []).map((o: any) => ({
     ...o, plan_label: planLabel(o.plan, o.account_type), reviewing_now: reviewsInvoices(o),
+    // The plan's own limit for THIS account (old accounts keep the old one).
+    plan_cap: planInvoiceCap(o),
   }))
 
   return c.json({
@@ -2777,11 +2779,32 @@ function featureForPath(path: string): string | null {
 // onboarding (~$3 all-in) and never again; invoices arrive every week forever,
 // so this is the only AI spend worth metering.
 //
-// 0 means uncapped. Pro is uncapped by design — the tier is sold on inventory
-// and variance, not on parse volume.
+// 0 means uncapped. Since 2026-10-12 both plans are capped, and the pricing page
+// says so: Essential 80 a month, Pro 200 (the user's decision).
 const PLAN_INVOICE_CAPS: Record<string, number> = {
+  essential: 80,
+  pro: 200,
+}
+
+// ONLY NEW ACCOUNTS (the user's decision): an account created before the day
+// the limits changed keeps what it was sold, Essential 150 and Pro with no
+// limit. Decided from organizations.created_at, by PLAN, so an old account that
+// moves between plans gets the old figure for its new plan. A row with no
+// created_at is read as an old account: the mistake to avoid is tightening a
+// customer who was promised more, not the other way round.
+const PLAN_INVOICE_CAPS_BEFORE: Record<string, number> = {
   essential: 150,
   pro: 0,
+}
+// 11 Oct UTC is the day the limits changed (12 Oct in Japan, where it was
+// decided); the newest account before it was created on 6 Oct.
+const NEW_INVOICE_CAPS_FROM = '2026-10-11 00:00:00'      // organizations.created_at, UTC
+
+// The plan's own monthly limit for THIS organization, before any override.
+function planInvoiceCap(orgRow: { plan?: string | null; created_at?: string | null }): number {
+  const created = String(orgRow.created_at || '').replace('T', ' ').slice(0, 19)
+  const table = created && created >= NEW_INVOICE_CAPS_FROM ? PLAN_INVOICE_CAPS : PLAN_INVOICE_CAPS_BEFORE
+  return table[(orgRow.plan || 'essential').toLowerCase()] ?? 0
 }
 
 // The cap actually in force for an organization.
@@ -2791,11 +2814,11 @@ const PLAN_INVOICE_CAPS: Record<string, number> = {
 // Returns 0 for "no limit", which is what the caller checks.
 // Takes the organization ROW (not an id — `org` means an id everywhere else in
 // this file, via orgOf()).
-function effectiveInvoiceCap(orgRow: { plan?: string | null; invoice_cap?: number | null }): number {
+function effectiveInvoiceCap(orgRow: { plan?: string | null; invoice_cap?: number | null; created_at?: string | null }): number {
   if (orgRow.invoice_cap !== null && orgRow.invoice_cap !== undefined) {
     return Number(orgRow.invoice_cap) || 0
   }
-  return PLAN_INVOICE_CAPS[(orgRow.plan || 'essential').toLowerCase()] ?? 0
+  return planInvoiceCap(orgRow)
 }
 
 // First instant of the current calendar month, as SQLite's datetime() format.
@@ -2867,8 +2890,8 @@ app.post('/api/admin/organizations/:id/invoice-cap', async (c) => {
     }
   }
 
-  const org = await c.env.DB.prepare('SELECT id, name, plan FROM organizations WHERE id = ?')
-    .bind(id).first<{ id: string; name: string; plan: string }>()
+  const org = await c.env.DB.prepare('SELECT id, name, plan, created_at FROM organizations WHERE id = ?')
+    .bind(id).first<{ id: string; name: string; plan: string; created_at: string | null }>()
   if (!org) return c.json({ error: 'Restaurant not found.' }, 404)
 
   await c.env.DB.prepare(`UPDATE organizations SET invoice_cap = ? WHERE id = ?`).bind(cap, id).run()
@@ -2876,7 +2899,7 @@ app.post('/api/admin/organizations/:id/invoice-cap', async (c) => {
     ok: true,
     organization: { id: org.id, name: org.name },
     invoice_cap: cap,
-    effective_cap: effectiveInvoiceCap({ plan: org.plan, invoice_cap: cap }),
+    effective_cap: effectiveInvoiceCap({ plan: org.plan, invoice_cap: cap, created_at: org.created_at }),
   })
 })
 
@@ -6650,8 +6673,8 @@ app.post('/api/ai/parse-invoice', async (c) => {
   // is the evidence for whether paid overage is worth offering.
   const parseOrg = orgOf(c)
   const capRow = await c.env.DB.prepare(
-    'SELECT plan, invoice_cap FROM organizations WHERE id = ?',
-  ).bind(parseOrg).first<{ plan: string; invoice_cap: number | null }>()
+    'SELECT plan, invoice_cap, created_at FROM organizations WHERE id = ?',
+  ).bind(parseOrg).first<{ plan: string; invoice_cap: number | null; created_at: string | null }>()
   // No row means the NULL-org demo/super-admin account, which is uncapped.
   const cap = capRow ? effectiveInvoiceCap(capRow) : 0
   if (cap > 0) {
@@ -7748,7 +7771,8 @@ app.get('/api/pnl', async (c) => {
   }
 
   // Invoice-level surcharges that are real running costs (delivery + fuel).
-  // Taxes and refundable deposits are intentionally excluded from the P&L.
+  // Refundable deposits are intentionally excluded from the P&L, and so is
+  // GST/HST, which a business claims back. PST is a cost — see pstRow below.
   const feeRow = await c.env.DB.prepare(`
     SELECT SUM(COALESCE(delivery, 0) + COALESCE(fuel_surcharge, 0)) AS fees
     FROM invoices
@@ -7761,7 +7785,10 @@ app.get('/api/pnl', async (c) => {
   // for the month. These are operating costs, not COGS, and have no line items.
   const expRows = await c.env.DB.prepare(`
     SELECT COALESCE(NULLIF(TRIM(expense_category), ''), 'Other') AS category,
-           SUM(COALESCE(total, 0)) AS amount
+           -- The bill's total less its GST/HST (2026-10-12): that tax is claimed
+           -- back, so it is not a cost. Any PST on the bill stays in, being one.
+           -- Never below zero, whatever was typed in the GST box.
+           SUM(COALESCE(total, 0) - MIN(MAX(COALESCE(tax_gst, 0), 0), MAX(COALESCE(total, 0), 0))) AS amount
     FROM invoices
     WHERE invoice_kind = 'expense' AND status = 'Closed' AND voided_at IS NULL
       AND substr(invoice_date, 1, ${dLen}) BETWEEN ? AND ?
@@ -7769,6 +7796,22 @@ app.get('/api/pnl', async (c) => {
     GROUP BY category
     ORDER BY amount DESC
   `).bind(from, to, org).all<{ category: string; amount: number }>()
+
+  // Provincial sales tax on purchases (2026-10-12, the user's decision). Unlike
+  // GST/HST it is not claimed back, so it is money spent: its own line under the
+  // running costs, never inside food cost (ingredients mostly carry none, and
+  // it would move the food cost % for a reason that is not food). Supplier
+  // invoices only: an expense bill's PST is already inside that bill's amount.
+  // Known limit: the invoice reader files Quebec's QST in the same box, and QST
+  // IS claimed back — a Quebec account would need a switch to leave this out.
+  const pstRow = await c.env.DB.prepare(`
+    SELECT SUM(COALESCE(tax_pst, 0)) AS pst
+    FROM invoices
+    WHERE status = 'Closed' AND voided_at IS NULL
+      AND COALESCE(invoice_kind, '') != 'expense'
+      AND substr(invoice_date, 1, ${dLen}) BETWEEN ? AND ?
+      AND org_id IS ?
+  `).bind(from, to, org).first<{ pst: number }>()
 
   // Invoices dated in the period that are NOT yet Closed. Every cost query above
   // filters status='Closed', so these are silently absent from the statement —
@@ -8014,6 +8057,7 @@ app.get('/api/pnl', async (c) => {
       amount: round2(pendingRow?.amount ?? 0),
     },
     invoice_fees:  round2(feeRow?.fees ?? 0),
+    purchase_pst:  round2(pstRow?.pst ?? 0),
     expense_invoices: (expRows.results ?? []).map(r => ({
       category: r.category ?? 'Other',
       amount:   round2(r.amount ?? 0),
