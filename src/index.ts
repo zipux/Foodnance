@@ -1333,7 +1333,7 @@ async function invoiceStartDate(db: D1Database, orgId: string | null): Promise<s
 // (tests/terms-acceptance.test.mjs fails if they drift). Bumping it does NOT
 // ask anyone again — Terms §17 covers changes by notice — it only means later
 // sign-ups are recorded against the new date.
-const TERMS_VERSION = '2026-10-12'
+const TERMS_VERSION = '2026-10-18'
 const TERMS_REQUIRED = 'Please tick the box to agree to the Terms of Service and Privacy Policy.'
 
 // Has this person still to agree (migration 0061)? Asked by /api/auth/me only,
