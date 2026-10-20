@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Start your trial — Foodnance</title>
+  <meta name="robots" content="noindex" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
+  <meta name="theme-color" content="#0369a1" />
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,560;9..144,620&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <style>
+    /* Standalone like login.html — does NOT load /static/style.css (app
+       chrome). Tokens copied from :root there; keep in sync if they change. */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary:    #0369a1;
+      --primary-d:  #075985;
+      --nav-bg:     #0f172a;
+      --border:     #e4e0d8;
+      --text:       #171512;
+      --text-muted: #6b6659;
+      --radius-sm:  6px;
+    }
+
+    body {
+      font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+      color: var(--text);
+      background: linear-gradient(160deg, #f0f9ff 0%, #faf9f6 45%, #f3f1ec 100%);
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      padding: 1.5rem;
+      font-size: 16px; line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .shell { width: 100%; max-width: 400px; }
+
+    .brand {
+      display: flex; align-items: center; justify-content: center; gap: .55rem;
+      font-weight: 700; font-size: 1.3rem; letter-spacing: -.01em;
+      color: var(--text); text-decoration: none; margin-bottom: 1.5rem;
+    }
+    .brand i { color: var(--primary); }
+
+    .card {
+      background: #fff; border: 1px solid var(--border);
+      border-radius: 14px; padding: 2rem 1.75rem;
+      box-shadow: 0 18px 48px rgba(15,23,42,.08);
+    }
+    .card h1 { font-family: 'Fraunces', Georgia, serif; font-size: 1.4rem; font-weight: 600; letter-spacing: -.01em; margin-bottom: .3rem; }
+    .card .lede { font-size: .92rem; color: var(--text-muted); margin-bottom: 1.5rem; }
+
+    label {
+      display: block; font-size: .82rem; font-weight: 600;
+      margin-bottom: .35rem; color: var(--text);
+    }
+    .field { margin-bottom: 1rem; }
+    input[type="email"], input[type="password"], input[type="text"] {
+      width: 100%; font-family: inherit; font-size: .95rem;
+      padding: .65rem .8rem; color: var(--text);
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      background: #fff; transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    input:focus {
+      outline: none; border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(3,105,161,.12);
+    }
+
+    button.submit {
+      width: 100%; font-family: inherit; font-size: .98rem; font-weight: 600;
+      padding: .75rem 1rem; border: none; border-radius: var(--radius-sm);
+      color: #fff; cursor: pointer;
+      background: var(--nav-bg);
+      transition: background .15s ease;
+      display: flex; align-items: center; justify-content: center; gap: .5rem;
+      margin-top: .5rem;
+    }
+    button.submit:hover { background: #1e293b; }
+    button.submit[disabled] { opacity: .65; cursor: default; }
+
+    .error {
+      display: none; margin-bottom: 1rem; padding: .7rem .85rem;
+      background: #fef2f2; border: 1px solid #fecaca; border-radius: var(--radius-sm);
+      font-size: .85rem; color: #991b1b;
+      align-items: flex-start; gap: .5rem;
+    }
+    .error.show { display: flex; }
+    .error i { margin-top: .15rem; }
+
+    .invalid { text-align: center; color: var(--text-muted); font-size: .92rem; }
+    .invalid i { font-size: 1.6rem; color: #94a3b8; margin-bottom: .75rem; display: block; }
+
+    .back { display: block; text-align: center; margin-top: 1rem; font-size: .85rem; color: var(--text-muted); text-decoration: none; }
+    .back:hover { color: var(--text); }
+
+    .agree { display: flex; align-items: flex-start; gap: 10px; margin: 4px 0 18px; font-size: 14px; font-weight: 400; line-height: 1.45; cursor: pointer; }
+    .agree input { width: 18px; height: 18px; margin-top: 1px; flex: none; }
+    .agree a { color: inherit; font-weight: 600; text-decoration: underline; }
+    .hidden { display: none !important; }
+    .steps { list-style: none; margin: 0 0 1.4rem; font-size: .9rem; }
+    .steps li { display: flex; gap: .6rem; align-items: flex-start; margin-bottom: .55rem; }
+    .steps i { color: var(--primary); margin-top: .3rem; width: 1rem; text-align: center; }
+    .note { font-size: .8rem; color: var(--text-muted); margin-top: .9rem; text-align: center; }
+    .center { text-align: center; }
+  </style>
+</head>
+<body>
+
+  <div class="shell">
+    <div class="brand"><img src="/logo/foodnance-logo.svg" width="300" height="175" alt="Foodnance, food meets profit" style="display:block;width:300px;max-width:78vw;height:auto"></div>
+
+    <div class="card">
+      <div id="loadingState">
+        <p class="lede center"><i class="fas fa-spinner fa-spin"></i> One moment…</p>
+      </div>
+
+      <!-- The owner: one button, Paddle's checkout opens over the page. -->
+      <div id="startState" class="hidden">
+        <h1>Start your 14-day free trial</h1>
+        <p class="lede"><span id="orgNameText"></span> · <span id="planText"></span> plan</p>
+
+        <div class="error" id="startError">
+          <i class="fas fa-circle-exclamation"></i>
+          <span id="startErrorText"></span>
+        </div>
+
+        <ul class="steps">
+          <li><i class="fas fa-credit-card"></i><span>Add a card to start. <strong>Nothing is charged today.</strong></span></li>
+          <li><i class="fas fa-calendar-check"></i><span>The first payment is on <strong id="firstChargeText">day 15</strong>. Cancel before then and you pay nothing.</span></li>
+          <li><i class="fas fa-lock"></i><span>Payments are handled by Paddle, our reseller. We never see your card.</span></li>
+        </ul>
+
+        <button type="button" class="submit" id="openCheckout">
+          <i class="fas fa-arrow-right"></i> Add card and start trial
+        </button>
+        <p class="note" id="closedNote" hidden>No card was added. Your account is ready as soon as you add one.</p>
+      </div>
+
+      <!-- After Paddle's checkout says done: wait for Paddle's signed webhook. -->
+      <div id="waitState" class="hidden center">
+        <h1>Thank you</h1>
+        <p class="lede"><i class="fas fa-spinner fa-spin"></i> Confirming with Paddle…</p>
+      </div>
+      <div id="slowState" class="hidden center">
+        <h1>Almost there</h1>
+        <p class="lede">Paddle has your card. Its confirmation hasn't reached us yet, which can take a minute.</p>
+        <button type="button" class="submit" id="checkAgain"><i class="fas fa-rotate"></i> Check again</button>
+      </div>
+
+      <!-- A teammate: only the owner agrees to pay. -->
+      <div id="notOwnerState" class="hidden center">
+        <h1>Almost ready</h1>
+        <p class="lede">The account owner needs to start the trial before the team can use Foodnance. Ask them to sign in.</p>
+      </div>
+    </div>
+
+    <a class="back" href="#" id="signOut"><i class="fas fa-arrow-left"></i> Sign out</a>
+  </div>
+
+  <script>
+    // Billing plan step 2. The account counts as having a card only when Paddle's
+    // signed webhook says so (GET /api/billing/status reads what it wrote), never
+    // because this page saw a checkout complete.
+    const STATES = ['loadingState', 'startState', 'waitState', 'slowState', 'notOwnerState'];
+    function show(id) { STATES.forEach(s => document.getElementById(s).classList.toggle('hidden', s !== id)); }
+    function showError(msg) {
+      document.getElementById('startErrorText').textContent = msg;
+      document.getElementById('startError').classList.add('show');
+      show('startState');
+    }
+    const goHome = () => { location.href = '/home.html'; };
+
+    async function getJson(url) {
+      const r = await fetch(url, { credentials: 'same-origin' });
+      if (r.status === 401) {
+        location.href = '/login.html?next=' + encodeURIComponent(location.pathname + location.search);
+        throw new Error('signed out');
+      }
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'Something went wrong.');
+      return data;
+    }
+
+    function loadPaddle() {
+      return new Promise((resolve, reject) => {
+        if (window.Paddle) return resolve(window.Paddle);
+        const s = document.createElement('script');
+        s.src = 'https://cdn.paddle.com/paddle/v2/paddle.js';
+        s.onload = () => resolve(window.Paddle);
+        s.onerror = () => reject(new Error('Could not load the payment window. Check your connection and try again.'));
+        document.head.appendChild(s);
+      });
+    }
+
+    let checkout = null, completed = false;
+
+    async function waitForWebhook() {
+      show('waitState');
+      for (let i = 0; i < 45; i++) {               // ~90 seconds
+        await new Promise(r => setTimeout(r, 2000));
+        try {
+          const st = await getJson('/api/billing/status');
+          if (!st.card_needed) return goHome();
+        } catch (_) { /* keep waiting */ }
+      }
+      show('slowState');
+    }
+
+    function openCheckout() {
+      document.getElementById('startError').classList.remove('show');
+      document.getElementById('closedNote').hidden = true;
+      window.Paddle.Checkout.open({
+        items: [{ priceId: checkout.price_id, quantity: 1 }],
+        customer: { email: checkout.email },
+        customData: checkout.custom_data,
+        settings: { displayMode: 'overlay', theme: 'light', locale: 'en', allowLogout: false, variant: 'one-page' },
+      });
+    }
+
+    function onPaddleEvent(ev) {
+      if (!ev || !ev.name) return;
+      if (ev.name === 'checkout.completed') {
+        completed = true;
+        setTimeout(() => { try { window.Paddle.Checkout.close(); } catch (_) {} waitForWebhook(); }, 1500);
+      } else if (ev.name === 'checkout.closed' && !completed) {
+        document.getElementById('closedNote').hidden = false;
+      }
+    }
+
+    (async function start() {
+      try {
+        const st = await getJson('/api/billing/status');
+        if (!st.card_needed) return goHome();
+        if (!st.is_owner) return show('notOwnerState');
+
+        checkout = await getJson('/api/billing/checkout');
+        document.getElementById('orgNameText').textContent = checkout.org_name || '';
+        document.getElementById('planText').textContent = checkout.plan_label || '';
+        const first = new Date(Date.now() + 14 * 864e5);
+        document.getElementById('firstChargeText').textContent =
+          first.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+
+        const Paddle = await loadPaddle();
+        if (checkout.environment === 'sandbox') Paddle.Environment.set('sandbox');
+        Paddle.Initialize({ token: checkout.client_token, eventCallback: onPaddleEvent });
+        show('startState');
+      } catch (e) {
+        if (e.message !== 'signed out') showError(e.message);
+      }
+    })();
+
+    document.getElementById('openCheckout').addEventListener('click', () => {
+      if (!checkout || !window.Paddle) return showError('The payment window is not ready yet. Reload the page and try again.');
+      openCheckout();
+    });
+    document.getElementById('checkAgain').addEventListener('click', waitForWebhook);
+    document.getElementById('signOut').addEventListener('click', async (e) => {
+      e.preventDefault();
+      try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (_) {}
+      location.href = '/login.html';
+    });
+  </script>
+
+  <script src="/static/env-banner.js?v=20260807-2"></script>
+</body>
+</html>

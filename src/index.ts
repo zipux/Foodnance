@@ -22,6 +22,18 @@ type Bindings = {
   // point at the pages.dev duplicate; anywhere it is unset the request's own
   // origin is used, which keeps staging links on staging.
   PUBLIC_URL?: string
+  // Paddle billing (migration 0064). The secret of this environment's Paddle
+  // notification destination — sandbox on staging, live on production. Without
+  // it the webhook answers 500 and Paddle keeps retrying; nothing else breaks.
+  PADDLE_WEBHOOK_SECRET?: string
+  // The card step after an owner sets their password. Plain vars in
+  // wrangler.jsonc, public by design (Paddle.js needs them in the page). All
+  // three unset = billing off: no card step, exactly as before. Set on staging
+  // (sandbox) only until production goes live.
+  PADDLE_ENV?: string             // 'sandbox' | 'production'
+  PADDLE_CLIENT_TOKEN?: string    // client-side token: opens a checkout, nothing else
+  PADDLE_PRICE_ESSENTIAL?: string // pri_… monthly, 14-day trial
+  PADDLE_PRICE_PRO?: string
 }
 
 const app = new Hono<{ Bindings: Bindings; Variables: { user: SessionUser } }>()
@@ -54,6 +66,7 @@ const PUBLIC_API = new Set([
   '/api/auth/reset-lookup',    // is this emailed link still good? — gated by the token
   '/api/auth/reset-password',  // sets a new password — gated by the emailed token
   '/api/interest',              // the marketing "Request access" form — no account exists yet
+  '/api/paddle/webhook',        // Paddle has no session — gated by the Paddle-Signature HMAC instead
 ])
 
 // Still allowed while an account is suspended: everything about the session
@@ -2543,6 +2556,204 @@ app.post('/api/interest', async (c) => {
   return c.json({ ok: true })
 })
 
+// ══════════════════════════════════════════════════════════════
+// BILLING — Paddle webhooks (migration 0064)
+// ══════════════════════════════════════════════════════════════
+// Paddle is the Merchant of Record: it takes the card, charges it, retries it
+// and sends the receipts. We only keep a copy of what it tells us, in the
+// organizations.billing_* columns, so the app can decide who gets in.
+//
+// POST /api/paddle/webhook is PUBLIC (Paddle has no session) and trusts nothing
+// until the Paddle-Signature header checks out against PADDLE_WEBHOOK_SECRET —
+// the secret of THIS environment's notification destination (sandbox on
+// staging, live on production; never shared). Unsigned, badly signed, stale or
+// secret-less → 401/500 and nothing is written. Paddle retries any non-2xx
+// (sandbox 3 times, live for 3 days), so a secret set late or a deploy missed
+// recovers on its own once fixed.
+//
+// Paddle delivers at least once and not in order. So: every event is logged
+// once in billing_events (INSERT OR IGNORE on event_id), and the account's
+// columns are written only from an event at least as new as the one they came
+// from (billing_event_at) — a late subscription.created can't undo a later
+// cancellation.
+
+// Paddle signs `${ts}:${rawBody}` with HMAC-SHA256. The header is
+// "ts=1671552777;h1=<hex>", with several h1 while a secret is being rotated.
+// Five minutes either way is enough for a clock skew and short enough that an
+// old captured request can't be replayed later (a replay would be harmless
+// anyway: same event_id, same or older state).
+const PADDLE_SIGNATURE_TOLERANCE_S = 300
+
+async function paddleSignatureValid(secret: string, header: string, rawBody: string, nowS = Math.floor(Date.now() / 1000)): Promise<boolean> {
+  let ts = ''
+  const sigs: string[] = []
+  for (const part of header.split(';')) {
+    const [k, v] = part.split('=', 2).map(s => (s || '').trim())
+    if (k === 'ts') ts = v
+    else if (k === 'h1' && v) sigs.push(v.toLowerCase())
+  }
+  if (!/^\d+$/.test(ts) || !sigs.length) return false
+  if (Math.abs(nowS - Number(ts)) > PADDLE_SIGNATURE_TOLERANCE_S) return false
+  const expected = await hmac(secret, `${ts}:${rawBody}`)
+  return sigs.some(s => timingSafeEqual(s, expected))
+}
+
+// The checkout carries custom_data { org_id, org_sig }. Paddle.js runs in the
+// browser, so the browser could put any org_id there — paying for someone
+// else's account would be harmless, but then cancelling would pause THEM. So the
+// id is only believed with the signature GET /api/billing/checkout handed out
+// for it (keyed on SESSION_SECRET, which differs per environment).
+async function paddleOrgSig(env: Bindings, orgId: string): Promise<string> {
+  return (await hmac(env.SESSION_SECRET || '', `paddle-checkout:${orgId}`)).slice(0, 32)
+}
+
+// Which account an event is about. custom_data.org_id is put on the checkout by
+// us and Paddle copies it onto the subscription; the ids we already stored are
+// the fallback for anything that arrives without it (or with a bad signature).
+async function paddleEventOrg(env: Bindings, data: Record<string, any>, kind: string): Promise<string | null> {
+  const db = env.DB
+  const fromCustom = typeof data?.custom_data?.org_id === 'string' ? data.custom_data.org_id : ''
+  const sig = typeof data?.custom_data?.org_sig === 'string' ? data.custom_data.org_sig : ''
+  if (fromCustom && sig && env.SESSION_SECRET && timingSafeEqual(sig, await paddleOrgSig(env, fromCustom))) {
+    const row = await db.prepare('SELECT id FROM organizations WHERE id = ?').bind(fromCustom).first<{ id: string }>()
+    if (row) return row.id
+  }
+  const subId = kind === 'subscription' ? data?.id : data?.subscription_id
+  if (typeof subId === 'string' && subId) {
+    const row = await db.prepare('SELECT id FROM organizations WHERE paddle_subscription_id = ?').bind(subId).first<{ id: string }>()
+    if (row) return row.id
+  }
+  if (typeof data?.customer_id === 'string' && data.customer_id) {
+    const row = await db.prepare('SELECT id FROM organizations WHERE paddle_customer_id = ?').bind(data.customer_id).first<{ id: string }>()
+    if (row) return row.id
+  }
+  return null
+}
+
+const paddleText = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
+
+app.post('/api/paddle/webhook', async (c) => {
+  const secret = c.env.PADDLE_WEBHOOK_SECRET
+  if (!secret) {
+    // Not "bad request": Paddle must keep retrying until the secret is set and
+    // a new deployment picks it up (secrets bind at deploy time).
+    console.error('POST /api/paddle/webhook: PADDLE_WEBHOOK_SECRET is not set on this deployment')
+    return c.json({ error: 'Not configured.' }, 500)
+  }
+  // The raw text, never c.req.json(): the signature is over the exact bytes.
+  const rawBody = await c.req.text()
+  const header = c.req.header('paddle-signature') || ''
+  if (!header || !rawBody || !await paddleSignatureValid(secret, header, rawBody)) {
+    return c.json({ error: 'Invalid signature.' }, 401)
+  }
+
+  let event: Record<string, any>
+  try { event = JSON.parse(rawBody) } catch (_) { return c.json({ error: 'Bad JSON.' }, 400) }
+  const eventId = paddleText(event?.event_id)
+  const eventType = paddleText(event?.event_type)
+  const occurredAt = paddleText(event?.occurred_at)
+  const data = (event?.data && typeof event.data === 'object') ? event.data as Record<string, any> : {}
+  if (!eventId || !eventType) return c.json({ error: 'Not a Paddle event.' }, 400)
+
+  const kind = eventType.split('.')[0]
+  try {
+    const orgId = await paddleEventOrg(c.env, data, kind)
+    const stmts: D1PreparedStatement[] = [
+      c.env.DB.prepare(
+        `INSERT OR IGNORE INTO billing_events (event_id, event_type, occurred_at, org_id, entity_id, status)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind(eventId, eventType, occurredAt, orgId, paddleText(data.id), paddleText(data.status)),
+    ]
+
+    // Every subscription.* event carries the whole subscription, so they are
+    // all handled the same way: copy its current state.
+    if (orgId && kind === 'subscription' && paddleText(data.id)) {
+      const change = data.scheduled_change && typeof data.scheduled_change === 'object' ? data.scheduled_change : null
+      const priceId = Array.isArray(data.items) ? paddleText(data.items[0]?.price?.id) : null
+      stmts.push(c.env.DB.prepare(
+        `UPDATE organizations SET
+           paddle_subscription_id = ?, paddle_customer_id = COALESCE(?, paddle_customer_id),
+           billing_status = ?, billing_price_id = COALESCE(?, billing_price_id),
+           billing_next_at = ?, billing_change = ?, billing_change_at = ?,
+           billing_event_at = ?, billing_updated_at = datetime('now')
+         WHERE id = ? AND (billing_event_at IS NULL OR ? IS NULL OR billing_event_at <= ?)`,
+      ).bind(
+        data.id, paddleText(data.customer_id),
+        paddleText(data.status), priceId,
+        paddleText(data.next_billed_at), paddleText(change?.action), paddleText(change?.effective_at),
+        occurredAt, orgId, occurredAt, occurredAt,
+      ))
+    } else if (orgId && paddleText(data.customer_id)) {
+      // A transaction (the checkout itself, a renewal, a failed charge) only
+      // teaches us the customer id; the subscription events carry the state.
+      stmts.push(c.env.DB.prepare(
+        `UPDATE organizations SET paddle_customer_id = ? WHERE id = ? AND paddle_customer_id IS NULL`,
+      ).bind(data.customer_id, orgId))
+    }
+    await c.env.DB.batch(stmts)
+    if (!orgId) console.warn(`POST /api/paddle/webhook: ${eventType} ${eventId} matches no account (logged in billing_events)`)
+  } catch (e) {
+    // 500, so Paddle tries again; nothing half-written (one batch).
+    console.error('POST /api/paddle/webhook: failed', eventType, eventId, e)
+    return c.json({ error: 'Could not record the event.' }, 500)
+  }
+  return c.json({ received: true })
+})
+
+// ── The card step (billing plan step 2) ───────────────────────
+// After an owner sets their password, /start-trial.html opens Paddle's checkout
+// (14-day trial, card required). These two routes feed it. Nothing here grants
+// access: the account counts as having a card only once Paddle's signed webhook
+// says so (billing_status), never because the browser reported a checkout.
+//
+// A card is on file while Paddle says trialing / active / past_due — past_due
+// still has a card, Paddle is retrying it, and pausing on day 14 is the
+// operator's call (admin screen).
+const BILLING_HAS_CARD = new Set(['trialing', 'active', 'past_due'])
+
+function billingConfigured(env: Bindings): boolean {
+  return !!(env.PADDLE_CLIENT_TOKEN && env.PADDLE_PRICE_ESSENTIAL && env.PADDLE_PRICE_PRO)
+}
+
+// GET /api/billing/status → { configured, card_needed, status, is_owner }
+// Polled by /start-trial.html while it waits for Paddle's webhook.
+app.get('/api/billing/status', async (c) => {
+  const me = c.get('user') as SessionUser
+  const configured = billingConfigured(c.env)
+  if (me.role === 'super_admin' || !me.org_id) {
+    return c.json({ configured, card_needed: false, status: null, is_owner: false })
+  }
+  const org = await c.env.DB.prepare('SELECT billing_status FROM organizations WHERE id = ?')
+    .bind(me.org_id).first<{ billing_status: string | null }>()
+  const status = org?.billing_status || null
+  return c.json({
+    configured,
+    card_needed: configured && !BILLING_HAS_CARD.has(status || ''),
+    status,
+    is_owner: me.role === 'owner',
+  })
+})
+
+// GET /api/billing/checkout → what Paddle.js needs to open the checkout.
+// Owner only: the owner is the one agreeing to pay.
+app.get('/api/billing/checkout', async (c) => {
+  const me = c.get('user') as SessionUser
+  if (me.role !== 'owner' || !me.org_id) {
+    return c.json({ error: 'Only the account owner can start the trial.' }, 403)
+  }
+  if (!billingConfigured(c.env)) return c.json({ error: 'Payments are not set up here.' }, 404)
+  const pro = (me.org_plan || 'essential').toLowerCase() === 'pro'
+  return c.json({
+    environment: c.env.PADDLE_ENV === 'production' ? 'production' : 'sandbox',
+    client_token: c.env.PADDLE_CLIENT_TOKEN,
+    price_id: pro ? c.env.PADDLE_PRICE_PRO : c.env.PADDLE_PRICE_ESSENTIAL,
+    plan_label: planLabel(me.org_plan, me.account_type),
+    email: me.email,
+    org_name: me.org_name,
+    custom_data: { org_id: me.org_id, org_sig: await paddleOrgSig(c.env, me.org_id) },
+  })
+})
+
 // POST /api/admin/organizations
 //   { name, owner_email, owner_name?, account_type? }        → emails the owner an invite
 //   { ..., owner_password }                                  → legacy: sets the password for them
@@ -3086,6 +3297,7 @@ const PURGE_TABLES = [
   'suppliers', 'categories', 'units', 'vendor_fee_templates',
   'sales_monthly', 'operating_expenses', 'recurring_expenses', 'spread_expenses',
   'labor_periods',
+  'billing_events',
 ]
 
 // Irreversible. Guarded three ways, because the cost of doing this to the wrong

@@ -43,7 +43,9 @@
     "test:taxes": "node tests/integration/pnl-taxes.test.mjs",
     "test:stock-log": "node tests/integration/stock-log.test.mjs",
     "test:line-product": "node tests/integration/invoice-line-product.test.mjs",
-    "test:same-as": "node tests/integration/same-as-remembered.test.mjs"
+    "test:same-as": "node tests/integration/same-as-remembered.test.mjs",
+    "test:paddle-webhook": "node tests/integration/paddle-webhook.test.mjs",
+    "test:card-step": "node tests/integration/billing-card-step.test.mjs"
   },
   "dependencies": {
     "hono": "^4.12.7"

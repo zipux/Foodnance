@@ -25,7 +25,7 @@ const SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'index.ts
 // invites) are deliberately absent: they are scoped by their own rules, not
 // by org_id on the row.
 const TENANT_TABLES = new Set([
-  'ai_cap_blocks', 'ai_parse_log',
+  'ai_cap_blocks', 'ai_parse_log', 'billing_events',
   'categories', 'certification_types', 'finished_product_items', 'finished_products',
   'generic_products', 'inventory', 'invoice_lines', 'invoices', 'item_placements',
   'labor_periods',

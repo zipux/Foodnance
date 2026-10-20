@@ -246,7 +246,14 @@
           showError(data.error || 'Could not complete sign-up. Please try again.');
           return;
         }
-        location.href = '/home.html';
+        // Where payments are switched on, the card comes next (14-day trial);
+        // anywhere else, or if the check fails, straight into the app as before.
+        let next = '/home.html';
+        try {
+          const st = await fetch('/api/billing/status').then(r => r.ok ? r.json() : {});
+          if (st.card_needed) next = '/start-trial.html';
+        } catch (_) {}
+        location.href = next;
       } catch (_) {
         showError('Could not reach the server. Check your connection and try again.');
       } finally {

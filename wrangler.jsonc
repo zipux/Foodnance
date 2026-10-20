@@ -61,7 +61,14 @@
 	"env": {
 		"preview": {
 			"vars": {
-				"APP_ENV": "staging"
+				"APP_ENV": "staging",
+				// Paddle SANDBOX (billing plan step 2). Public by design: the client
+				// token can only open a checkout. Production has none of these, so
+				// there is no card step there until billing goes live.
+				"PADDLE_ENV": "sandbox",
+				"PADDLE_CLIENT_TOKEN": "test_f64cf3063a3af875abc336b2bca",
+				"PADDLE_PRICE_ESSENTIAL": "pri_01m5bwchn0gyfhpj8pcqs62prj",
+				"PADDLE_PRICE_PRO": "pri_01m5bwcj3cm2mh11zv3dkb25ap"
 			},
 			"d1_databases": [
 				{

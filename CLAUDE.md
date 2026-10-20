@@ -466,6 +466,45 @@ a remembered line shows "Files under **X** · remembered" (`l._remembered`, **di
 nothing Save or Confirm reads). "No" needed no fix: approving creates a product with that
 name, which then matches exactly. Without `vendor_name` the route behaves as before.
 
+### Billing: the Paddle webhook (added 2026-10-20, migration `0064`)
+
+Step 1 of the billing plan (one email → password → Paddle card → app). Paddle is the
+Merchant of Record; we keep a **copy** of what it tells us on `organizations`
+(`paddle_customer_id`, `paddle_subscription_id`, `billing_status` = Paddle's word:
+trialing / active / past_due / paused / canceled, `billing_price_id`, `billing_next_at`,
+`billing_change` + `billing_change_at` for a scheduled cancel/pause, `billing_event_at`)
+and log every event once in `billing_events` (tenant table, purged with the account).
+`POST /api/paddle/webhook` is in `PUBLIC_API` and writes **nothing** until the
+`Paddle-Signature` HMAC checks out against `PADDLE_WEBHOOK_SECRET` (the secret of *this*
+environment's notification destination: sandbox on staging, live on production; ±5 min).
+No secret on a deployment = 500, so Paddle keeps retrying until one is set and redeployed.
+Account = `custom_data.org_id` (we put it on the checkout; it must name a real account),
+else the stored subscription id, else the customer id; no match = logged with `org_id`
+NULL and answered 200. Every `subscription.*` event carries the whole subscription and is
+copied as is, **only if it is not older** than `billing_event_at` (Paddle delivers out of
+order); a `transaction.*` only fills a missing customer id. **Nothing reads these columns
+yet** — access is unchanged until step 3. **Apply `0064` before deploying** (by file).
+`npm run test:paddle-webhook` (needs the sandbox and `PADDLE_WEBHOOK_SECRET=<anything>` in
+`.dev.vars`).
+
+**Step 2, the card step (2026-10-20, no migration).** After the password, `accept-invite.html`
+asks `GET /api/billing/status` and, when `card_needed`, sends the owner to
+**`/start-trial.html`**: one button opens Paddle's overlay checkout (Paddle.js v2 from
+cdn.paddle.com), then the page polls status until the webhook has written a card
+(`BILLING_HAS_CARD` = trialing / active / past_due) and goes to `/home.html`.
+`GET /api/billing/checkout` (owner only) hands out client token, price for the org's plan,
+email and `custom_data { org_id, org_sig }`; the webhook believes `custom_data.org_id`
+**only with that signature** (`paddleOrgSig`, HMAC on `SESSION_SECRET`), so nobody can pin
+their subscription on another business. Switched on by `PADDLE_ENV` / `PADDLE_CLIENT_TOKEN`
+/ `PADDLE_PRICE_ESSENTIAL` / `PADDLE_PRICE_PRO` — plain vars in `wrangler.jsonc`, set under
+`env.preview` (sandbox) **only**; with them unset (production today) there is no card step.
+Nothing is enforced yet: a signed-in owner without a card can still use the app (step 3).
+Sandbox setup it relies on: `staging.webapp-g5y.pages.dev` approved under Website approval,
+default payment link = its `/start-trial.html`, prices limited to quantity 1 (else the
+checkout shows a quantity picker). **Live will need the same three.** Verified end to end on
+staging with the test card (BC: CA$0 today, CA$88.48 from day 15). `npm run test:card-step`
+(needs the sandbox and the four vars in `.dev.vars`).
+
 ### Tests
 
 ```bash
@@ -491,6 +530,8 @@ npm run test:estimate       # count carried to the month end (estimate), before-
 npm run test:taxes          # P&L taxes: PST line, expense bills without GST — needs the sandbox
 npm run test:stock-log      # stock movement log: server filters, Stock after, links, history kept — needs the sandbox
 npm run test:same-as        # "Same as…?" asked once: remembered wordings, per supplier — needs the sandbox
+npm run test:paddle-webhook # Paddle webhook: signature, out-of-order events, account matching — needs the sandbox (0064 applied locally)
+npm run test:card-step      # card step: status, checkout, signed custom_data, webhook unlocks — needs the sandbox
 ```
 
 **The account purge** (`DELETE /api/admin/organizations/:id`, admin-screen button) is
