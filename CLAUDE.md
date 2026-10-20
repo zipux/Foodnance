@@ -498,7 +498,22 @@ email and `custom_data { org_id, org_sig }`; the webhook believes `custom_data.o
 their subscription on another business. Switched on by `PADDLE_ENV` / `PADDLE_CLIENT_TOKEN`
 / `PADDLE_PRICE_ESSENTIAL` / `PADDLE_PRICE_PRO` — plain vars in `wrangler.jsonc`, set under
 `env.preview` (sandbox) **only**; with them unset (production today) there is no card step.
-Nothing is enforced yet: a signed-in owner without a card can still use the app (step 3).
+**Steps 3 + 4, no card no app (2026-10-20, migration `0065`).** In the `/api/*` chokepoint,
+after suspension and plan gating: `cardNeeded()` → **402 `{ card_required: true }`** for
+everything but `CARD_EXEMPT` (logout, me, change-password, accept-terms, the two billing
+routes). False when payments are off, for a super-admin (and so "viewing as"), and for
+`organizations.billing_exempt = 1` — **"No payment needed"**, the admin screen's Payment
+column (`POST /api/admin/organizations/:id/billing-exempt`); 0065 sets it on **every account
+that existed when it ran**, so nobody already using the app is locked out. Fail-open on a
+read error. `/api/auth/me` and the login reply carry `card_needed`; `utils.js` (every app
+page) and `login.html` send that person to `/start-trial.html`. Teammates are shut out with
+the owner (the page tells them to ask the owner). The admin Payment line reads
+`billing_*` in words (trial, first charge … / paid, next … / card failed / cancelled /
+signed up, no card yet). The admin list **selects** these columns: **apply 0064 and 0065
+before deploying** (by file / `--command`, as always). Locally, `dev:sandbox` keeps payments
+off so other integration tests can make accounts; `dev:sandbox:billing` turns them on for
+`test:card-step`. Known gaps: Paddle `paused` (end of dunning) or a cancelled owner gets a
+new checkout rather than an "update your card" screen; no customer-facing billing page yet.
 Sandbox setup it relies on: `staging.webapp-g5y.pages.dev` approved under Website approval,
 default payment link = its `/start-trial.html`, prices limited to quantity 1 (else the
 checkout shows a quantity picker). **Live will need the same three.** Verified end to end on
@@ -531,7 +546,7 @@ npm run test:taxes          # P&L taxes: PST line, expense bills without GST —
 npm run test:stock-log      # stock movement log: server filters, Stock after, links, history kept — needs the sandbox
 npm run test:same-as        # "Same as…?" asked once: remembered wordings, per supplier — needs the sandbox
 npm run test:paddle-webhook # Paddle webhook: signature, out-of-order events, account matching — needs the sandbox (0064 applied locally)
-npm run test:card-step      # card step: status, checkout, signed custom_data, webhook unlocks — needs the sandbox
+npm run test:card-step      # card step + no-card lock + "No payment needed" — needs `npm run dev:sandbox:billing` (0064/0065 applied locally)
 ```
 
 **The account purge** (`DELETE /api/admin/organizations/:id`, admin-screen button) is

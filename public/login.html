@@ -225,6 +225,8 @@
     // Only same-site paths are honoured, so ?next=https://evil.example can't
     // turn this page into an open redirect.
     function destinationFor(user) {
+      // No card yet (payments switched on): the card step comes before anything.
+      if (user && user.card_needed) return '/start-trial.html';
       const next = new URLSearchParams(location.search).get('next') || '';
       if (next.startsWith('/') && !next.startsWith('//')) return next;
       // Super-admin first: they have no org, so the upload screen has nothing

@@ -520,6 +520,7 @@
         const rows = payload.data || [];
         // Plan defaults come from the server so the two can't drift apart.
         const planCaps = payload.plan_caps || {};
+        const billingOn = !!payload.billing_on;
         if (!rows.length) {
           box.innerHTML = '<div class="empty">No restaurants yet. Add your first one on the left.</div>';
           return;
@@ -528,6 +529,7 @@
           <div class="tablewrap"><table>
             <thead><tr>
               <th>Name</th><th>Owner</th><th>Type</th><th>Plan</th><th>Status</th>
+              <th title="Whether this account must add a card (Paddle) to use the app, and what Paddle last said">Payment</th>
               <th>People</th><th style="text-align:right">AI cost (USD)</th>
               <th style="text-align:right">Cap</th><th style="text-align:right">Waiting</th>
               <th title="Whether new invoices come to you first (Processing) before the customer can approve them">Check first</th>
@@ -540,6 +542,7 @@
                 <td><span class="pill">${esc(o.account_type)}</span></td>
                 <td>${planPicker(o)}</td>
                 <td>${statusPill(o)}</td>
+                ${paymentCell(o, billingOn)}
                 <td>${o.user_count}</td>
                 ${aiCostCell(o)}
                 ${capCell(o, planCaps)}
@@ -663,6 +666,10 @@
 
         box.querySelectorAll('select[data-plan-for]').forEach(sel => {
           sel.addEventListener('change', () => setPlan(sel, sel.dataset.planFor, sel.dataset.name));
+        });
+
+        box.querySelectorAll('select[data-pay-for]').forEach(sel => {
+          sel.addEventListener('change', () => setBillingExempt(sel, sel.dataset.payFor, sel.dataset.name));
         });
 
         box.querySelectorAll('select[data-review-for]').forEach(sel => {
@@ -947,6 +954,72 @@
         msg('Could not reach the server.', 'bad');
       } finally {
         input.disabled = false;
+      }
+    }
+
+    // Payment (billing plan step 4, migrations 0064/0065). The picker is the
+    // "No payment needed" switch; the line under it is what Paddle last told us
+    // (the webhook writes billing_*), in words. Where payments are switched off
+    // (production until go-live) nobody is asked for a card either way.
+    const fmtDay = (iso) => {
+      if (!iso) return '';
+      const d = new Date(iso);
+      return isNaN(d) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+    };
+    function paymentLine(o) {
+      const st = o.billing_status;
+      if (st === 'trialing') return `trial, first charge ${fmtDay(o.billing_next_at)}`;
+      if (st === 'active') {
+        if (o.billing_change === 'cancel') return `paid, cancels ${fmtDay(o.billing_change_at)}`;
+        if (o.billing_change === 'pause') return `paid, pauses ${fmtDay(o.billing_change_at)}`;
+        return `paid, next ${fmtDay(o.billing_next_at)}`;
+      }
+      if (st === 'past_due') return 'card failed — Paddle retrying';
+      if (st === 'paused')   return 'paused by Paddle';
+      if (st === 'canceled') return 'cancelled';
+      if (o.owner_email)     return 'signed up, no card yet';
+      return 'not signed up yet';
+    }
+    function paymentCell(o, billingOn) {
+      const exempt = !!o.billing_exempt;
+      const st = o.billing_status;
+      const hasCard = st === 'trialing' || st === 'active' || st === 'past_due';
+      let sub = exempt && !st ? 'never asked for a card' : paymentLine(o);
+      if (!billingOn) sub += ' · payments off here';
+      const warn = billingOn && !exempt && !hasCard;
+      const opt = (v, label) => `<option value="${v}"${(exempt ? 'free' : 'card') === v ? ' selected' : ''}>${label}</option>`;
+      return `<td class="waiting"><select class="planpick${exempt ? '' : ' pro'}" data-pay-for="${esc(o.id)}"
+                 data-name="${esc(o.name)}" data-current="${exempt ? 'free' : 'card'}">
+          ${opt('card', 'Card required')}${opt('free', 'No payment needed')}
+        </select><span class="sub"${warn ? ' style="color:#b45309"' : ''}>${esc(sub)}</span></td>`;
+    }
+
+    async function setBillingExempt(sel, orgId, name) {
+      const v = sel.value;
+      const before = sel.dataset.current || 'card';
+      if (v === before) return;
+      sel.disabled = true;
+      try {
+        const r = await fetch(`/api/admin/organizations/${orgId}/billing-exempt`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ exempt: v === 'free' }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          sel.value = before;
+          msg(data.error || `Could not change payment for ${name}.`, 'bad');
+          return;
+        }
+        msg(v === 'free' ? `${name}: no payment needed — never asked for a card.`
+          : data.card_on_file ? `${name}: card required — they already have one on file.`
+          : `${name}: card required — they will be asked for one at their next click.`, 'ok');
+        loadOrgs();
+      } catch (_) {
+        sel.value = before;
+        msg('Could not reach the server.', 'bad');
+      } finally {
+        sel.disabled = false;
       }
     }
 

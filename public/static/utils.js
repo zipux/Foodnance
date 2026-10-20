@@ -418,6 +418,11 @@ async function renderSessionChip() {
     return;
   }
 
+  // No card yet where payments are switched on: the server refuses everything
+  // but the card step (402 card_required), so go there rather than show a page
+  // whose every request will fail. Never true for a super-admin.
+  if (me.card_needed) { location.replace('/start-trial.html'); return; }
+
   // Viewing a customer's data: make that impossible to miss. Without this an
   // operator could edit a customer's numbers believing they were their own.
   if (viewingAs) renderViewingAsBar(viewingAs);

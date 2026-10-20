@@ -79,6 +79,17 @@ const SUSPEND_EXEMPT = new Set([
   '/api/auth/accept-terms',   // or a paused account could never get past the one-time panel to its own data
 ])
 
+// Still allowed while an account has no card yet (see cardNeeded): the session
+// itself, and the two routes /start-trial.html needs to take one.
+const CARD_EXEMPT = new Set([
+  '/api/auth/logout',
+  '/api/auth/me',
+  '/api/auth/change-password',
+  '/api/auth/accept-terms',
+  '/api/billing/status',
+  '/api/billing/checkout',
+])
+
 app.use('/api/*', async (c, next) => {
   const path = new URL(c.req.url).pathname
   if (PUBLIC_API.has(path)) return next()
@@ -123,6 +134,15 @@ app.use('/api/*', async (c, next) => {
         plan: (me.org_plan || 'essential').toLowerCase(),
       }, 403)
     }
+  }
+
+  // No card, no app (billing plan step 3). Where payments are switched on, an
+  // account without a Paddle subscription that has a card on it, and not marked
+  // "No payment needed", can reach only what it takes to add one. Every route
+  // added later is covered without anyone remembering to. A commercial gate,
+  // like plan gating: if the check itself fails it lets the request through.
+  if (!CARD_EXEMPT.has(path) && await cardNeeded(c.env, me)) {
+    return c.json({ error: 'Add a card to start your free trial.', card_required: true }, 402)
   }
 
   // Downstream handlers read the caller from here rather than re-querying.
@@ -1491,7 +1511,8 @@ app.post('/api/auth/login', async (c) => {
       WHERE u.id = ?`,
   ).bind(row.id).first<SessionUser>()
 
-  return c.json({ ok: true, user: me ? publicUser(me) : null })
+  // login.html sends someone with no card yet to /start-trial.html.
+  return c.json({ ok: true, user: me ? { ...publicUser(me), card_needed: await cardNeeded(c.env, me) } : null })
 })
 
 // ── Forgotten password ────────────────────────────────────────
@@ -1672,7 +1693,9 @@ app.get('/api/auth/me', async (c) => {
   }
   // Drives the one-time "please agree to our Terms" panel (utils.js).
   const terms_due = await termsDue(c.env.DB, me)
-  return c.json({ user: { ...publicUser(me), terms_due }, viewing_as })
+  // Sends the app to /start-trial.html (utils.js), so no page opens without a card.
+  const card_needed = await cardNeeded(c.env, me)
+  return c.json({ user: { ...publicUser(me), terms_due, card_needed }, viewing_as })
 })
 
 // ── Super-admin: view a customer's data without their password ──
@@ -2104,6 +2127,7 @@ app.get('/api/admin/organizations', async (c) => {
     `SELECT o.id, o.name, o.account_type, o.created_at, o.archived_at,
             o.suspended_at, o.suspend_reason, o.plan, o.invoice_cap,
             o.started_at, o.invoice_start_date, o.review_mode,
+            o.billing_status, o.billing_next_at, o.billing_change, o.billing_change_at, o.billing_exempt,
             (SELECT COUNT(*) FROM users u WHERE u.org_id = o.id AND u.archived_at IS NULL) AS user_count,
             (SELECT email FROM users u WHERE u.org_id = o.id AND u.role = 'owner'
               ORDER BY u.created_at LIMIT 1) AS owner_email,
@@ -2206,6 +2230,7 @@ app.get('/api/admin/organizations', async (c) => {
     data: rows,
     range: { from, to },
     plan_caps: PLAN_INVOICE_CAPS,
+    billing_on: billingConfigured(c.env),
   })
 })
 
@@ -2715,6 +2740,25 @@ function billingConfigured(env: Bindings): boolean {
   return !!(env.PADDLE_CLIENT_TOKEN && env.PADDLE_PRICE_ESSENTIAL && env.PADDLE_PRICE_PRO)
 }
 
+// Does this account still have to add a card before using the app? Never where
+// payments are off (production until go-live), never for a super-admin (who
+// has no account, and "viewing as" is staff looking in), never for an account
+// marked "No payment needed" (billing_exempt, migration 0065 — every account
+// that existed before cards were asked for). Fail-open: a database without
+// 0064/0065 answers false, so a missed migration can't lock anyone out.
+async function cardNeeded(env: Bindings, me: SessionUser): Promise<boolean> {
+  if (!billingConfigured(env) || me.role === 'super_admin' || !me.org_id) return false
+  try {
+    const org = await env.DB.prepare('SELECT billing_status, billing_exempt FROM organizations WHERE id = ?')
+      .bind(me.org_id).first<{ billing_status: string | null; billing_exempt: number | null }>()
+    if (!org || org.billing_exempt) return false
+    return !BILLING_HAS_CARD.has(org.billing_status || '')
+  } catch (e) {
+    console.error('cardNeeded: could not read billing state, letting the request through', e)
+    return false
+  }
+}
+
 // GET /api/billing/status → { configured, card_needed, status, is_owner }
 // Polled by /start-trial.html while it waits for Paddle's webhook.
 app.get('/api/billing/status', async (c) => {
@@ -2725,11 +2769,10 @@ app.get('/api/billing/status', async (c) => {
   }
   const org = await c.env.DB.prepare('SELECT billing_status FROM organizations WHERE id = ?')
     .bind(me.org_id).first<{ billing_status: string | null }>()
-  const status = org?.billing_status || null
   return c.json({
     configured,
-    card_needed: configured && !BILLING_HAS_CARD.has(status || ''),
-    status,
+    card_needed: await cardNeeded(c.env, me),
+    status: org?.billing_status || null,
     is_owner: me.role === 'owner',
   })
 })
@@ -3168,6 +3211,27 @@ app.post('/api/admin/organizations/:id/review-mode', async (c) => {
   return c.json({
     ok: true, organization: { id: org.id, name: org.name }, review_mode: stored,
     reviewing_now: reviewsInvoices({ review_mode: stored, started_at: org.started_at }),
+  })
+})
+
+// ── "No payment needed" (billing plan step 4, migration 0065) ──
+// POST /api/admin/organizations/:id/billing-exempt   Body: { exempt: boolean }
+// On: the account is never asked for a card (free pilots, demo accounts, and
+// every account from before cards were required). Off: where payments are
+// switched on, it must have a Paddle subscription with a card to use the app.
+app.post('/api/admin/organizations/:id/billing-exempt', async (c) => {
+  if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)
+  const id = c.req.param('id')
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  if (typeof body.exempt !== 'boolean') return c.json({ error: 'exempt must be true or false.' }, 400)
+
+  const org = await c.env.DB.prepare('SELECT id, name, billing_status FROM organizations WHERE id = ?')
+    .bind(id).first<{ id: string; name: string; billing_status: string | null }>()
+  if (!org) return c.json({ error: 'Restaurant not found.' }, 404)
+  await c.env.DB.prepare('UPDATE organizations SET billing_exempt = ? WHERE id = ?').bind(body.exempt ? 1 : 0, id).run()
+  return c.json({
+    ok: true, organization: { id: org.id, name: org.name }, billing_exempt: body.exempt,
+    card_on_file: BILLING_HAS_CARD.has(org.billing_status || ''),
   })
 })
 
