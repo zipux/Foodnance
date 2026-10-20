@@ -138,6 +138,14 @@ t.check('...and the app opens', (await get('/api/tables/invoices', ownerJar)).st
 t.check('webhook found the account through the checkout\'s custom_data',
   sql(`SELECT paddle_subscription_id FROM organizations WHERE id = '${ORG}'`)[0]?.paddle_subscription_id === SUB);
 
+const rowOf = async () => ((await get('/api/admin/organizations', adminJar)).data?.data || []).find(o => o.id === ORG);
+let arow = await rowOf();
+t.check('the admin list says which plan Paddle charges for', arow?.billing_plan === 'pro' && arow?.plan === 'pro', JSON.stringify(arow));
+await post(`/api/admin/organizations/${ORG}/plan`, { plan: 'essential' }, adminJar);
+arow = await rowOf();
+t.check('plan changed after the card: on Essential, paying for Pro', arow?.plan === 'essential' && arow?.billing_plan === 'pro', JSON.stringify(arow));
+await post(`/api/admin/organizations/${ORG}/plan`, { plan: 'pro' }, adminJar);
+
 await webhook('subscription.past_due', '2026-11-03T10:05:00.000000Z', subData('past_due', { custom_data: null }));
 st = await get('/api/billing/status', ownerJar);
 t.check('past_due: still has a card (Paddle is retrying)', st.data.card_needed === false && st.data.status === 'past_due', JSON.stringify(st.data));
@@ -170,6 +178,17 @@ const row = (list.data?.data || []).find(o => o.id === ORG);
 t.check('the admin list carries payment state', list.data?.billing_on === true && row?.billing_exempt === 1 && row?.billing_status === 'canceled', JSON.stringify(row));
 r = await post(`/api/admin/organizations/${ORG}/billing-exempt`, { exempt: false }, adminJar);
 t.check('switched off again: shut again', r.status === 200 && r.data?.card_on_file === false && (await get('/api/tables/invoices', ownerJar)).status === 402);
+
+t.section('the plan picked on "Add a restaurant"');
+r = await post('/api/admin/organizations', { name: `Card Step Pro ${STAMP}`, owner_email: `pro-${STAMP}@example.test`, owner_name: 'Owner', plan: 'pro' }, adminJar);
+t.check('a restaurant created on Pro', r.data?.ok === true && r.data?.organization?.plan === 'pro', JSON.stringify(r.data));
+r = await post('/api/admin/organizations', { name: `Card Step Ess ${STAMP}`, owner_email: `ess-${STAMP}@example.test`, owner_name: 'Owner' }, adminJar);
+t.check('no plan sent: Essential, as before', r.data?.ok === true && r.data?.organization?.plan === 'essential', JSON.stringify(r.data));
+r = await post('/api/admin/organizations', { name: `Card Step Bad ${STAMP}`, owner_email: `bad-${STAMP}@example.test`, plan: 'gold' }, adminJar);
+t.check('any other plan: 400, nothing created', r.status === 400
+  && sql(`SELECT COUNT(*) n FROM organizations WHERE name = 'Card Step Bad ${STAMP}'`)[0]?.n === 0);
+r = await post('/api/admin/organizations', { name: `Card Step Com ${STAMP}`, owner_email: `com-${STAMP}@example.test`, account_type: 'commissary', plan: 'essential' }, adminJar);
+t.check('a commissary is Production whatever is sent', r.data?.ok === true && r.data?.organization?.plan === 'pro', JSON.stringify(r.data));
 
 t.section('the pages');
 const page = await fetch(`${BASE}/start-trial.html`);

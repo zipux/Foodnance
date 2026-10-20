@@ -510,7 +510,15 @@ page) and `login.html` send that person to `/start-trial.html`. Teammates are sh
 the owner (the page tells them to ask the owner). The admin Payment line reads
 `billing_*` in words (trial, first charge … / paid, next … / card failed / cancelled /
 signed up, no card yet). The admin list **selects** these columns: **apply 0064 and 0065
-before deploying** (by file / `--command`, as always). Locally, `dev:sandbox` keeps payments
+before deploying** (by file / `--command`, as always; applied to staging and production
+2026-10-20 by `--command`, unrecorded; pre-change production bookmark
+`000005f5-00000000-0000510a-68a3f99917223526ddef24022eac00f5`; production has no `PADDLE_*`
+vars yet, so payments are off there). **The plan is chosen on "Add a restaurant"**
+(`plan` on `POST /api/admin/organizations`, Essential/Pro; a commissary is always `pro`),
+because the card step charges for the plan the account is on when the owner gets there. The
+admin list's `billing_plan` (`paddlePlanOf`) is the plan Paddle is charging for; the Payment
+cell flags an account on one plan and paying for the other. Changing the plan never changes the
+Paddle subscription (fixed in Paddle's dashboard for now). Locally, `dev:sandbox` keeps payments
 off so other integration tests can make accounts; `dev:sandbox:billing` turns them on for
 `test:card-step`. Known gaps: Paddle `paused` (end of dunning) or a cancelled owner gets a
 new checkout rather than an "update your card" screen; no customer-facing billing page yet.

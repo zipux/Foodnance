@@ -58,7 +58,9 @@ t.check('admin.html reads plan_label rather than deriving it',
 
 t.section('a commissary is always on the Pro entitlement');
 t.check('created on pro',
-  /accountType === 'commissary' \? 'pro' : 'essential'/.test(src));
+  /accountType === 'commissary' \? 'pro' : askedPlan/.test(src));
+t.check('a restaurant\'s asked-for plan is only essential or pro',
+  /\['essential', 'pro'\]\.includes\(askedPlan\)/.test(src));
 t.check('the org INSERT actually writes the plan column',
   /INSERT INTO organizations \(id, name, account_type, plan\)/.test(src));
 t.check('the plan endpoint refuses to move a commissary off pro',

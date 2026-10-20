@@ -2128,6 +2128,7 @@ app.get('/api/admin/organizations', async (c) => {
             o.suspended_at, o.suspend_reason, o.plan, o.invoice_cap,
             o.started_at, o.invoice_start_date, o.review_mode,
             o.billing_status, o.billing_next_at, o.billing_change, o.billing_change_at, o.billing_exempt,
+            o.billing_price_id,
             (SELECT COUNT(*) FROM users u WHERE u.org_id = o.id AND u.archived_at IS NULL) AS user_count,
             (SELECT email FROM users u WHERE u.org_id = o.id AND u.role = 'owner'
               ORDER BY u.created_at LIMIT 1) AS owner_email,
@@ -2224,6 +2225,9 @@ app.get('/api/admin/organizations', async (c) => {
     ...o, plan_label: planLabel(o.plan, o.account_type), reviewing_now: reviewsInvoices(o),
     // The plan's own limit for THIS account (old accounts keep the old one).
     plan_cap: planInvoiceCap(o),
+    // Which plan Paddle is charging for, so the screen can flag an account on
+    // one plan and paying for the other (the plan was changed after the card).
+    billing_plan: paddlePlanOf(c.env, o.billing_price_id),
   }))
 
   return c.json({
@@ -2736,6 +2740,15 @@ app.post('/api/paddle/webhook', async (c) => {
 // operator's call (admin screen).
 const BILLING_HAS_CARD = new Set(['trialing', 'active', 'past_due'])
 
+// The plan a Paddle price id is for, in this environment. NULL = no price, or
+// one this deployment doesn't know (an old or hand-made price in Paddle).
+function paddlePlanOf(env: Bindings, priceId: string | null | undefined): 'essential' | 'pro' | null {
+  if (!priceId) return null
+  if (priceId === env.PADDLE_PRICE_PRO) return 'pro'
+  if (priceId === env.PADDLE_PRICE_ESSENTIAL) return 'essential'
+  return null
+}
+
 function billingConfigured(env: Bindings): boolean {
   return !!(env.PADDLE_CLIENT_TOKEN && env.PADDLE_PRICE_ESSENTIAL && env.PADDLE_PRICE_PRO)
 }
@@ -2817,6 +2830,7 @@ app.post('/api/admin/organizations', async (c) => {
   const password = String(body.owner_password || '')
   const inviting = password === ''
   const accountType = String(body.account_type || 'restaurant')
+  const askedPlan = String(body.plan || 'essential').toLowerCase()
 
   if (!name) return c.json({ error: 'Restaurant name is required.' }, 400)
   if (!email.includes('@')) return c.json({ error: 'A valid owner email is required.' }, 400)
@@ -2825,6 +2839,9 @@ app.post('/api/admin/organizations', async (c) => {
   }
   if (!['restaurant', 'commissary'].includes(accountType)) {
     return c.json({ error: 'Account type must be restaurant or commissary.' }, 400)
+  }
+  if (!['essential', 'pro'].includes(askedPlan)) {
+    return c.json({ error: 'Plan must be essential or pro.' }, 400)
   }
 
   const clash = await c.env.DB.prepare(`SELECT id FROM users WHERE email = ?`).bind(email).first()
@@ -2840,7 +2857,10 @@ app.post('/api/admin/organizations', async (c) => {
   // is a broken account, not a cheaper one. Its whole workflow is Produce Batch
   // and Pack Run drawing bins down, and those write inventory that only Pro can
   // then count, adjust or reconcile. See planLabel().
-  const plan = accountType === 'commissary' ? 'pro' : 'essential'
+  // A restaurant gets the plan picked on the form (the one they asked for), set
+  // before the invite goes out, because the card step charges for whatever plan
+  // the account is on when the owner gets there.
+  const plan = accountType === 'commissary' ? 'pro' : askedPlan
 
   // The owner's way in: either a ready-made login (legacy) or an invite.
   let ownerStatement: D1PreparedStatement

@@ -244,10 +244,17 @@
                 <option value="restaurant">Restaurant</option>
                 <option value="commissary">Commissary</option>
               </select>
-              <!-- The plan follows from this, so there is no plan field above:
-                   a restaurant starts on Essential and is moved from the table
-                   below; a commissary is created on Production and stays. -->
               <small class="hint" id="accountTypePlanHint"></small>
+            </div>
+            <!-- Set before the invite goes out: the card step charges for the
+                 plan the account is on when the owner gets there. A commissary
+                 is always Production, so this hides for one. -->
+            <div class="field" id="planField">
+              <label for="plan">Plan (the one they asked for)</label>
+              <select id="plan">
+                <option value="essential">Essential</option>
+                <option value="pro">Pro</option>
+              </select>
             </div>
             <button type="submit" class="btn btn-primary" id="createBtn">
               <i class="fas fa-paper-plane"></i> Create &amp; send invite
@@ -374,14 +381,14 @@
       return [...bytes].map(b => alphabet[b % alphabet.length]).join('');
     }
 
-    // Which plan the account will be created on. The server decides this from
-    // the account type (a commissary is created on Production); this only says
-    // so out loud, so the choice isn't a surprise discovered in the table below.
+    // Which plan the account will be created on. A commissary is always
+    // Production (the server forces it), so the plan box only shows for a restaurant.
     function syncPlanHint() {
       const commissary = $('accountType').value === 'commissary';
+      $('planField').style.display = commissary ? 'none' : '';
       $('accountTypePlanHint').textContent = commissary
         ? 'Created on Production — the full feature set, plus batch and pack. No plan choice.'
-        : 'Created on Essential. Move them to Pro in the table below.';
+        : 'Their trial card is signed up for the plan below.';
     }
     $('accountType').addEventListener('change', syncPlanHint);
     syncPlanHint();
@@ -399,6 +406,7 @@
         owner_name:     $('ownerName').value.trim(),
         owner_email:    $('ownerEmail').value.trim(),
         account_type:   $('accountType').value,
+        plan:           $('plan').value,
       };
 
       try {
@@ -986,7 +994,15 @@
       const hasCard = st === 'trialing' || st === 'active' || st === 'past_due';
       let sub = exempt && !st ? 'never asked for a card' : paymentLine(o);
       if (!billingOn) sub += ' · payments off here';
-      const warn = billingOn && !exempt && !hasCard;
+      // On one plan, paying for the other: the plan was changed after the card.
+      // Fixed in Paddle's dashboard (the subscription's price); nothing here moves it.
+      const plan = (o.plan || 'essential').toLowerCase();
+      const mismatch = hasCard && o.billing_plan && o.billing_plan !== plan
+        && (o.account_type || '').toLowerCase() !== 'commissary';
+      if (mismatch) {
+        sub += ` · paying for ${o.billing_plan === 'pro' ? 'Pro' : 'Essential'}, on ${plan === 'pro' ? 'Pro' : 'Essential'} — change the price in Paddle`;
+      }
+      const warn = mismatch || (billingOn && !exempt && !hasCard);
       const opt = (v, label) => `<option value="${v}"${(exempt ? 'free' : 'card') === v ? ' selected' : ''}>${label}</option>`;
       return `<td class="waiting"><select class="planpick${exempt ? '' : ' pro'}" data-pay-for="${esc(o.id)}"
                  data-name="${esc(o.name)}" data-current="${exempt ? 'free' : 'card'}">
