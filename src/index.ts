@@ -5192,14 +5192,25 @@ app.put('/api/suppliers/:id', async (c) => {
   if (!current) return c.json({ error: 'Supplier not found' }, 404)
   const oldName = current.name
 
-  // Update the supplier row itself
-  await c.env.DB.prepare(
+  const updateRow = c.env.DB.prepare(
     'UPDATE suppliers SET name = ?, contact = ?, email = ?, notes = ? WHERE id = ? AND org_id IS ?'
-  ).bind(newName, body.contact ?? '', body.email ?? '', body.notes ?? '', id, org).run()
+  ).bind(newName, body.contact ?? '', body.email ?? '', body.notes ?? '', id, org)
 
   // Cascade only when the name actually changed (ignoring case/space)
-  if (oldName.trim().toLowerCase() !== newName.toLowerCase()) {
+  if (oldName.trim().toLowerCase() === newName.toLowerCase()) {
+    await updateRow.run()
+  } else {
+    // vendor_fee_templates.vendor_name is UNIQUE within a business (0066) —
+    // renaming into one this business already has would violate it, so drop
+    // the old row in that case.
+    const clashTmpl = await c.env.DB.prepare(
+      'SELECT id FROM vendor_fee_templates WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?)) AND org_id IS ?'
+    ).bind(newName, org).first<{ id: string }>()
+
+    // One batch (one transaction), so a rename can't stop half-way with the
+    // supplier renamed and its invoices or fees still under the old name.
     await c.env.DB.batch([
+      updateRow,
       // Name-matched, so org-scoped: renaming your "Sysco" must not rewrite
       // another restaurant's invoices and purchase history.
       c.env.DB.prepare(
@@ -5211,22 +5222,14 @@ app.put('/api/suppliers/:id', async (c) => {
       c.env.DB.prepare(
         'UPDATE product_mappings SET vendor_name = ? WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?)) AND org_id IS ?'
       ).bind(newName, oldName, org),
+      clashTmpl
+        ? c.env.DB.prepare(
+            'DELETE FROM vendor_fee_templates WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?)) AND org_id IS ?'
+          ).bind(oldName, org)
+        : c.env.DB.prepare(
+            'UPDATE vendor_fee_templates SET vendor_name = ? WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?)) AND org_id IS ?'
+          ).bind(newName, oldName, org),
     ])
-
-    // vendor_fee_templates.vendor_name is UNIQUE — renaming into an existing
-    // one would violate the constraint, so drop the old row in that case.
-    const clashTmpl = await c.env.DB.prepare(
-      'SELECT id FROM vendor_fee_templates WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?)) AND org_id IS ?'
-    ).bind(newName, org).first<{ id: string }>()
-    if (clashTmpl) {
-      await c.env.DB.prepare(
-        'DELETE FROM vendor_fee_templates WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?)) AND org_id IS ?'
-      ).bind(oldName, org).run()
-    } else {
-      await c.env.DB.prepare(
-        'UPDATE vendor_fee_templates SET vendor_name = ? WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM(?)) AND org_id IS ?'
-      ).bind(newName, oldName, org).run()
-    }
   }
 
   return c.json({ id, name: newName, contact: body.contact ?? '', email: body.email ?? '', notes: body.notes ?? '' })

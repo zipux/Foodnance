@@ -528,6 +528,19 @@ checkout shows a quantity picker). **Live will need the same three.** Verified e
 staging with the test card (BC: CA$0 today, CA$88.48 from day 15). `npm run test:card-step`
 (needs the sandbox and the four vars in `.dev.vars`).
 
+### Fee templates are per business (2026-10-20, migration `0066`)
+
+`vendor_fee_templates.vendor_name` was `UNIQUE` across **every** account (0005, from before
+org scoping), so a second business could never save fees for a supplier name another business
+already had: the invoice screen's save failed silently (the fees were never remembered) and a
+supplier rename into that name 500'd after part of the rename. 0066 rebuilt the table with a
+unique index on `(COALESCE(org_id,''), LOWER(TRIM(vendor_name)))`, the routes' own lookup key,
+and `PUT /api/suppliers/:id` now does the whole rename in one `DB.batch()`. Applied to staging
+and production 2026-10-20 by `--command` (one multi-statement command; unrecorded; rows checked
+identical to a JSON backup; pre-change production bookmark
+`00000600-00000000-0000510a-9a687dcab62e027b80c68c24e8b8b507`).
+`npm run test:fee-template` (needs the sandbox and 0066 applied locally).
+
 ### Tests
 
 ```bash
@@ -555,6 +568,7 @@ npm run test:stock-log      # stock movement log: server filters, Stock after, l
 npm run test:same-as        # "Same as…?" asked once: remembered wordings, per supplier — needs the sandbox
 npm run test:paddle-webhook # Paddle webhook: signature, out-of-order events, account matching — needs the sandbox (0064 applied locally)
 npm run test:card-step      # card step + no-card lock + "No payment needed" — needs `npm run dev:sandbox:billing` (0064/0065 applied locally)
+npm run test:fee-template   # fee templates per business, supplier rename — needs the sandbox (0066 applied locally)
 ```
 
 **The account purge** (`DELETE /api/admin/organizations/:id`, admin-screen button) is
