@@ -16,7 +16,15 @@
 		// Origin used in emailed links (owner invites), so they can never point at
 		// the pages.dev duplicate. Deliberately NOT set under env.preview: there the
 		// request's own origin is used, which keeps staging links on staging.
-		"PUBLIC_URL": "https://foodnance.com"
+		"PUBLIC_URL": "https://foodnance.com",
+		// Paddle LIVE (switched on 2026-10-21, after Paddle approved the account).
+		// Public by design: the client token can only open a checkout. With these
+		// set, a new account's owner must add a card before using the app; every
+		// account that existed before 0065 is billing_exempt.
+		"PADDLE_ENV": "production",
+		"PADDLE_CLIENT_TOKEN": "live_779f5af78720cee93cf00aec25e",
+		"PADDLE_PRICE_ESSENTIAL": "pri_01m5cmwbdwcrft7cxfeb1wc592",
+		"PADDLE_PRICE_PRO": "pri_01m5cmt3gc0ep0kstkcha7rr35"
 	},
 	"d1_databases": [
 		{
