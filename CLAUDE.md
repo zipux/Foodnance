@@ -537,6 +537,24 @@ in the subject on staging. Checked on staging with a Paddle sandbox simulation (
 attempt failed with `transaction_default_checkout_url_not_set` because it hadn't saved before
 the domain was approved.
 
+### Settings → Billing: card and receipts (added 2026-10-21, no migration)
+
+Owner only (`billingOwnerOrg()`, 403 for anyone else, so the box stays hidden for them).
+`GET /api/billing/summary` = plan, status words, next payment, scheduled cancel/pause, and the
+card on file. The card comes from the subscription's **latest transaction with a captured or
+authorized payment** (`billingCard()`), because Paddle's saved-payment-methods list comes back
+empty for a card given at checkout (checked on the sandbox). `POST /api/billing/update-card`
+asks Paddle for `/subscriptions/:id/update-payment-method-transaction` (CA$0 while trialing or
+paid; the failed charge itself while past due) and Paddle.js opens it by `transactionId`.
+`POST /api/billing/portal` makes a customer-portal session (receipts, invoices, cancelling),
+opened in a tab that is created inside the click so it isn't blocked as a pop-up. These are
+the only routes calling Paddle's API (`paddleApi()`, base URL by `PADDLE_ENV`), with secret
+**`PADDLE_API_KEY`** per environment (4 read / 2 write; the **live key expires 19 Jan 2027**).
+A Paddle failure is 503 with plain words, never 502. The subscription is still only written by
+the webhook. An account marked "No payment needed" with no subscription gets one plain line.
+Tested end to end locally against the sandbox (trial with 4242, update to 5555…4444, portal
+opened) and by `test:roles` (who may reach it).
+
 ### Team roles: Owner / Manager / Kitchen staff (added 2026-10-21, migration `0067`)
 
 Before this every teammate was stored as `owner` with full access. Now `users.role` and

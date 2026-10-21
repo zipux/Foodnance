@@ -153,6 +153,16 @@ t.check('/api/team carries roles and the saved switches',
   team?.roles?.settings?.kitchen?.pnl === true && team?.roles?.settings?.managers_edit_kitchen === false
   && team?.users?.some(u => u.id === kit.id && u.role === 'kitchen'));
 
+t.section('billing is the owner\'s');
+const ownBill = await call('GET', '/api/billing/summary', null, owner);
+t.check('the owner reads the Billing box', ownBill.status === 200 && typeof ownBill.data?.plan_label === 'string');
+t.check('a manager cannot', (await call('GET', '/api/billing/summary', null, mgr.j)).status === 403);
+t.check('kitchen staff cannot', (await call('GET', '/api/billing/summary', null, kit.j)).status === 403);
+t.check('a manager cannot open the card window', (await call('POST', '/api/billing/update-card', {}, mgr.j)).status === 403);
+t.check('a manager cannot open the receipts page', (await call('POST', '/api/billing/portal', {}, mgr.j)).status === 403);
+t.check('the owner with no subscription gets a plain refusal, not a Paddle call',
+  (await call('POST', '/api/billing/update-card', {}, owner)).status === 409);
+
 t.section('changing a role');
 t.check('a manager cannot change roles', (await call('POST', `/api/team/${kit.id}/role`, { role: 'manager' }, mgr.j)).status === 403);
 t.check("the owner's own role can't be changed", (await call('POST', `/api/team/${ownerId}/role`, { role: 'kitchen' }, owner)).status === 400);

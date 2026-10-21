@@ -10,6 +10,7 @@ let currentUserId = null;
 document.addEventListener('DOMContentLoaded', async () => {
   await loadAccount();
   loadPlan();
+  loadBilling();
   await loadTeam();
 
   document.getElementById('changePwBtn').addEventListener('click', () => {
@@ -107,6 +108,136 @@ async function loadPlan() {
     // else is a real failure worth saying so.
     if (/No organization/i.test(e.message || '')) document.getElementById('planCard').classList.add('hidden');
     else body.innerHTML = `<p class="team-sub">Could not load your plan — ${esc(e.message || 'try again')}</p>`;
+  }
+}
+
+// ─── Billing (owner only) ─────────────────────────────────────
+// GET /api/billing/summary answers 403 for anyone but the owner, so the box
+// simply stays hidden for them. Where payments are off and the account isn't
+// "no payment needed", there is nothing to show either.
+const CARD_BRANDS = { visa: 'Visa', mastercard: 'Mastercard', american_express: 'American Express',
+  discover: 'Discover', jcb: 'JCB', diners_club: 'Diners Club', union_pay: 'UnionPay', maestro: 'Maestro' };
+
+function billingDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return isNaN(d) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+function billingCardText(card) {
+  if (!card) return '';
+  if (card.type === 'paypal') return 'PayPal';
+  if (card.type !== 'card') return esc(card.type);
+  const brand = CARD_BRANDS[card.brand] || (card.brand ? card.brand[0].toUpperCase() + card.brand.slice(1) : 'Card');
+  const exp = card.expiry_month && card.expiry_year
+    ? `, expires ${String(card.expiry_month).padStart(2, '0')}/${String(card.expiry_year).slice(-2)}` : '';
+  return `${esc(brand)} ending ${esc(card.last4)}${esc(exp)}`;
+}
+
+function billingStatusText(b) {
+  const next = billingDate(b.next_at);
+  if (b.change === 'cancel' && b.change_at) return `Cancels on ${billingDate(b.change_at)}. Nothing more will be charged.`;
+  if (b.change === 'pause' && b.change_at) return `Pauses on ${billingDate(b.change_at)}.`;
+  switch (b.status) {
+    case 'trialing': return next ? `Free trial. First payment on ${next}.` : 'Free trial.';
+    case 'active':   return next ? `Paid up. Next payment on ${next}.` : 'Paid up.';
+    case 'past_due': return 'Your last payment didn’t go through.';
+    case 'paused':   return 'Paused. No payments are being taken.';
+    case 'canceled': return 'Cancelled.';
+    default:         return 'No card on file yet.';
+  }
+}
+
+async function loadBilling() {
+  const card = document.getElementById('billingCard');
+  const body = document.getElementById('billingBody');
+  let b;
+  try { b = await apiGet('billing/summary'); }
+  catch (e) { card.classList.add('hidden'); return; }   // not the owner, or no account
+  if (!b.configured && !b.exempt) { card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+
+  if (b.exempt && !b.has_subscription) {
+    body.innerHTML = `<p class="team-sub" style="font-size:.9rem">This account is set up without online billing, so there is no card to manage. Questions about it go to <a href="mailto:billing@foodnance.com">billing@foodnance.com</a>.</p>`;
+    return;
+  }
+
+  const rows = [
+    ['Plan', esc(b.plan_label)],
+    ['Status', esc(billingStatusText(b))],
+  ];
+  if (b.card) rows.push(['Card', billingCardText(b.card)]);
+  else if (b.card_unavailable) rows.push(['Card', '<span class="team-sub">Couldn’t load it just now.</span>']);
+  body.innerHTML = `
+    ${b.status === 'past_due' ? `<div class="billing-warn"><i class="fas fa-triangle-exclamation"></i>
+      Your last payment didn’t go through. Our payment provider will try again; updating your card now fixes it straight away.</div>` : ''}
+    ${rows.map(([k, v]) => `<div class="billing-row"><span class="k">${k}</span><span>${v}</span></div>`).join('')}
+    <div class="billing-actions">
+      ${b.can_update_card ? `<button class="btn btn-primary" id="updateCardBtn"><i class="fas fa-credit-card"></i> Update card</button>` : ''}
+      ${b.can_open_portal ? `<button class="btn btn-secondary" id="billingPortalBtn"><i class="fas fa-receipt"></i> Receipts and billing</button>` : ''}
+    </div>
+    <p class="team-sub billing-note">Payments are handled by Paddle, our reseller. We never see your card number.
+      Receipts and billing opens Paddle’s page, where you can download invoices or cancel.</p>`;
+  document.getElementById('updateCardBtn')?.addEventListener('click', updateCard);
+  document.getElementById('billingPortalBtn')?.addEventListener('click', openBillingPortal);
+}
+
+let _paddleReady = null;
+function loadPaddleJs(environment, token) {
+  if (_paddleReady) return _paddleReady;
+  _paddleReady = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.paddle.com/paddle/v2/paddle.js';
+    s.onload = () => {
+      if (environment === 'sandbox') window.Paddle.Environment.set('sandbox');
+      window.Paddle.Initialize({ token, eventCallback: onPaddleEvent });
+      resolve(window.Paddle);
+    };
+    s.onerror = () => { _paddleReady = null; reject(new Error('Could not load the payment window. Check your connection and try again.')); };
+    document.head.appendChild(s);
+  });
+  return _paddleReady;
+}
+
+function onPaddleEvent(ev) {
+  if (ev?.name !== 'checkout.completed') return;
+  setTimeout(() => { try { window.Paddle.Checkout.close(); } catch (_) {} }, 1500);
+  showToast('Card updated.', 'success');
+  // Paddle's confirmation reaches the server a moment later.
+  setTimeout(loadBilling, 4000);
+}
+
+async function updateCard() {
+  const btn = document.getElementById('updateCardBtn');
+  btn.disabled = true;
+  try {
+    const d = await apiPost('billing/update-card', {});
+    const Paddle = await loadPaddleJs(d.environment, d.client_token);
+    Paddle.Checkout.open({
+      transactionId: d.transaction_id,
+      settings: { displayMode: 'overlay', theme: 'light', locale: 'en', allowLogout: false },
+    });
+  } catch (e) {
+    showToast(e.message || 'Could not open the payment window.', 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function openBillingPortal() {
+  const btn = document.getElementById('billingPortalBtn');
+  // Opened now, inside the click, or the browser blocks it as a pop-up; it is
+  // pointed at Paddle's page once the link arrives.
+  const win = window.open('', '_blank');
+  btn.disabled = true;
+  try {
+    const d = await apiPost('billing/portal', {});
+    if (win) { win.opener = null; win.location = d.url; } else { location.href = d.url; }
+  } catch (e) {
+    if (win) win.close();
+    showToast(e.message || 'Could not open the billing page.', 'error');
+  } finally {
+    btn.disabled = false;
   }
 }
 

@@ -26,6 +26,7 @@ type Bindings = {
   // notification destination — sandbox on staging, live on production. Without
   // it the webhook answers 500 and Paddle keeps retrying; nothing else breaks.
   PADDLE_WEBHOOK_SECRET?: string
+  PADDLE_API_KEY?: string         // server-side key for the Settings billing box (4 read, 2 write)
   // The card step after an owner sets their password. Plain vars in
   // wrangler.jsonc, public by design (Paddle.js needs them in the page). All
   // three unset = billing off: no card step, exactly as before. Set on staging
@@ -2964,6 +2965,154 @@ app.get('/api/billing/checkout', async (c) => {
     org_name: me.org_name,
     custom_data: { org_id: me.org_id, org_sig: await paddleOrgSig(c.env, me.org_id) },
   })
+})
+
+// ── Settings → Billing (owner only) ───────────────────────────
+// What the owner sees about their subscription, the card it is charged to, and
+// two ways to change things: Paddle's "update card" window, and Paddle's own
+// customer page (receipts, invoices, cancelling). These are the only routes that
+// call Paddle's API, with PADDLE_API_KEY (Subscriptions, Customers, Payment
+// methods read; Transactions read + write; Customer portal sessions write).
+// The subscription itself is still only ever written by the signed webhook.
+//
+// A Paddle failure answers 503 with plain words, never 502 (on foodnance.com
+// Cloudflare would swap a 502 for its own error page).
+function paddleApiBase(env: Bindings): string {
+  return env.PADDLE_ENV === 'production' ? 'https://api.paddle.com' : 'https://sandbox-api.paddle.com'
+}
+
+async function paddleApi(env: Bindings, path: string, init: { method?: string; body?: unknown } = {}): Promise<any> {
+  const r = await fetch(paddleApiBase(env) + path, {
+    method: init.method || 'GET',
+    headers: {
+      authorization: `Bearer ${env.PADDLE_API_KEY}`,
+      'content-type': 'application/json',
+      'paddle-version': '1',
+    },
+    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    signal: AbortSignal.timeout(10000),
+  })
+  const data = await r.json().catch(() => null) as any
+  if (!r.ok) {
+    console.error('paddleApi:', init.method || 'GET', path, r.status, data?.error?.code, data?.error?.detail)
+    throw new Error(`Paddle answered ${r.status}`)
+  }
+  return data?.data
+}
+
+const BILLING_UNAVAILABLE = "We couldn't reach our payment provider just now. Please try again in a few minutes."
+
+type BillingOrg = {
+  name: string; plan: string | null; account_type: string | null; billing_exempt: number | null
+  billing_status: string | null; billing_next_at: string | null; billing_change: string | null
+  billing_change_at: string | null; billing_price_id: string | null
+  paddle_customer_id: string | null; paddle_subscription_id: string | null
+}
+
+// The owner of the signed-in person's business, or a refusal.
+async function billingOwnerOrg(c: any): Promise<{ account: BillingOrg; orgId: string } | Response> {
+  const me = c.get('user') as SessionUser
+  if (me.role !== 'owner' || !me.org_id) {
+    return c.json({ error: 'Only the owner of the account can see or change billing.' }, 403)
+  }
+  const account = await c.env.DB.prepare(
+    `SELECT name, plan, account_type, billing_exempt, billing_status, billing_next_at, billing_change,
+            billing_change_at, billing_price_id, paddle_customer_id, paddle_subscription_id
+       FROM organizations WHERE id = ?`,
+  ).bind(me.org_id).first<BillingOrg>()
+  if (!account) return c.json({ error: 'Account not found.' }, 404)
+  return { account, orgId: me.org_id }
+}
+
+// The card the subscription is charged to: read from its latest transaction that
+// was paid by a method, because Paddle's "saved payment methods" list leaves out
+// cards given at checkout (checked on the sandbox 2026-10-21). After an update,
+// the update's own transaction is the latest, so the new card shows.
+async function billingCard(env: Bindings, subscriptionId: string): Promise<Record<string, unknown> | null> {
+  const txns = await paddleApi(env, `/transactions?subscription_id=${encodeURIComponent(subscriptionId)}&order_by=id[DESC]&per_page=10`)
+  for (const t of Array.isArray(txns) ? txns : []) {
+    for (const p of Array.isArray(t?.payments) ? t.payments : []) {
+      const m = p?.method_details
+      if (!m || !['captured', 'authorized'].includes(p?.status)) continue
+      if (m.type === 'card' && m.card) {
+        return { type: 'card', brand: String(m.card.type || ''), last4: String(m.card.last4 || ''),
+                 expiry_month: m.card.expiry_month ?? null, expiry_year: m.card.expiry_year ?? null }
+      }
+      if (m.type) return { type: String(m.type) }
+    }
+  }
+  return null
+}
+
+// GET /api/billing/summary → the Settings Billing box.
+app.get('/api/billing/summary', async (c) => {
+  const got = await billingOwnerOrg(c)
+  if (got instanceof Response) return got
+  const { account } = got
+  const paying = paddlePlanOf(c.env, account.billing_price_id)
+  const out: Record<string, unknown> = {
+    configured: billingConfigured(c.env),
+    exempt: !!account.billing_exempt,
+    plan_label: planLabel(paying || account.plan, account.account_type),
+    status: account.billing_status,
+    next_at: account.billing_next_at,
+    change: account.billing_change,
+    change_at: account.billing_change_at,
+    has_subscription: !!account.paddle_subscription_id,
+    can_update_card: !!(c.env.PADDLE_API_KEY && account.paddle_subscription_id && BILLING_HAS_CARD.has(account.billing_status || '')),
+    can_open_portal: !!(c.env.PADDLE_API_KEY && account.paddle_customer_id),
+    card: null,
+  }
+  if (c.env.PADDLE_API_KEY && account.paddle_subscription_id) {
+    // The box still shows everything else if Paddle can't be reached.
+    try { out.card = await billingCard(c.env, account.paddle_subscription_id) } catch (_) { out.card_unavailable = true }
+  }
+  return c.json(out)
+})
+
+// POST /api/billing/update-card → a Paddle transaction id for Paddle.js to open.
+// Paddle makes it: a CA$0 one while trialing or paid up, or the failed charge
+// itself while past due, so a new card also settles what is owed.
+app.post('/api/billing/update-card', async (c) => {
+  const got = await billingOwnerOrg(c)
+  if (got instanceof Response) return got
+  const { account } = got
+  if (!c.env.PADDLE_API_KEY || !account.paddle_subscription_id || !BILLING_HAS_CARD.has(account.billing_status || '')) {
+    return c.json({ error: 'There is no subscription to update the card on.' }, 409)
+  }
+  try {
+    const txn = await paddleApi(c.env, `/subscriptions/${encodeURIComponent(account.paddle_subscription_id)}/update-payment-method-transaction`)
+    if (!txn?.id) throw new Error('no transaction id')
+    return c.json({
+      transaction_id: txn.id,
+      environment: c.env.PADDLE_ENV === 'production' ? 'production' : 'sandbox',
+      client_token: c.env.PADDLE_CLIENT_TOKEN,
+    })
+  } catch (_) {
+    return c.json({ error: BILLING_UNAVAILABLE }, 503)
+  }
+})
+
+// POST /api/billing/portal → a signed-in link to Paddle's customer page
+// (receipts, invoices, cancelling). Temporary, so it is made on each click.
+app.post('/api/billing/portal', async (c) => {
+  const got = await billingOwnerOrg(c)
+  if (got instanceof Response) return got
+  const { account } = got
+  if (!c.env.PADDLE_API_KEY || !account.paddle_customer_id) {
+    return c.json({ error: 'There is no billing record for this account yet.' }, 409)
+  }
+  try {
+    const session = await paddleApi(c.env, `/customers/${encodeURIComponent(account.paddle_customer_id)}/portal-sessions`, {
+      method: 'POST',
+      body: account.paddle_subscription_id ? { subscription_ids: [account.paddle_subscription_id] } : {},
+    })
+    const url = session?.urls?.general?.overview
+    if (typeof url !== 'string' || !/^https:\/\//.test(url)) throw new Error('no portal url')
+    return c.json({ url })
+  } catch (_) {
+    return c.json({ error: BILLING_UNAVAILABLE }, 503)
+  }
 })
 
 // POST /api/admin/organizations
