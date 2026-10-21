@@ -134,6 +134,18 @@ app.use('/api/*', async (c, next) => {
         plan: (me.org_plan || 'essential').toLowerCase(),
       }, 403)
     }
+
+    // Team roles (0067): what this person's role is allowed on this request.
+    const role = teamRoleOf(me.role)
+    if (role !== 'owner') {
+      const need = await roleNeedFor(c, path, c.req.method)
+      if (need === 'not_kitchen') {
+        if (role === 'kitchen') return permissionRefused(c, null)
+      } else if (need && !(need.managerOpen && role === 'manager')) {
+        const mine = permissionsOf(me)
+        if (!need.any.some(p => mine.has(p))) return permissionRefused(c, need.any[0])
+      }
+    }
   }
 
   // No card, no app (billing plan step 3). Where payments are switched on, an
@@ -287,6 +299,8 @@ type SessionUser = {
   // Plan tier (migration 0039). Read per request for the same reason: an upgrade
   // takes effect on the customer's next click, with no re-login.
   org_plan: string | null;
+  // This business's role switches (migration 0067), JSON; NULL = defaults.
+  org_role_permissions: string | null;
 }
 
 // The columns that make up a SessionUser.
@@ -303,7 +317,8 @@ const SESSION_USER_COLUMNS = `
        o.suspended_at   AS org_suspended_at,
        o.archived_at    AS org_archived_at,
        o.suspend_reason AS org_suspend_reason,
-       o.plan           AS org_plan`
+       o.plan           AS org_plan,
+       o.role_permissions AS org_role_permissions`
 
 // Resolves the caller from their cookie, or null when signed out. Reads the
 // user fresh each time so archiving a user takes effect immediately.
@@ -1399,6 +1414,10 @@ function publicUser(u: SessionUser) {
     features: u.role === 'super_admin'
       ? [...PRO_FEATURES]
       : [...planFeatures(u.org_plan)],
+    // Team roles (0067): what the screens may offer this person. The server
+    // checks every request itself; this only hides what would be refused.
+    team_role: teamRoleOf(u.role),
+    permissions: [...permissionsOf(u)],
   }
 }
 
@@ -1778,11 +1797,9 @@ app.post('/api/auth/change-password', async (c) => {
 // ══════════════════════════════════════════════════════════════
 // TEAM — an owner invites teammates into their own organization.
 //
-// Invited users get IDENTICAL access to the owner. `role` already carries no
-// authorization meaning anywhere in this file (every gate is org_id plus the
-// super_admin exemption via orgOf()) — so there is no new permission logic
-// here, only the honest choice to store 'owner' rather than invent a
-// restricted 'member' this codebase would never actually enforce.
+// Each invite carries the role the person will have (team roles, 0067): Manager
+// or Kitchen staff, never above the inviter's own. What each role may do is in
+// ROLE_DEFAULTS / roleSettings() and is checked in the /api/* middleware.
 //
 // Copy-link, not email: the owner generates a link and shares it however
 // they like (text, WhatsApp, in person). Matches migrations/0034's own
@@ -1835,11 +1852,89 @@ app.get('/api/team', async (c) => {
   ).bind(org).all()
 
   const invites = await c.env.DB.prepare(
-    `SELECT id, email, name, token, created_at, expires_at
+    `SELECT id, email, name, role, token, created_at, expires_at
        FROM invites WHERE org_id = ? AND accepted_at IS NULL ORDER BY created_at DESC`,
   ).bind(org).all()
 
-  return c.json({ users: users.results || [], invites: invites.results || [] })
+  // The switches (team roles, 0067) and which of them this person may change.
+  const orgRow = await c.env.DB.prepare('SELECT role_permissions FROM organizations WHERE id = ?')
+    .bind(org).first<{ role_permissions: string | null }>()
+  const settings = roleSettings(orgRow?.role_permissions)
+  const me = c.get('user') as SessionUser
+  const myRole = teamRoleOf(me.role)
+  const isOwner = myRole === 'owner' || myRole === 'super_admin'
+  const roleOf = (r: Record<string, unknown>) => ({ ...r, role: teamRoleOf(String(r.role || '')) })
+
+  return c.json({
+    users: (users.results || []).map(roleOf),
+    invites: (invites.results || []).map(roleOf),
+    roles: {
+      my_role: myRole,
+      switches: ROLE_PERMISSIONS,
+      defaults: ROLE_DEFAULTS,
+      settings,
+      can_edit: { manager: isOwner, kitchen: isOwner || (myRole === 'manager' && settings.managers_edit_kitchen) },
+      can_change_roles: isOwner,
+      invitable: invitableRoles(myRole),
+    },
+  })
+})
+
+// The roles this person may give someone they invite: never above their own.
+function invitableRoles(myRole: TeamRole | 'super_admin'): TeamRole[] {
+  if (myRole === 'owner' || myRole === 'super_admin' || myRole === 'manager') return ['manager', 'kitchen']
+  return ['kitchen']
+}
+
+// POST /api/team/:id/role  { role: 'manager' | 'kitchen' } — owner only. The
+// owner's own role never changes here (handing the account over is not built).
+app.post('/api/team/:id/role', async (c) => {
+  const org = orgOf(c)
+  if (!org) return c.json({ error: 'No organization to manage.' }, 400)
+  const me = c.get('user') as SessionUser
+  const myRole = teamRoleOf(me.role)
+  if (myRole !== 'owner' && myRole !== 'super_admin') return permissionRefused(c, null)
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const role = String(body.role || '')
+  if (role !== 'manager' && role !== 'kitchen') return c.json({ error: 'Choose Manager or Kitchen staff.' }, 400)
+  const { id } = c.req.param()
+  const target = await c.env.DB.prepare(
+    'SELECT id, role FROM users WHERE id = ? AND org_id = ? AND archived_at IS NULL',
+  ).bind(id, org).first<{ id: string; role: string }>()
+  if (!target) return c.json({ error: 'Teammate not found.' }, 404)
+  if (teamRoleOf(target.role) === 'owner') return c.json({ error: "The owner's role can't be changed." }, 400)
+  await c.env.DB.prepare('UPDATE users SET role = ? WHERE id = ? AND org_id = ?').bind(role, id, org).run()
+  return c.json({ ok: true, role })
+})
+
+// POST /api/team/permissions
+//   { role: 'manager' | 'kitchen', permissions: { pnl: true, ... }, managers_edit_kitchen?: bool }
+// The owner changes either role; a manager only Kitchen staff, and only while
+// the owner allows it. managers_edit_kitchen is the owner's alone.
+app.post('/api/team/permissions', async (c) => {
+  const org = orgOf(c)
+  if (!org) return c.json({ error: 'No organization to manage.' }, 400)
+  const me = c.get('user') as SessionUser
+  const myRole = teamRoleOf(me.role)
+  const isOwner = myRole === 'owner' || myRole === 'super_admin'
+  const body = await c.req.json().catch(() => ({})) as Record<string, any>
+  const role = String(body.role || '')
+  if (role !== 'manager' && role !== 'kitchen') return c.json({ error: 'Unknown role.' }, 400)
+
+  const row = await c.env.DB.prepare('SELECT role_permissions FROM organizations WHERE id = ?')
+    .bind(org).first<{ role_permissions: string | null }>()
+  const settings = roleSettings(row?.role_permissions)
+  const allowed = isOwner || (myRole === 'manager' && role === 'kitchen' && settings.managers_edit_kitchen)
+  if (!allowed) return permissionRefused(c, null)
+  if ('managers_edit_kitchen' in body && !isOwner) return permissionRefused(c, null)
+
+  const incoming = body.permissions && typeof body.permissions === 'object' ? body.permissions : {}
+  for (const p of ROLE_PERMISSIONS) if (typeof incoming[p] === 'boolean') settings[role][p] = incoming[p]
+  if (typeof body.managers_edit_kitchen === 'boolean') settings.managers_edit_kitchen = body.managers_edit_kitchen
+
+  await c.env.DB.prepare('UPDATE organizations SET role_permissions = ? WHERE id = ?')
+    .bind(JSON.stringify(settings), org).run()
+  return c.json({ ok: true, settings })
 })
 
 // POST /api/team/invite  { email, name } — invite a teammate BY EMAIL (see
@@ -1856,6 +1951,11 @@ app.post('/api/team/invite', async (c) => {
   const email = normalizeEmail(body.email)
   const name = String(body.name || '').trim()
   const me = c.get('user') as SessionUser
+  // Team roles (0067): the role they'll have, never above the inviter's own.
+  const role = String(body.role || 'kitchen') as TeamRole
+  if (!invitableRoles(teamRoleOf(me.role)).includes(role)) {
+    return c.json({ error: "You can't invite someone with that role." }, 403)
+  }
   if (!name) return c.json({ error: 'A name is required.' }, 400)
   if (!email.includes('@')) return c.json({ error: 'A valid email is required.' }, 400)
 
@@ -1886,8 +1986,8 @@ app.post('/api/team/invite', async (c) => {
   const token = randomHex(32)
   await c.env.DB.prepare(
     `INSERT INTO invites (id, org_id, email, name, role, token, created_by, expires_at)
-     VALUES (?, ?, ?, ?, 'owner', ?, ?, datetime('now', '+7 days'))`,
-  ).bind(id, org, email, name, token, me.id).run()
+     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '+7 days'))`,
+  ).bind(id, org, email, name, role, token, me.id).run()
 
   const sent = await emailTeamInvite(c, org, token, name, email)
   return c.json({ id, token, emailed: sent.ok, ...(sent.ok ? {} : { email_error: sent.error }) }, 201)
@@ -1949,9 +2049,15 @@ app.post('/api/team/:id/archive', async (c) => {
   // error message ("last active person") that was true of the CALLER's own
   // org and had nothing to do with why the request actually failed.
   const target = await c.env.DB.prepare(
-    `SELECT id FROM users WHERE id = ? AND org_id = ? AND archived_at IS NULL`,
-  ).bind(id, org).first()
+    `SELECT id, role FROM users WHERE id = ? AND org_id = ? AND archived_at IS NULL`,
+  ).bind(id, org).first<{ id: string; role: string }>()
   if (!target) return c.json({ error: 'Teammate not found.' }, 404)
+  // Team roles (0067): the owner can't be removed, and nobody removes someone
+  // with a role above their own.
+  const targetRole = teamRoleOf(target.role)
+  const myRole = teamRoleOf(me.role)
+  if (targetRole === 'owner') return c.json({ error: "The owner of the account can't be deactivated." }, 400)
+  if (myRole === 'kitchen' && targetRole !== 'kitchen') return permissionRefused(c, null)
 
   if (id === me.id) return c.json({ error: "You can't deactivate your own account." }, 400)
 
@@ -2009,9 +2115,9 @@ app.post('/api/auth/accept-invite', async (c) => {
   // Re-validate for real — the client's earlier /api/invites/lookup call is
   // not trusted, it only shaped the form.
   const invite = await c.env.DB.prepare(
-    `SELECT id, org_id, email FROM invites WHERE token = ? AND accepted_at IS NULL
+    `SELECT id, org_id, email, role FROM invites WHERE token = ? AND accepted_at IS NULL
        AND (expires_at IS NULL OR expires_at > datetime('now'))`,
-  ).bind(token).first<{ id: string; org_id: string; email: string }>()
+  ).bind(token).first<{ id: string; org_id: string; email: string; role: string }>()
   if (!invite) return invalid()
 
   // A link that was emailed to someone is for that address. Without this, whoever
@@ -2042,8 +2148,10 @@ app.post('/api/auth/accept-invite', async (c) => {
     c.env.DB.prepare(
       `INSERT INTO users (id, org_id, email, password_hash, password_salt, password_iter, role, name,
                           terms_version, terms_accepted_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'owner', ?, ?, datetime('now'))`,
-    ).bind(userId, invite.org_id, email, hash, salt, PBKDF2_ITERATIONS, name, TERMS_VERSION),
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+    ).bind(userId, invite.org_id, email, hash, salt, PBKDF2_ITERATIONS,
+           // The role the invite was sent with (0067); an operator's invite is the owner's.
+           TEAM_ROLES.includes(invite.role as TeamRole) ? invite.role : 'kitchen', name, TERMS_VERSION),
     c.env.DB.prepare(`UPDATE invites SET accepted_at = datetime('now') WHERE id = ?`).bind(invite.id),
   ])
   // Accepting the owner invite signs them straight in (below), so this is the
@@ -3096,6 +3204,152 @@ function featureForPath(path: string): string | null {
   return null
 }
 
+// ─── Team roles (migration 0067) ──────────────────────────────
+// Owner / Manager / Kitchen staff. The owner can do everything; what a manager
+// or kitchen staff can do is a set of switches, with these defaults, that each
+// business may change (organizations.role_permissions). Owner-only, never a
+// switch: billing and the card, roles and switches, closing the account.
+//
+// Unlike plan gating this IS checked for reads where the switch is about seeing
+// something (the P&L, till sales, stock counts, price movers). "See prices and
+// costs" is mostly screen-only: costs are worked out in the browser from the
+// purchase records every page needs, so the server cannot withhold them yet.
+const ROLE_PERMISSIONS = [
+  'prices', 'invoice_upload', 'invoice_approve', 'invoice_void', 'pnl',
+  'catalog', 'stock', 'pos', 'invite',
+] as const
+type RolePermission = typeof ROLE_PERMISSIONS[number]
+type TeamRole = 'owner' | 'manager' | 'kitchen'
+const TEAM_ROLES: TeamRole[] = ['owner', 'manager', 'kitchen']
+
+const ROLE_DEFAULTS: Record<'manager' | 'kitchen', Record<RolePermission, boolean>> = {
+  manager: { prices: true, invoice_upload: true, invoice_approve: true, invoice_void: true, pnl: true,
+             catalog: true, stock: true, pos: true, invite: false },
+  kitchen: { prices: false, invoice_upload: true, invoice_approve: false, invoice_void: false, pnl: false,
+             catalog: false, stock: true, pos: false, invite: false },
+}
+
+type RoleSettings = {
+  manager: Record<RolePermission, boolean>
+  kitchen: Record<RolePermission, boolean>
+  managers_edit_kitchen: boolean
+}
+
+// The business's switches: defaults with its own changes on top. Anything
+// unreadable or unknown in the stored JSON is ignored, never trusted.
+function roleSettings(json: string | null | undefined): RoleSettings {
+  let saved: any = {}
+  try { saved = json ? JSON.parse(json) : {} } catch (_) { saved = {} }
+  const pick = (role: 'manager' | 'kitchen') => {
+    const out = { ...ROLE_DEFAULTS[role] }
+    const s = saved && typeof saved[role] === 'object' ? saved[role] : {}
+    for (const p of ROLE_PERMISSIONS) if (typeof s?.[p] === 'boolean') out[p] = s[p]
+    return out
+  }
+  return {
+    manager: pick('manager'),
+    kitchen: pick('kitchen'),
+    managers_edit_kitchen: typeof saved?.managers_edit_kitchen === 'boolean' ? saved.managers_edit_kitchen : true,
+  }
+}
+
+// A role stored before 0067 or by hand ('member', anything odd) reads as kitchen
+// staff — the narrow side. The owner and the operator are never narrowed.
+function teamRoleOf(role: string | null | undefined): TeamRole | 'super_admin' {
+  if (role === 'super_admin' || role === 'owner' || role === 'manager') return role
+  return 'kitchen'
+}
+
+function permissionsOf(u: { role: string; org_role_permissions?: string | null }): Set<RolePermission> {
+  const role = teamRoleOf(u.role)
+  if (role === 'super_admin' || role === 'owner') return new Set(ROLE_PERMISSIONS)
+  const s = roleSettings(u.org_role_permissions)[role]
+  return new Set(ROLE_PERMISSIONS.filter(p => s[p]))
+}
+
+// What a request needs. `any`: one of these switches. `managerOpen`: a manager
+// passes regardless (kitchen staff still need one of `any`). An action no switch
+// names is open to the owner and managers and closed to kitchen staff, so a
+// route added later is never handed to kitchen staff by accident.
+type RoleNeed = { any: RolePermission[]; managerOpen?: boolean } | 'not_kitchen' | null
+
+const KITCHEN_OPEN_WRITES = new Set([
+  '/api/auth/logout', '/api/auth/change-password', '/api/auth/accept-terms',
+  '/api/suppliers/match', '/api/products/match', '/api/invoices/duplicate-check',
+])
+
+const PNL_TABLES = new Set(['sales_monthly', 'operating_expenses', 'recurring_expenses', 'spread_expenses', 'labor_periods'])
+const CATALOG_TABLES = new Set([
+  'suppliers', 'generic_products', 'product_entries', 'recipes', 'recipe_items',
+  'finished_products', 'finished_product_items', 'units', 'categories', 'product_aliases', 'product_mappings',
+])
+
+async function roleNeedFor(c: any, path: string, method: string): Promise<RoleNeed> {
+  const write = method !== 'GET' && method !== 'HEAD'
+  // Seeing the numbers.
+  if (path === '/api/pnl' || path.startsWith('/api/pnl/') || path === '/api/spending-breakdown') return { any: ['pnl'] }
+  if (path === '/api/price-movers') return { any: ['prices'] }
+  if (path.startsWith('/api/pos-')) return { any: ['pos'] }
+  if (path.startsWith('/api/stock-take')) return { any: ['stock'] }
+  if (/^\/api\/inventory\/[^/]+\/(adjust|waste|recount)$/.test(path)) return { any: ['stock'] }
+  if (path.startsWith('/api/storage-layout')) return write ? { any: ['stock'] } : null
+
+  const table = path.match(/^\/api\/tables\/([^/?]+)/)?.[1]
+  if (table) {
+    if (PNL_TABLES.has(table)) return { any: ['pnl'] }
+    if (table === 'stock_takes' || table === 'stock_take_items') return { any: ['stock'] }
+    if (!write) return null
+    // The exact rule (approving, editing a saved invoice) is in guardInvoiceWrite.
+    if (table === 'invoices') return { any: ['invoice_upload', 'invoice_approve', 'invoice_void'] }
+    if (table === 'invoice_lines') return { any: ['invoice_upload', 'invoice_approve'] }
+    // Stock moves come from Produce Batch, Pack Run and saving an invoice.
+    if (table === 'inventory' || table === 'stock_log') return { any: ['stock', 'catalog', 'invoice_approve'] }
+    // Saving an invoice remembers the supplier's wording.
+    if (table === 'product_aliases' || table === 'product_mappings') return { any: ['catalog', 'invoice_approve'] }
+    // Produce Batch marks the recipe as made ahead (production_mode only).
+    if (table === 'recipes' && method === 'PATCH') {
+      const body = await c.req.json().catch(() => null)
+      const keys = body && typeof body === 'object' ? Object.keys(body) : []
+      if (keys.length && keys.every(k => k === 'production_mode')) return { any: ['catalog', 'stock'] }
+    }
+    if (CATALOG_TABLES.has(table)) return { any: ['catalog'] }
+    return 'not_kitchen'
+  }
+
+  if (!write) return null
+  if (path === '/api/ai/parse-invoice') return { any: ['invoice_upload', 'invoice_approve'] }
+  if (/^\/api\/invoices\/[^/]+\/(void|restore)$/.test(path)) return { any: ['invoice_void'] }
+  // The exact rule (a saved invoice needs approving) is in the route.
+  if (/^\/api\/invoice-lines\/[^/]+\/replace$/.test(path)) return { any: ['invoice_upload', 'invoice_approve'] }
+  if (path === '/api/bulk/upsert-products') return { any: ['invoice_approve'] }
+  if (path === '/api/vendor-fee-template' || path === '/api/product-mappings') return { any: ['invoice_approve', 'catalog'] }
+  if (path === '/api/upload' || path === '/api/ensure-invoice') {
+    return { any: ['invoice_upload', 'invoice_approve', 'catalog', 'pos'], managerOpen: true }
+  }
+  if (/^\/api\/(suppliers|generic_products)\/[^/]+$/.test(path) || path === '/api/products/merge'
+      || path === '/api/products/group' || path === '/api/ai/parse-recipe'
+      || /^\/api\/(units|categories)\/[^/]+$/.test(path)) return { any: ['catalog'] }
+  if (path === '/api/team/invite' || /^\/api\/team\/invites\/[^/]+\/(resend|revoke)$/.test(path)
+      || /^\/api\/team\/[^/]+\/archive$/.test(path)) return { any: ['invite'] }
+  if (KITCHEN_OPEN_WRITES.has(path)) return null
+  return 'not_kitchen'
+}
+
+// True when the signed-in person has none of these switches. The owner and the
+// operator have them all.
+function lacksPermission(c: any, ...perms: RolePermission[]): boolean {
+  const me = c.get('user') as SessionUser | undefined
+  if (!me) return true
+  const mine = permissionsOf(me)
+  return !perms.some(p => mine.has(p))
+}
+
+const ROLE_REFUSED = "Your role doesn't allow this. Ask the owner of the account if you need it."
+
+function permissionRefused(c: any, permission: string | null): Response {
+  return c.json({ error: ROLE_REFUSED, permission_required: permission }, 403)
+}
+
 // ─── Monthly AI invoice-parsing cap ───────────────────────────
 // The one recurring per-customer cost. A recipe book is parsed once at
 // onboarding (~$3 all-in) and never again; invoices arrive every week forever,
@@ -3728,6 +3982,18 @@ async function guardInvoiceWrite(
   const row = await c.env.DB.prepare('SELECT status, voided_at FROM invoices WHERE id = ? AND org_id IS ?')
     .bind(id, orgOf(c)).first() as { status: string | null; voided_at: string | null } | null
   if (!row) return c.json({ error: 'Invoice not found.' }, 404)
+  // Team roles (0067). The middleware let in anyone with an invoice switch;
+  // here is which one this write needs.
+  if (method === 'DELETE' && lacksPermission(c, 'invoice_void')) return permissionRefused(c, 'invoice_void')
+  if (method !== 'DELETE' && body) {
+    const onlyTurning = Object.keys(body).every(k => k === 'page_rotations')
+    const approving = 'status' in body && body.status === 'Closed' && row.status !== 'Closed'
+    if (!onlyTurning && (approving || row.status === 'Closed')) {
+      if (lacksPermission(c, 'invoice_approve')) return permissionRefused(c, 'invoice_approve')
+    } else if (lacksPermission(c, 'invoice_upload', 'invoice_approve')) {
+      return permissionRefused(c, 'invoice_upload')
+    }
+  }
   if (method === 'DELETE') {
     if (row.status === 'Closed') {
       return c.json({ error: "A saved invoice can't be deleted. Void it instead, so it can be restored." }, 409)
@@ -4913,9 +5179,11 @@ app.post('/api/invoice-lines/:invoice_id/replace', async (c) => {
   // Confirm the invoice belongs to this business before touching its lines —
   // otherwise the delete-then-insert below would rewrite someone else's invoice.
   const owner = await c.env.DB.prepare(
-    'SELECT id FROM invoices WHERE id = ? AND org_id IS ?'
-  ).bind(invoiceId, org).first()
+    'SELECT id, status FROM invoices WHERE id = ? AND org_id IS ?'
+  ).bind(invoiceId, org).first<{ id: string; status: string | null }>()
   if (!owner) return c.json({ error: 'Invoice not found' }, 404)
+  // Changing a saved invoice's lines is approving them (team roles, 0067).
+  if (owner.status === 'Closed' && lacksPermission(c, 'invoice_approve')) return permissionRefused(c, 'invoice_approve')
 
   // Each line may carry the id of the product it is filed under (migration 0054).
   // This route deletes and re-inserts every line, so an edit that didn't send

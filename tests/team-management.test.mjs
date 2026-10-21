@@ -79,8 +79,11 @@ t.check('re-checks email uniqueness at redemption time',
   !!acceptBody && /SELECT id FROM users WHERE email = \?/.test(acceptBody));
 t.check('the invite is consumed (accepted_at is written)',
   !!acceptBody && /UPDATE invites SET accepted_at/.test(acceptBody));
-t.check("stores the honest 'owner' role, not an unenforced 'member'",
-  !!acceptBody && /'owner'/.test(acceptBody) && !/'member'/.test(acceptBody));
+// Team roles (0067): the person gets the role their invite was sent with,
+// and anything unrecognised becomes the narrowest role, never the owner.
+t.check('stores the role the invite carries, kitchen staff if unrecognised',
+  !!acceptBody && /invite\.role/.test(acceptBody) && /TEAM_ROLES\.includes\(invite\.role/.test(acceptBody)
+  && /: 'kitchen'/.test(acceptBody) && !/'member'/.test(acceptBody));
 
 t.section('invites/lookup gives one message for unknown/expired/used tokens');
 const lookupBody = handlerBody('post', '/api/invites/lookup');

@@ -68,6 +68,9 @@ function dmNavRemember(me) {
     if (me && Array.isArray(me.features)) {
       localStorage.setItem(DM_NAV_KEY, JSON.stringify({ features: me.features }));
     }
+    if (me && Array.isArray(me.permissions)) {
+      localStorage.setItem(DM_ROLE_KEY, JSON.stringify({ permissions: me.permissions }));
+    }
   } catch (_) { /* private mode, storage blocked: the nav just isn't pre-hidden */ }
   dmChipIdRemember(me);
 }
@@ -77,6 +80,7 @@ function dmNavRemember(me) {
 function dmNavForget() {
   try {
     localStorage.removeItem(DM_NAV_KEY);
+    localStorage.removeItem(DM_ROLE_KEY);
     localStorage.removeItem(DM_CHIP_KEY);
     localStorage.removeItem(DM_CHIP_ID_KEY);
   } catch (_) {}
@@ -93,6 +97,75 @@ function dmNavForget() {
 // added when the server answers. Someone with no business name and who is not an
 // admin gets no remembered chip at all (their label would be their email), and
 // the chip simply appears when the server answers, as before.
+// ─── Team roles (migration 0067) ──────────────────────────────
+// The same idea for what a person's ROLE allows: the pages and buttons that would
+// only be refused are hidden before the first paint, from the switch list this
+// browser last saw (`permissions` on /api/auth/me). Fail-open like the plan list:
+// nothing remembered = nothing hidden. The server refuses regardless.
+//
+// A page is hidden when the person has NONE of its switches.
+const DM_ROLE_KEY = 'dm_role_perms';
+const DM_ROLE_STYLE_ID = 'dmRoleGate';
+const DM_NAV_ROLE_GATED = {
+  '/pnl':            ['pnl'],
+  '/sales':          ['pos'],
+  '/stock-take':     ['stock'],
+  '/upload-invoice': ['invoice_upload', 'invoice_approve'],
+};
+// Buttons, by id, that need one of a switch. Ids are unique per page, so one
+// list serves every page.
+const DM_ROLE_CONTROLS = {
+  invoice_approve: ['confirmInvSaveBtn'],
+  invoice_void:    ['voidInvBtn', 'deleteInvBtn', 'restoreInvBtn'],
+  catalog: [
+    'openAddProductModal', 'saveProductBtn', 'openAddEntryBtn', 'confirmMergeBtn', 'confirmGroupBtn',
+    'quickAddToggle', 'saveRecipeBtn', 'clearRecipeBtn', 'editFromDetailBtn', 'deleteFromDetailBtn',
+    'saveFpBtn', 'clearFpBtn', 'editFromFpDetailBtn', 'deleteFromFpDetailBtn',
+    'openAddSupplierBtn', 'saveSupplierBtn',
+  ],
+  invite: ['openInviteBtn'],
+  // Home page blocks.
+  pnl:    ['pnlTile', 'sbCard'],
+  prices: ['pmLayout'],
+};
+
+function dmRoleCss(perms) {
+  if (!Array.isArray(perms)) return '';
+  const have = new Set(perms.filter(p => typeof p === 'string'));
+  const selectors = [];
+  for (const path of Object.keys(DM_NAV_ROLE_GATED)) {
+    if (DM_NAV_ROLE_GATED[path].some(p => have.has(p))) continue;
+    selectors.push('.nav-links a[href="' + path + '.html"]', '.nav-links a[href="' + path + '"]');
+  }
+  for (const perm of Object.keys(DM_ROLE_CONTROLS)) {
+    if (have.has(perm)) continue;
+    for (const id of DM_ROLE_CONTROLS[perm]) selectors.push('#' + id);
+  }
+  return selectors.length ? selectors.join(',') + '{display:none !important}' : '';
+}
+
+function dmRoleRecall() {
+  try {
+    const o = JSON.parse(localStorage.getItem(DM_ROLE_KEY));
+    return o && Array.isArray(o.permissions) ? o.permissions : null;
+  } catch (_) { return null; }
+}
+
+// Writes (or replaces) the role <style>. Called at load from memory and by
+// utils.js when the server answers.
+function dmRoleApply(perms) {
+  if (typeof document === 'undefined' || !document.head) return;
+  let el = document.getElementById(DM_ROLE_STYLE_ID);
+  const css = dmRoleCss(perms);
+  if (!css) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('style');
+    el.id = DM_ROLE_STYLE_ID;
+    document.head.appendChild(el);
+  }
+  el.textContent = css;
+}
+
 const DM_CHIP_ID_KEY = 'dm_chip_id';
 const DM_CHIP_LABEL_MAX = 80;
 
@@ -164,6 +237,9 @@ function dmNavDropProvisional() {
 
 (function () {
   if (typeof document === 'undefined' || !document.head || !document.createElement) return;
+
+  // What the person's role doesn't allow (pages and buttons), from memory.
+  dmRoleApply(dmRoleRecall());
 
   // Hide the tabs the plan lacks. Provisional: removed when the server answers.
   const css = dmNavCss(dmNavRecall());

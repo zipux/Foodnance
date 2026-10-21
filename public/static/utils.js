@@ -193,6 +193,38 @@ function applyPlanGating(me) {
     .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
 }
 
+// Team roles (0067): a page this person's role has none of the switches for,
+// reached by URL, shows a short note instead of a screen of refusals. The nav
+// links and buttons are hidden by nav-gate.js (dmRoleApply).
+function applyRoleGating(me) {
+  if (!Array.isArray(me.permissions) || typeof DM_NAV_ROLE_GATED === 'undefined') return;
+  if (document.getElementById('planUpgradePanel')) return;
+  const need = DM_NAV_ROLE_GATED[_planPagePath(location.pathname)];
+  if (!need || need.some(p => me.permissions.includes(p))) return;
+  const container = document.querySelector('.container');
+  if (!container) return;
+  container.style.display = 'none';   // hidden, not removed: see applyPlanGating
+  const panel = document.createElement('div');
+  panel.className = 'container';
+  panel.id = 'roleGatePanel';
+  panel.innerHTML = `
+    <div style="max-width:520px;margin:4rem auto;text-align:center;
+                background:#fff;border:1px solid var(--border,#e2e8f0);
+                border-radius:12px;padding:2.5rem 2rem">
+      <i class="fas fa-user-lock" style="font-size:1.75rem;color:var(--primary,#0369a1)"></i>
+      <h2 style="margin:.9rem 0 .5rem;font-size:1.25rem">Not part of your role</h2>
+      <p style="color:var(--text-muted,#64748b);font-size:.92rem;line-height:1.6;margin:0 0 1.5rem">
+        This page isn't included in what your role can do. If you need it, ask the
+        owner of the account to switch it on in Settings → Team.
+      </p>
+      <a href="/home.html" class="btn btn-primary"
+         style="display:inline-block;text-decoration:none">Back to the home page</a>
+    </div>`;
+  container.parentNode.insertBefore(panel, container);
+  ['stFooter', 'stFilters', 'stFilterNote', 'stLoading', 'stStartPanel']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+}
+
 // A restaurant sells over the counter. It never packs a product for sale, and it
 // never needs to be ASKED how a recipe is made:
 //   - Produce Batch records that on its own (confirmProduceBatch in recipes.js
@@ -455,6 +487,12 @@ async function renderSessionChip() {
   // Remember which tabs this plan has, so the NEXT page load hides the rest
   // before it is drawn (nav-gate.js) instead of flashing them.
   if (typeof dmNavRemember === 'function') dmNavRemember(me);
+  // The role's switches, before the event, so a repaint already hides prices.
+  if (Array.isArray(me.permissions)) {
+    window.__perms = new Set(me.permissions);
+    if (typeof dmRoleApply === 'function') dmRoleApply(me.permissions);
+  }
+  window.__teamRole = me.team_role || '';
   window.dispatchEvent(new CustomEvent('dm:plan-known', { detail: window.__accountPlan }));
   if (me.suspended) {
     renderSuspendedBar(me.suspend_reason);
@@ -464,6 +502,7 @@ async function renderSessionChip() {
   // Before the chip, so a gated page swaps its content in the same frame rather
   // than flashing the real screen first.
   applyPlanGating(me);
+  applyRoleGating(me);
   applyBatchWorkflowGating();
 
   if (chip) {
@@ -878,8 +917,18 @@ function fmtDateTime(iso) {
   return `${yyyy}/${mm}/${dd}, ${hh}:${min}`;
 }
 
-// Currency format
+// Team roles (migration 0067). The switches this person has, or null while not
+// known: from this browser's memory at load (nav-gate.js), then from the server.
+// null allows everything — the server refuses what a role may not do anyway.
+window.__perms = (typeof dmRoleRecall === 'function' && dmRoleRecall()) ? new Set(dmRoleRecall()) : null;
+function roleAllows(...perms) {
+  return !window.__perms || perms.some(p => window.__perms.has(p));
+}
+
+// Currency format. Without "See prices and costs" every amount reads "—"; this
+// is screen-only (the browser still holds the purchase records it costs from).
 function fmt(n) {
+  if (!roleAllows('prices')) return '—';
   const num = parseFloat(n);
   return isNaN(num) ? '$0.00' : '$' + num.toFixed(2);
 }
@@ -913,6 +962,7 @@ function scalePriceUnit(costPerUnit, unit) {
 // "$1.28 / kg" from a cost of $0.0012848 per g. Use anywhere a per-unit PRICE is
 // shown; never for a line total, which is already money.
 function fmtUnitCost(costPerUnit, unit) {
+  if (!roleAllows('prices')) return '—';
   const s = scalePriceUnit(costPerUnit, unit);
   return `${fmt(s.cost)} / ${s.unit}`;
 }

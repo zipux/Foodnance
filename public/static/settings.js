@@ -28,6 +28,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('cancelInviteModal').addEventListener('click', () => closeModal('inviteModal'));
   document.getElementById('generateInviteBtn').addEventListener('click', generateInvite);
   document.getElementById('copyInviteLinkBtn').addEventListener('click', copyInviteLink);
+  document.getElementById('mgrEditKitchen').addEventListener('change', e =>
+    saveRoleSwitch('manager', null, e.target, { managers_edit_kitchen: e.target.checked }));
 });
 
 async function loadAccount() {
@@ -108,6 +110,88 @@ async function loadPlan() {
   }
 }
 
+// ─── Team roles (migration 0067) ─────────────────────────────
+const ROLE_LABELS = { owner: 'Owner', manager: 'Manager', kitchen: 'Kitchen staff' };
+const ROLE_RANK = { kitchen: 1, manager: 2, owner: 3, super_admin: 4 };
+const SWITCH_LABELS = {
+  prices:          'See prices and costs',
+  invoice_upload:  'Upload invoices',
+  invoice_approve: 'Approve invoices',
+  invoice_void:    'Void or delete invoices',
+  pnl:             'See the profit and loss',
+  catalog:         'Edit products, recipes and suppliers',
+  stock:           'Stock counts and recording waste',
+  pos:             'Import till sales',
+  invite:          'Invite teammates',
+};
+let teamRoles = null;   // the `roles` block of GET /api/team
+
+function roleLabel(role) { return ROLE_LABELS[role] || ROLE_LABELS.kitchen; }
+
+// The owner picks a teammate's role in place; everyone else just reads it.
+function roleCell(u) {
+  if (u.role === 'owner' || !teamRoles?.can_change_roles) return esc(roleLabel(u.role));
+  return `<select class="role-select" data-id="${esc(u.id)}" aria-label="Role">
+      ${['manager', 'kitchen'].map(r => `<option value="${r}"${r === u.role ? ' selected' : ''}>${roleLabel(r)}</option>`).join('')}
+    </select>`;
+}
+
+async function changeRole(sel) {
+  const was = sel.dataset.was;
+  sel.disabled = true;
+  try {
+    await apiPost(`team/${sel.dataset.id}/role`, { role: sel.value });
+    sel.dataset.was = sel.value;
+    showToast(`Now ${roleLabel(sel.value)}.`, 'success');
+  } catch (e) {
+    sel.value = was;
+    showToast(e.message || 'Could not change the role.', 'error');
+  } finally {
+    sel.disabled = false;
+  }
+}
+
+function renderRoleSwitches() {
+  const body = document.getElementById('rolesBody');
+  const r = teamRoles;
+  if (!r) return;
+  body.innerHTML = r.switches.map(p => `
+    <tr>
+      <td>${esc(SWITCH_LABELS[p] || p)}</td>
+      ${['manager', 'kitchen'].map(role => `
+        <td><input type="checkbox" data-role="${role}" data-perm="${esc(p)}"
+              ${r.settings[role][p] ? 'checked' : ''} ${r.can_edit[role] ? '' : 'disabled'}
+              aria-label="${esc(roleLabel(role))}: ${esc(SWITCH_LABELS[p] || p)}"></td>`).join('')}
+    </tr>`).join('');
+  body.querySelectorAll('input[type=checkbox]').forEach(box => {
+    box.addEventListener('change', () =>
+      saveRoleSwitch(box.dataset.role, box.dataset.perm, box, { permissions: { [box.dataset.perm]: box.checked } }));
+  });
+
+  const isOwner = r.my_role === 'owner' || r.my_role === 'super_admin';
+  document.getElementById('mgrEditKitchenRow').classList.toggle('hidden', !isOwner);
+  document.getElementById('mgrEditKitchen').checked = !!r.settings.managers_edit_kitchen;
+  document.getElementById('rolesIntro').textContent = isOwner
+    ? 'You can do everything, including billing and changing these switches. Changes apply to everyone with that role straight away.'
+    : (r.can_edit.kitchen
+      ? 'The owner can do everything. You can change what Kitchen staff can do; only the owner can change Managers.'
+      : 'The owner can do everything and decides what each role can do. Ask them if you need something switched on.');
+}
+
+async function saveRoleSwitch(role, perm, box, payload) {
+  box.disabled = true;
+  try {
+    const d = await apiPost('team/permissions', { role, ...payload });
+    teamRoles.settings = d.settings;
+    showToast('Saved.', 'success');
+  } catch (e) {
+    box.checked = !box.checked;
+    showToast(e.message || 'Could not save that change.', 'error');
+  } finally {
+    box.disabled = false;
+  }
+}
+
 async function loadTeam() {
   const teamBody = document.getElementById('teamBody');
   const pendingWrap = document.getElementById('pendingWrap');
@@ -116,22 +200,36 @@ async function loadTeam() {
     const data = await apiGet('team');
     const users = data.users || [];
     const invites = data.invites || [];
+    teamRoles = data.roles || null;
+    renderRoleSwitches();
+    const myRank = ROLE_RANK[teamRoles?.my_role] || 0;
+    // Deactivate: needs "Invite teammates", never the owner, never above your own role.
+    const canRemove = u => roleAllows('invite') && u.role !== 'owner' && (ROLE_RANK[u.role] || 1) <= myRank;
+    const inviteRole = document.getElementById('inviteRole');
+    inviteRole.innerHTML = (teamRoles?.invitable || ['kitchen'])
+      .map(r => `<option value="${r}">${roleLabel(r)}</option>`).join('');
 
     teamBody.innerHTML = users.length
       ? users.map(u => `
         <tr>
           <td>${esc(u.name || '—')}</td>
           <td>${esc(u.email)}</td>
+          <td>${u.id === currentUserId ? esc(roleLabel(u.role)) : roleCell(u)}</td>
           <td>${fmtDate(u.created_at)}</td>
           <td class="actions">
             ${u.id === currentUserId
               ? '<span class="team-sub">This is you</span>'
-              : `<button class="btn btn-ghost" data-act="archive" data-id="${esc(u.id)}" data-name="${esc(u.name || u.email)}">
+              : canRemove(u) ? `<button class="btn btn-ghost" data-act="archive" data-id="${esc(u.id)}" data-name="${esc(u.name || u.email)}">
                    <i class="fas fa-user-slash"></i> Deactivate
-                 </button>`}
+                 </button>` : ''}
           </td>
         </tr>`).join('')
-      : '<tr><td colspan="4" class="empty-row">No one yet.</td></tr>';
+      : '<tr><td colspan="5" class="empty-row">No one yet.</td></tr>';
+
+    teamBody.querySelectorAll('select.role-select').forEach(sel => {
+      sel.dataset.was = sel.value;
+      sel.addEventListener('change', () => changeRole(sel));
+    });
 
     teamBody.querySelectorAll('button[data-act="archive"]').forEach(btn => {
       btn.addEventListener('click', () => archiveTeammate(btn.dataset.id, btn.dataset.name));
@@ -143,6 +241,7 @@ async function loadTeam() {
         <tr class="pending-row">
           <td>${esc(i.name || '—')}</td>
           <td>${esc(i.email || '—')}</td>
+          <td>${esc(roleLabel(i.role))}</td>
           <td>${fmtDate(i.created_at)}</td>
           <td>${isExpired(i.expires_at) ? '<strong>Expired</strong>' : (i.expires_at ? fmtDate(i.expires_at) : '—')}</td>
           <td class="actions">
@@ -172,7 +271,7 @@ async function loadTeam() {
       pendingBody.innerHTML = '';
     }
   } catch (e) {
-    teamBody.innerHTML = `<tr><td colspan="4" class="empty-row">Could not load — ${esc(e.message)}</td></tr>`;
+    teamBody.innerHTML = `<tr><td colspan="5" class="empty-row">Could not load — ${esc(e.message)}</td></tr>`;
   }
 }
 
@@ -198,7 +297,8 @@ async function generateInvite() {
   // not make two.
   btn.disabled = true;
   try {
-    const d = await apiPost('team/invite', { name, email });
+    const role = document.getElementById('inviteRole').value || 'kitchen';
+    const d = await apiPost('team/invite', { name, email, role });
     if (d.emailed) {
       msgEl.textContent = `Invitation emailed to ${email}.`;
       msgEl.className = 'msg show good';

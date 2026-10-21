@@ -115,7 +115,9 @@ async function loadMovers() {
     const r = await apiGet(`price-movers?${qs.toString()}`);
     pmData = (r.data || []).map(pmRescaleForDisplay);
   } catch (e) {
-    listEl.innerHTML = `<div class="pm-empty" style="color:var(--danger)">Failed to load: ${esc(e.message || e)}</div>`;
+    listEl.innerHTML = e.payload?.permission_required
+      ? `<div class="pm-empty">Prices aren't part of your role.</div>`
+      : `<div class="pm-empty" style="color:var(--danger)">Failed to load: ${esc(e.message || e)}</div>`;
     return;
   }
 
@@ -989,7 +991,9 @@ async function loadSpendingBreakdown() {
     const data = await apiGet(`spending-breakdown?from=${from}&to=${to}`);
     renderSpendingBreakdown(data);
   } catch (e) {
-    listEl.innerHTML = `<div class="sb-empty" style="color:var(--danger)">Failed to load: ${esc(e.message || e)}</div>`;
+    listEl.innerHTML = e.payload?.permission_required
+      ? `<div class="sb-empty">Spending isn't part of your role.</div>`
+      : `<div class="sb-empty" style="color:var(--danger)">Failed to load: ${esc(e.message || e)}</div>`;
   }
 }
 
@@ -1157,7 +1161,17 @@ function renderSpendingBreakdown(data) {
 }
 
 // ── Init ─────────────────────────────────────────────────────
+// Team roles (0067): with neither prices nor the P&L, this page has nothing to
+// show, so it points at what the role can use. The blocks themselves are hidden
+// by nav-gate.js.
+function homeRoleNote() {
+  const none = !roleAllows('prices') && !roleAllows('pnl');
+  document.getElementById('homeRoleNote')?.classList.toggle('hidden', !none);
+}
+window.addEventListener('dm:plan-known', homeRoleNote);
+
 document.addEventListener('DOMContentLoaded', () => {
+  homeRoleNote();
   const today = new Date();
   const ninetyAgo = new Date(today.getTime() - 90 * 86400000);
   document.getElementById('pmTo').value   = toISODate(today);
@@ -1268,6 +1282,8 @@ async function loadPnlTile() {
       stat('Profit', sales ? money(profit) : '—', profit >= 0 ? '#15803d' : '#b91c1c') +
       `<span id="pnlTileNote" style="flex-basis:100%;font-size:.72rem;color:var(--text-muted)">${noteBits.join(' ')}</span>`;
   } catch (e) {
-    statsEl.innerHTML = `<span style="color:var(--text-muted);font-size:.85rem">P&amp;L unavailable</span>`;
+    statsEl.innerHTML = e.payload?.permission_required
+      ? `<span style="color:var(--text-muted);font-size:.85rem">The P&amp;L isn't part of your role.</span>`
+      : `<span style="color:var(--text-muted);font-size:.85rem">P&amp;L unavailable</span>`;
   }
 }

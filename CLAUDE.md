@@ -191,7 +191,7 @@ from 0024 on — org scoping, plans, suspension, the invoice cap, POS sales impo
 — was applied **by hand and never recorded**, so the command would try to replay
 0024 onward.
 
-**`migrations/` now runs to `0063_stock_take_kind.sql`** (0061 applied to production by `--command` on 2026-10-06, unrecorded; 0058–0060 applied to production by `--command` on 2026-10-03, not recorded in `d1_migrations`; pre-change bookmark `000005b6-00000000-000050f9-0d0604a1c3a13f5c20f25018fe83498b`). Earlier it ran to `0052_invite_emails.sql` (0047–0051 landed after this note was written; 0052 is not on prod yet). It first ran to `0046_recurring_expense_dates.sql`: 0044–0046
+**`migrations/` now runs to `0067_team_roles.sql`** (0067 applied to staging and production by `--command` on 2026-10-21, unrecorded; pre-change production bookmark `0000060d-00000000-0000510b-76306f2b976073c9d1f3366e46e837f3`; 0061 applied to production by `--command` on 2026-10-06, unrecorded; 0058–0060 applied to production by `--command` on 2026-10-03, not recorded in `d1_migrations`; pre-change bookmark `000005b6-00000000-000050f9-0d0604a1c3a13f5c20f25018fe83498b`). Earlier it ran to `0052_invite_emails.sql` (0047–0051 landed after this note was written; 0052 is not on prod yet). It first ran to `0046_recurring_expense_dates.sql`: 0044–0046
 landed after that audit: 0044 is recorded as applied on 2026-08-04, 0045 and 0046
 are unconfirmed either way. Re-verify against live D1 — do not read the 0043
 figure as current.
@@ -537,6 +537,42 @@ in the subject on staging. Checked on staging with a Paddle sandbox simulation (
 attempt failed with `transaction_default_checkout_url_not_set` because it hadn't saved before
 the domain was approved.
 
+### Team roles: Owner / Manager / Kitchen staff (added 2026-10-21, migration `0067`)
+
+Before this every teammate was stored as `owner` with full access. Now `users.role` and
+`invites.role` are `owner` (one per business), `manager` or `kitchen`; an invite carries the
+role (never above the inviter's own) and accept-invite gives it. **Nine switches**
+(`ROLE_PERMISSIONS`, defaults in `ROLE_DEFAULTS`, the user's approved table): prices,
+invoice_upload, invoice_approve, invoice_void, pnl, catalog, stock, pos, invite. Each business
+may change them (`organizations.role_permissions`, JSON, read by `roleSettings()`); the owner
+changes either role, a manager only kitchen staff's and only while `managers_edit_kitchen`
+(owner's switch, default on). Owner-only, never a switch: billing/card, roles and switches,
+closing the account. Roles change with `POST /api/team/:id/role` (owner only, never the owner).
+
+**Enforced in the `/api/*` middleware** after plan gating: `roleNeedFor()` maps the request to
+the switches that allow it. Unlike plan gating it covers READS where the switch is about
+seeing (P&L and its input tables, spending breakdown, price movers, till sales, stock counts).
+**Anything no switch names is closed to kitchen staff and open to managers**, so a new route
+is never handed to kitchen staff by accident (`KITCHEN_OPEN_WRITES` lists the harmless ones).
+The invoice detail is in `guardInvoiceWrite`: approving or changing a saved invoice needs
+`invoice_approve`, deleting needs `invoice_void`, turning a photo needs nothing more; the
+line-replace route needs `invoice_approve` on a saved invoice. Produce Batch's
+`production_mode`-only PATCH on recipes is allowed with `stock`. Refusals are 403
+`{ permission_required }`. `SESSION_USER_COLUMNS` reads `o.role_permissions`, so **apply
+0067 before deploying or nobody can sign in**.
+
+**Screens** (presentation only): `publicUser()` sends `team_role` + `permissions`;
+`nav-gate.js` hides role-gated nav pages (`DM_NAV_ROLE_GATED`) and buttons by id
+(`DM_ROLE_CONTROLS`) before first paint from `localStorage['dm_role_perms']`; `utils.js`
+`roleAllows()`, `applyRoleGating()` (a "Not part of your role" panel for a page reached by
+URL). **Prices are screen-only**: `fmt()` / `fmtUnitCost()` print "—" without `prices`; the
+invoice screens still show amounts (they are the supplier's paper). The browser still holds
+the purchase records costing needs, so hiding prices server-side is a later step. Settings →
+Team shows roles, a role picker on invite, and the switch table.
+`npm run test:roles` (needs the sandbox and 0067 applied locally). `dev:sandbox` now blanks
+`PADDLE_CLIENT_TOKEN`: the live Paddle vars in `wrangler.jsonc` would otherwise put every
+local test account behind the card step.
+
 ### Fee templates are per business (2026-10-20, migration `0066`)
 
 `vendor_fee_templates.vendor_name` was `UNIQUE` across **every** account (0005, from before
@@ -578,6 +614,7 @@ npm run test:same-as        # "Same as…?" asked once: remembered wordings, per
 npm run test:paddle-webhook # Paddle webhook: signature, out-of-order events, account matching — needs the sandbox (0064 applied locally)
 npm run test:card-step      # card step + no-card lock + "No payment needed" — needs `npm run dev:sandbox:billing` (0064/0065 applied locally)
 npm run test:fee-template   # fee templates per business, supplier rename — needs the sandbox (0066 applied locally)
+npm run test:roles          # team roles: switches, refusals, who changes what — needs the sandbox (0067 applied locally)
 ```
 
 **The account purge** (`DELETE /api/admin/organizations/:id`, admin-screen button) is

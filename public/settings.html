@@ -35,6 +35,14 @@
     .msg.bad { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
     .msg.good { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
 
+    /* Team roles */
+    .role-select { padding: .25rem .4rem; font-size: .85rem; }
+    .roles-table td:not(:first-child), .roles-table th:not(:first-child) { text-align: center; width: 8.5rem; }
+    .roles-table input[type=checkbox] { width: 1.05rem; height: 1.05rem; cursor: pointer; }
+    .roles-table input[type=checkbox]:disabled { cursor: default; }
+    .roles-extra { display: flex; align-items: center; gap: .5rem; margin-top: 1rem; font-size: .9rem; cursor: pointer; }
+    .roles-extra.hidden { display: none; }
+
     /* Plan & usage */
     .plan-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .35rem; }
     .plan-badge { background: #f0f9ff; color: #075985; border: 1px solid #bae6fd; border-radius: 999px;
@@ -47,7 +55,7 @@
     .upsell { margin-top: 1rem; padding: .85rem; border-radius: var(--radius-sm); background: #f8fafc; border: 1px solid var(--border); font-size: .85rem; }
     .upsell ul { margin: .4rem 0 .7rem 1.1rem; padding: 0; }
   </style>
-  <script src="/static/nav-gate.js?v=20260921-3"></script>
+  <script src="/static/nav-gate.js?v=20261021-2"></script>
 </head>
 <body>
   <!-- Deliberately NOT the full 14-link app nav — this page doesn't want to
@@ -98,17 +106,18 @@
       </div>
       <div class="card-body">
         <p class="team-sub">
-          Anyone you invite has the exact same access you do — it's a
-          separate login, not a restricted one. We email them a link to set
-          their own password.
+          Everyone has their own login and a role: <strong>Owner</strong>,
+          <strong>Manager</strong> or <strong>Kitchen staff</strong>. What each
+          role can do is set in the box below. We email new people a link to
+          set their own password.
         </p>
         <div class="table-scroll">
           <table class="data-table">
             <thead>
-              <tr><th>Name</th><th>Email</th><th>Added</th><th></th></tr>
+              <tr><th>Name</th><th>Email</th><th>Role</th><th>Added</th><th></th></tr>
             </thead>
             <tbody id="teamBody">
-              <tr><td colspan="4" class="empty-row"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>
+              <tr><td colspan="5" class="empty-row"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>
             </tbody>
           </table>
         </div>
@@ -120,12 +129,38 @@
           <div class="table-scroll">
             <table class="data-table">
               <thead>
-                <tr><th>Name</th><th>Email</th><th>Sent</th><th>Expires</th><th></th></tr>
+                <tr><th>Name</th><th>Email</th><th>Role</th><th>Sent</th><th>Expires</th><th></th></tr>
               </thead>
               <tbody id="pendingBody"></tbody>
             </table>
           </div>
         </div>
+      </div>
+    </section>
+
+    <section class="card" id="rolesCard">
+      <div class="card-header">
+        <h2><i class="fas fa-user-shield"></i> What each role can do</h2>
+      </div>
+      <div class="card-body">
+        <p class="team-sub" id="rolesIntro">
+          The owner can do everything, including billing and changing these
+          switches. Changes apply to everyone with that role straight away.
+        </p>
+        <div class="table-scroll">
+          <table class="data-table roles-table">
+            <thead>
+              <tr><th></th><th>Manager</th><th>Kitchen staff</th></tr>
+            </thead>
+            <tbody id="rolesBody">
+              <tr><td colspan="3" class="empty-row"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <label class="roles-extra hidden" id="mgrEditKitchenRow">
+          <input type="checkbox" id="mgrEditKitchen" />
+          Managers can change what Kitchen staff can do
+        </label>
       </div>
     </section>
   </div>
@@ -150,6 +185,10 @@
           <label>Email <span style="color:var(--danger,#dc2626)">*</span></label>
           <input type="email" id="inviteEmail" required autocomplete="off" placeholder="e.g. maria@example.com" />
         </div>
+        <div class="form-group">
+          <label>Role</label>
+          <select id="inviteRole"></select>
+        </div>
         <div id="inviteMsg" class="msg"></div>
         <div class="copybox hidden" id="inviteResult">
           <strong>Send them this link yourself</strong> — it works once and expires in 7 days.
@@ -168,7 +207,7 @@
 
   <div id="toast" class="toast hidden"></div>
   <script src="/static/env-banner.js?v=20260807-2"></script>
-  <script src="/static/utils.js?v=20261020-1"></script>
-  <script src="/static/settings.js?v=20260922-4"></script>
+  <script src="/static/utils.js?v=20261021-1"></script>
+  <script src="/static/settings.js?v=20261021-1"></script>
 </body>
 </html>

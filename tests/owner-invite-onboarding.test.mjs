@@ -55,7 +55,7 @@ t.check('link is returned ONLY when the email did not go out',
 t.section('the emailed link only works for the address it was sent to');
 const accepting = handlerBody('post', '/api/auth/accept-invite');
 t.check('accept-invite reads the invite email',
-  !!accepting && /SELECT id, org_id, email FROM invites/.test(accepting));
+  !!accepting && /SELECT id, org_id, email(, role)? FROM invites/.test(accepting));
 t.check('accept-invite rejects a different address',
   !!accepting && /invite\.email && email !== normalizeEmail\(invite\.email\)/.test(accepting));
 t.check('accept page locks the prefilled email', /em\.readOnly = true/.test(accept));

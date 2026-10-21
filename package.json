@@ -5,7 +5,7 @@
     "test": "node tests/run.mjs",
     "test:integration": "node tests/integration/inventory-conversion.test.mjs",
     "dev": "vite",
-    "dev:sandbox": "wrangler pages dev dist --d1=invoicedb-production --local --ip 0.0.0.0 --port 3000",
+    "dev:sandbox": "wrangler pages dev dist --d1=invoicedb-production --local --ip 0.0.0.0 --port 3000 --binding PADDLE_CLIENT_TOKEN=",
     "dev:sandbox:billing": "wrangler pages dev dist --d1=invoicedb-production --local --ip 0.0.0.0 --port 3000 --binding PADDLE_ENV=sandbox --binding PADDLE_CLIENT_TOKEN=test_f64cf3063a3af875abc336b2bca --binding PADDLE_PRICE_ESSENTIAL=pri_01m5bwchn0gyfhpj8pcqs62prj --binding PADDLE_PRICE_PRO=pri_01m5bwcj3cm2mh11zv3dkb25ap",
     "build": "vite build",
     "preview": "wrangler pages dev dist",
@@ -47,7 +47,8 @@
     "test:same-as": "node tests/integration/same-as-remembered.test.mjs",
     "test:paddle-webhook": "node tests/integration/paddle-webhook.test.mjs",
     "test:card-step": "node tests/integration/billing-card-step.test.mjs",
-    "test:fee-template": "node tests/integration/fee-template-per-org.test.mjs"
+    "test:fee-template": "node tests/integration/fee-template-per-org.test.mjs",
+    "test:roles": "node tests/integration/team-roles.test.mjs"
   },
   "dependencies": {
     "hono": "^4.12.7"

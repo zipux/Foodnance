@@ -589,7 +589,7 @@
     }
     .sb-oc-sub-amount { font-family: ui-monospace, monospace; }
   </style>
-  <script src="/static/nav-gate.js?v=20260921-3"></script>
+  <script src="/static/nav-gate.js?v=20261021-2"></script>
 </head>
 <body>
   <nav class="navbar">
@@ -615,6 +615,19 @@
       <p>Products with the biggest price swings between their two most recent purchases.</p>
     </div>
 
+    <!-- Team roles (0067): shown instead of prices and the P&L to someone whose
+         role has neither (kitchen staff by default). -->
+    <section class="card hidden" id="homeRoleNote" style="margin-bottom:1.5rem">
+      <div class="card-body">
+        <p style="margin:0 0 .75rem">Prices and the profit and loss aren't part of your role. From here you can:</p>
+        <div style="display:flex;gap:.6rem;flex-wrap:wrap">
+          <a href="/upload-invoice.html" class="btn btn-primary" style="text-decoration:none"><i class="fas fa-file-upload"></i> Upload an invoice</a>
+          <a href="/inventory.html" class="btn btn-secondary" style="text-decoration:none"><i class="fas fa-warehouse"></i> Inventory</a>
+          <a href="/recipes.html" class="btn btn-secondary" style="text-decoration:none"><i class="fas fa-utensils"></i> Recipes</a>
+        </div>
+      </div>
+    </section>
+
     <!-- P&L summary tile → links to full P&L page -->
     <a href="/pnl.html" id="pnlTile" style="text-decoration:none;display:block;margin-bottom:1.5rem">
       <section class="card" style="transition:var(--transition)">
@@ -631,7 +644,7 @@
       </section>
     </a>
 
-    <div class="pm-layout">
+    <div class="pm-layout" id="pmLayout">
       <!-- LEFT: filters + list -->
       <section class="card">
         <div class="card-header">
@@ -719,7 +732,7 @@
     </div>
 
     <!-- Spending Breakdown -->
-    <section class="card" style="margin-top: 1.5rem;">
+    <section class="card" id="sbCard" style="margin-top: 1.5rem;">
       <div class="card-header">
         <h2><i class="fas fa-tags"></i> Spending Breakdown</h2>
       </div>
@@ -764,7 +777,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="/static/env-banner.js?v=20260807-2"></script>
-  <script src="/static/utils.js?v=20261020-1"></script>
-  <script src="/static/home.js?v=20261013-1"></script>
+  <script src="/static/utils.js?v=20261021-1"></script>
+  <script src="/static/home.js?v=20261021-2"></script>
 </body>
 </html>
