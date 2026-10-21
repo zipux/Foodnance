@@ -2661,6 +2661,49 @@ async function paddleEventOrg(env: Bindings, data: Record<string, any>, kind: st
 
 const paddleText = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
 
+// Tells the operator a business has added its card (subscription.created), so a
+// new customer is never noticed only by chance on the admin screen. Sign-ups
+// only, by decision: renewals, failed cards and cancellations send nothing.
+// Never throws, and runs after the webhook has answered: a mail outage must not
+// make Paddle retry an event that was recorded.
+const SIGNUP_NOTICE_TO = 'billing@foodnance.com'
+
+async function sendSignupNotice(env: Bindings, orgId: string, data: Record<string, any>): Promise<void> {
+  try {
+    const org = await env.DB.prepare(
+      `SELECT o.name, o.plan, o.account_type,
+              (SELECT u.name FROM users u WHERE u.org_id = o.id AND u.role = 'owner' ORDER BY u.created_at LIMIT 1) AS owner_name,
+              (SELECT u.email FROM users u WHERE u.org_id = o.id AND u.role = 'owner' ORDER BY u.created_at LIMIT 1) AS owner_email
+         FROM organizations o WHERE o.id = ?`,
+    ).bind(orgId).first<{ name: string; plan: string | null; account_type: string | null; owner_name: string | null; owner_email: string | null }>()
+    if (!org) return
+    const priceId = Array.isArray(data.items) ? paddleText(data.items[0]?.price?.id) : null
+    const paying = paddlePlanOf(env, priceId)
+    const plan = paying ? planLabel(paying, org.account_type) : planLabel(org.plan, org.account_type)
+    const firstCharge = paddleText(data.next_billed_at)
+    const firstChargeText = firstCharge
+      ? new Date(firstCharge).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
+      : 'not given by Paddle'
+    const stage = env.APP_ENV === 'staging' ? '[STAGING] ' : ''
+    const owner = [org.owner_name, org.owner_email].filter(Boolean).join(', ') || 'unknown'
+    const lines = [
+      `${org.name} has added a card and started a ${data.status === 'trialing' ? 'free trial' : 'subscription'}.`,
+      '',
+      `Plan: ${plan}`,
+      `First charge: ${firstChargeText}`,
+      `Owner: ${owner}`,
+      '',
+      'Details are on the admin screen, in the Payment column.',
+    ]
+    const text = lines.join('\n')
+    const html = lines.map(l => (l ? `<p style="margin:0 0 4px">${escHtml(l)}</p>` : '<br>')).join('')
+    const sent = await sendEmail(env, { to: SIGNUP_NOTICE_TO, subject: `${stage}New customer: ${org.name} (${plan})`, html, text })
+    if (!sent.ok) console.error('sendSignupNotice: not sent', orgId, sent.error)
+  } catch (e) {
+    console.error('sendSignupNotice: failed', orgId, e)
+  }
+}
+
 app.post('/api/paddle/webhook', async (c) => {
   const secret = c.env.PADDLE_WEBHOOK_SECRET
   if (!secret) {
@@ -2719,7 +2762,12 @@ app.post('/api/paddle/webhook', async (c) => {
         `UPDATE organizations SET paddle_customer_id = ? WHERE id = ? AND paddle_customer_id IS NULL`,
       ).bind(data.customer_id, orgId))
     }
-    await c.env.DB.batch(stmts)
+    const results = await c.env.DB.batch(stmts)
+    // First delivery of this event only (a retry inserts no log row).
+    if (orgId && eventType === 'subscription.created' && results[0]?.meta?.changes === 1) {
+      const notice = sendSignupNotice(c.env, orgId, data)
+      try { c.executionCtx.waitUntil(notice) } catch (_) { await notice }
+    }
     if (!orgId) console.warn(`POST /api/paddle/webhook: ${eventType} ${eventId} matches no account (logged in billing_events)`)
   } catch (e) {
     // 500, so Paddle tries again; nothing half-written (one batch).

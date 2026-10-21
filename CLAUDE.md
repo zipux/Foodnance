@@ -528,6 +528,15 @@ checkout shows a quantity picker). **Live will need the same three.** Verified e
 staging with the test card (BC: CA$0 today, CA$88.48 from day 15). `npm run test:card-step`
 (needs the sandbox and the four vars in `.dev.vars`).
 
+**Sign-up email to the operator (2026-10-21, no migration).** The first delivery of a
+`subscription.created` webhook for a known account (the `billing_events` insert changed a row,
+so a retry sends nothing) emails `SIGNUP_NOTICE_TO` = billing@foodnance.com: business, plan,
+first charge, owner. Sign-ups only, by decision. Sent via `waitUntil`, never throws, `[STAGING]`
+in the subject on staging. Checked on staging with a Paddle sandbox simulation (arrived).
+**Live checkout needs a default payment link** in Paddle (Checkout settings); the first live
+attempt failed with `transaction_default_checkout_url_not_set` because it hadn't saved before
+the domain was approved.
+
 ### Fee templates are per business (2026-10-20, migration `0066`)
 
 `vendor_fee_templates.vendor_name` was `UNIQUE` across **every** account (0005, from before
