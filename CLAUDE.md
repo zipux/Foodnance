@@ -191,7 +191,7 @@ from 0024 on — org scoping, plans, suspension, the invoice cap, POS sales impo
 — was applied **by hand and never recorded**, so the command would try to replay
 0024 onward.
 
-**`migrations/` now runs to `0067_team_roles.sql`** (0067 applied to staging and production by `--command` on 2026-10-21, unrecorded; pre-change production bookmark `0000060d-00000000-0000510b-76306f2b976073c9d1f3366e46e837f3`; 0061 applied to production by `--command` on 2026-10-06, unrecorded; 0058–0060 applied to production by `--command` on 2026-10-03, not recorded in `d1_migrations`; pre-change bookmark `000005b6-00000000-000050f9-0d0604a1c3a13f5c20f25018fe83498b`). Earlier it ran to `0052_invite_emails.sql` (0047–0051 landed after this note was written; 0052 is not on prod yet). It first ran to `0046_recurring_expense_dates.sql`: 0044–0046
+**`migrations/` now runs to `0068_org_province.sql`** (0068 applied to staging and production by `--command` on 2026-10-22, unrecorded; pre-change production bookmark `00000618-00000000-0000510c-3f0bfe8276464eaf0eebcfd12540370a`) (0067 applied to staging and production by `--command` on 2026-10-21, unrecorded; pre-change production bookmark `0000060d-00000000-0000510b-76306f2b976073c9d1f3366e46e837f3`; 0061 applied to production by `--command` on 2026-10-06, unrecorded; 0058–0060 applied to production by `--command` on 2026-10-03, not recorded in `d1_migrations`; pre-change bookmark `000005b6-00000000-000050f9-0d0604a1c3a13f5c20f25018fe83498b`). Earlier it ran to `0052_invite_emails.sql` (0047–0051 landed after this note was written; 0052 is not on prod yet). It first ran to `0046_recurring_expense_dates.sql`: 0044–0046
 landed after that audit: 0044 is recorded as applied on 2026-08-04, 0045 and 0046
 are unconfirmed either way. Re-verify against live D1 — do not read the 0043
 figure as current.
@@ -636,6 +636,7 @@ npm run test:paddle-webhook # Paddle webhook: signature, out-of-order events, ac
 npm run test:card-step      # card step + no-card lock + "No payment needed" — needs `npm run dev:sandbox:billing` (0064/0065 applied locally)
 npm run test:fee-template   # fee templates per business, supplier rename — needs the sandbox (0066 applied locally)
 npm run test:roles          # team roles: switches, refusals, who changes what — needs the sandbox (0067 applied locally)
+npm run test:province       # province + tax names: create, change, /me, view-as — needs the sandbox (0068 applied locally)
 ```
 
 **The account purge** (`DELETE /api/admin/organizations/:id`, admin-screen button) is
@@ -1153,6 +1154,23 @@ Computed at read time, so bills saved earlier with a GST the reader found droppe
 amount the day this shipped. **Known limit:** the reader files Quebec's QST in `tax_pst`, and
 QST is claimed back; a Quebec account would need a per-account switch (not built, no Quebec
 customers). `npm run test:taxes` (needs the sandbox).
+
+### Tax names by province (added 2026-10-22, migration `0068`)
+
+`organizations.province` (two letters; Quebec not offered; every account before 0068 = BC) names
+the taxes on screen. **Amounts never depend on it**: the reader files GST/HST in `tax_gst` (claimed
+back, never a cost) and PST/RST in `tax_pst` (a P&L cost line), whatever the province. `taxNames()`
+in `utils.js`: BC/SK GST + PST, MB GST + RST, AB and the territories GST only, ON and the Atlantic
+provinces HST only (`prov: null`, `provOr: 'PST'` for an invoice that carries one anyway, e.g. a BC
+supplier's PST, which is always shown). The P&L PST line, its tax sentence, the invoice screen's
+tax boxes and summary use it; the PST box hides where there is no provincial tax and the invoice
+has none. Set on **Add a restaurant**, changed in the admin list (`POST
+/api/admin/organizations/:id/province`, super-admin only). `/api/auth/me` sends `province` (the
+viewed org's for an operator) from `orgProvince()`, a fail-soft read **outside**
+`SESSION_USER_COLUMNS`, and create/list read and write it fail-soft too, so a database without
+0068 still signs in and creates accounts (they read BC). The three province lists (server
+`PROVINCES`, `utils.js`, admin picker and form) are pinned equal by `tests/tax-names.test.mjs`.
+**Apply `0068` before deploying** (by file / `--command`). `npm run test:province` (needs the sandbox).
 
 ### The P&L sum is written once (2026-10-13, no migration)
 

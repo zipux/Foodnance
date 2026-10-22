@@ -149,6 +149,6 @@ t.check('each button says what its email will say (raise-limit button ↔ raise-
 
 t.section('housekeeping');
 const migrations = readdirSync(join(ROOT, 'migrations')).filter(f => f.endsWith('.sql')).sort();
-t.check('0067 is the newest migration, numbered without a gap', migrations.at(-1).startsWith('0067_') && migrations.at(-2).startsWith('0066_'));
+t.check('0068 is the newest migration, numbered without a gap', migrations.at(-1).startsWith('0068_') && migrations.at(-2).startsWith('0067_'));
 
 t.done();

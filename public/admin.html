@@ -246,6 +246,25 @@
               </select>
               <small class="hint" id="accountTypePlanHint"></small>
             </div>
+            <!-- Names the taxes on their screens (GST/HST, PST/RST). Quebec is not
+                 offered. Changeable later in the list below. -->
+            <div class="field">
+              <label for="province">Province</label>
+              <select id="province">
+                <option value="BC">British Columbia</option>
+                <option value="AB">Alberta</option>
+                <option value="SK">Saskatchewan</option>
+                <option value="MB">Manitoba</option>
+                <option value="ON">Ontario</option>
+                <option value="NS">Nova Scotia</option>
+                <option value="NB">New Brunswick</option>
+                <option value="NL">Newfoundland and Labrador</option>
+                <option value="PE">Prince Edward Island</option>
+                <option value="YT">Yukon</option>
+                <option value="NT">Northwest Territories</option>
+                <option value="NU">Nunavut</option>
+              </select>
+            </div>
             <!-- Set before the invite goes out: the card step charges for the
                  plan the account is on when the owner gets there. A commissary
                  is always Production, so this hides for one. -->
@@ -407,6 +426,7 @@
         owner_email:    $('ownerEmail').value.trim(),
         account_type:   $('accountType').value,
         plan:           $('plan').value,
+        province:       $('province').value,
       };
 
       try {
@@ -547,7 +567,7 @@
               <tr${o.archived_at ? ' style="opacity:.55"' : ''}>
                 <td><strong>${esc(o.name)}</strong></td>
                 <td class="owner">${ownerCell(o)}</td>
-                <td><span class="pill">${esc(o.account_type)}</span></td>
+                <td><span class="pill">${esc(o.account_type)}</span> ${provincePicker(o)}</td>
                 <td>${planPicker(o)}</td>
                 <td>${statusPill(o)}</td>
                 ${paymentCell(o, billingOn)}
@@ -670,6 +690,10 @@
               case 'purge':   return purgeOrg(d.id, d.name);
             }
           });
+        });
+
+        box.querySelectorAll('select[data-prov-for]').forEach(sel => {
+          sel.addEventListener('change', () => setProvince(sel, sel.dataset.provFor, sel.dataset.name));
         });
 
         box.querySelectorAll('select[data-plan-for]').forEach(sel => {
@@ -1141,6 +1165,38 @@
     // would offer a move the server refuses (see the plan endpoint), so show the
     // name and nothing to press. The label itself comes from the API so there is
     // one definition of it.
+    // The province names the taxes on the customer's screens (migration 0068);
+    // no amount depends on it. Saves on change, like the plan picker.
+    const PROVINCE_CODES = ['BC', 'AB', 'SK', 'MB', 'ON', 'NS', 'NB', 'NL', 'PE', 'YT', 'NT', 'NU'];
+    function provincePicker(o) {
+      const p = (o.province || 'BC').toUpperCase();
+      return `<select class="planpick" data-prov-for="${esc(o.id)}" data-name="${esc(o.name)}"
+                      data-current="${p}" title="Province: names the taxes on their screens (GST/HST, PST/RST)">
+        ${PROVINCE_CODES.map(c => `<option value="${c}"${c === p ? ' selected' : ''}>${c}</option>`).join('')}
+      </select>`;
+    }
+    async function setProvince(sel, orgId, name) {
+      const chosen = sel.value;
+      const before = sel.dataset.current || 'BC';
+      sel.disabled = true;
+      try {
+        const r = await fetch(`/api/admin/organizations/${orgId}/province`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ province: chosen }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { sel.value = before; msg(d.error || 'Could not change the province.', 'bad'); return; }
+        sel.dataset.current = chosen;
+        msg(`${name} is now in ${chosen}.`, 'ok');
+      } catch (_) {
+        sel.value = before;
+        msg('Could not reach the server. Check your connection and try again.', 'bad');
+      } finally {
+        sel.disabled = false;
+      }
+    }
+
     function planPicker(o) {
       const plan = (o.plan || 'essential').toLowerCase();
       const label = o.plan_label || (plan === 'pro' ? 'Pro' : 'Essential');

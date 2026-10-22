@@ -76,7 +76,7 @@ t.check('both statements carry the note', (js.match(/\$\{pnlCarryNote\(cogsData\
 t.section('taxes: PST is a cost, GST/HST is not');
 t.check('PST comes from supplier invoices only, closed and not voided', /SUM\(COALESCE\(tax_pst, 0\)\) AS pst[\s\S]{0,160}status = 'Closed' AND voided_at IS NULL[\s\S]{0,80}COALESCE\(invoice_kind, ''\) != 'expense'/.test(pnl));
 t.check('an expense bill is counted less its GST, never below zero', /SUM\(COALESCE\(total, 0\) - MIN\(MAX\(COALESCE\(tax_gst, 0\), 0\), MAX\(COALESCE\(total, 0\), 0\)\)\) AS amount/.test(pnl));
-t.check('the page adds PST to the running costs once', /const running = supplies \+ fees \+ pst \+ expenseInvTotal/.test(readFileSync(new URL('../public/static/utils.js', import.meta.url), 'utf8')) && (js.match(/costRow\('Provincial sales tax \(PST\)'/g) || []).length === 1);
+t.check('the page adds PST to the running costs once', /const running = supplies \+ fees \+ pst \+ expenseInvTotal/.test(readFileSync(new URL('../public/static/utils.js', import.meta.url), 'utf8')) && (js.match(/costRow\(`Provincial sales tax \(\$\{taxNames\(\)\.provOr\}\)`/g) || []).length === 1);
 // The Home tile's sum is monthProfitSummary() in utils.js since 2026-10-13.
 const homeJs = readFileSync(new URL('../public/static/home.js', import.meta.url), 'utf8');
 const utilsJs = readFileSync(new URL('../public/static/utils.js', import.meta.url), 'utf8');

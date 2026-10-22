@@ -311,6 +311,22 @@ type SessionUser = {
 // so the incoming request still has none). They drifted the first time a column
 // was added — `o.plan` went into currentUser only, so logging in reported every
 // Pro account as Essential — hence one list instead of two copies.
+// Provinces a business can be in (migration 0068). The screens name the taxes
+// from it (taxNames() in public/static/utils.js); the AMOUNTS never depend on it.
+// Quebec is not offered (QST is claimed back but read into tax_pst).
+const PROVINCES = ['BC', 'AB', 'SK', 'MB', 'ON', 'NS', 'NB', 'NL', 'PE', 'YT', 'NT', 'NU']
+
+// The business's province, or 'BC'. Read on its own and fail-soft, NOT in
+// SESSION_USER_COLUMNS, so a database without 0068 can't break sign-in.
+async function orgProvince(db: D1Database, org: string | null): Promise<string> {
+  if (!org) return 'BC'
+  try {
+    const r = await db.prepare('SELECT province FROM organizations WHERE id = ?').bind(org).first<{ province: string | null }>()
+    const p = String(r?.province || '').toUpperCase()
+    return PROVINCES.includes(p) ? p : 'BC'
+  } catch (_) { return 'BC' }
+}
+
 const SESSION_USER_COLUMNS = `
        u.id, u.email, u.role, u.org_id, u.name,
        o.name           AS org_name,
@@ -1715,7 +1731,11 @@ app.get('/api/auth/me', async (c) => {
   const terms_due = await termsDue(c.env.DB, me)
   // Sends the app to /start-trial.html (utils.js), so no page opens without a card.
   const card_needed = await cardNeeded(c.env, me)
-  return c.json({ user: { ...publicUser(me), terms_due, card_needed }, viewing_as })
+  // Which tax names the screens show (GST/HST, PST/RST). The org being viewed,
+  // so an operator viewing as a customer sees that customer's names.
+  const province = await orgProvince(c.env.DB,
+    me.role === 'super_admin' ? (viewing_as?.id ?? null) : me.org_id)
+  return c.json({ user: { ...publicUser(me), terms_due, card_needed, province }, viewing_as })
 })
 
 // ── Super-admin: view a customer's data without their password ──
@@ -2330,8 +2350,15 @@ app.get('/api/admin/organizations', async (c) => {
   // it — the picker needs the entitlement to decide what it may offer.
   // reviewing_now: whether a new upload would go to Processing today — the
   // same function the upload uses, so the admin screen can't disagree with it.
+  // Province (0068) read on its own, so the list still loads without the column.
+  const provinces = new Map<string, string>()
+  try {
+    const pr = await c.env.DB.prepare('SELECT id, province FROM organizations').all<{ id: string; province: string | null }>()
+    for (const r of pr.results ?? []) provinces.set(r.id, String(r.province || 'BC').toUpperCase())
+  } catch (_) { /* before 0068: everyone reads BC */ }
   const rows = (results || []).map((o: any) => ({
-    ...o, plan_label: planLabel(o.plan, o.account_type), reviewing_now: reviewsInvoices(o),
+    ...o, province: provinces.get(o.id) || 'BC',
+    plan_label: planLabel(o.plan, o.account_type), reviewing_now: reviewsInvoices(o),
     // The plan's own limit for THIS account (old accounts keep the old one).
     plan_cap: planInvoiceCap(o),
     // Which plan Paddle is charging for, so the screen can flag an account on
@@ -3136,6 +3163,7 @@ app.post('/api/admin/organizations', async (c) => {
   const inviting = password === ''
   const accountType = String(body.account_type || 'restaurant')
   const askedPlan = String(body.plan || 'essential').toLowerCase()
+  const province = String(body.province || 'BC').trim().toUpperCase()
 
   if (!name) return c.json({ error: 'Restaurant name is required.' }, 400)
   if (!email.includes('@')) return c.json({ error: 'A valid owner email is required.' }, 400)
@@ -3147,6 +3175,9 @@ app.post('/api/admin/organizations', async (c) => {
   }
   if (!['essential', 'pro'].includes(askedPlan)) {
     return c.json({ error: 'Plan must be essential or pro.' }, 400)
+  }
+  if (!PROVINCES.includes(province)) {
+    return c.json({ error: `Province must be one of: ${PROVINCES.join(', ')}.` }, 400)
   }
 
   const clash = await c.env.DB.prepare(`SELECT id FROM users WHERE email = ?`).bind(email).first()
@@ -3203,8 +3234,13 @@ app.post('/api/admin/organizations', async (c) => {
       c.env.DB.prepare(`INSERT INTO categories (name, sort_order, type, org_id) VALUES (?, ?, ?, ?)`)
         .bind(cat.name, i + 1, cat.type, orgId)),
   ])
+  // The province (0068) on its own, after the batch: a database without the
+  // column still creates the account (its screens then read BC).
+  try {
+    await c.env.DB.prepare('UPDATE organizations SET province = ? WHERE id = ?').bind(province, orgId).run()
+  } catch (e) { console.error('province not saved (apply 0068):', e) }
 
-  const organization = { id: orgId, name, account_type: accountType, plan,
+  const organization = { id: orgId, name, account_type: accountType, plan, province,
                          plan_label: planLabel(plan, accountType) }
 
   if (!inviting) return c.json({ ok: true, organization, owner: { id: userId, email } })
@@ -3562,6 +3598,25 @@ async function monthlyInvoiceParses(db: D1Database, orgId: string | null): Promi
   ).bind(orgId, monthStart()).first<{ n: number }>()
   return Number(row?.n) || 0
 }
+
+// ── Change a business's province ─────────────────────────────
+// POST /api/admin/organizations/:id/province   Body: { province: 'ON' }
+// Only the tax NAMES on its screens follow it (taxNames() in utils.js); no
+// amount is recalculated, because none depends on it.
+app.post('/api/admin/organizations/:id/province', async (c) => {
+  if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)
+  const id = c.req.param('id')
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const province = String(body.province || '').trim().toUpperCase()
+  if (!PROVINCES.includes(province)) {
+    return c.json({ error: `Province must be one of: ${PROVINCES.join(', ')}.` }, 400)
+  }
+  const org = await c.env.DB.prepare('SELECT id, name FROM organizations WHERE id = ?')
+    .bind(id).first<{ id: string; name: string }>()
+  if (!org) return c.json({ error: 'Restaurant not found.' }, 404)
+  await c.env.DB.prepare('UPDATE organizations SET province = ? WHERE id = ?').bind(province, id).run()
+  return c.json({ ok: true, organization: { id: org.id, name: org.name }, province })
+})
 
 app.post('/api/admin/organizations/:id/plan', async (c) => {
   if (!await requireSuperAdmin(c)) return c.json({ error: 'Not authorized.' }, 403)

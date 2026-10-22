@@ -478,6 +478,8 @@ async function renderSessionChip() {
   // hoping we won the race — the same mistake that left recipe lists showing $0.
   window.__accountPlan = String(me.plan || '').toLowerCase();
   window.__accountType = String(me.account_type || '').toLowerCase();
+  // Names the taxes on screen (taxNames below); BC until the server says.
+  window.__province = String(me.province || 'BC').toUpperCase();
 
   // Operator-only figures (currently the per-invoice AI parse cost) key off
   // this. Unlike the plan flags above, the safe default while the bootstrap is
@@ -2354,3 +2356,24 @@ function monthProfitSummary(month, d, basisChoice) {
     costs: p.cogsTotal + p.running, profit: p.net,
   };
 }
+
+// ── Tax names by province (migration 0068) ────────────────────
+// The amounts never depend on the province: GST/HST is always claimed back
+// (invoices.tax_gst, never a cost), PST/RST never is (tax_pst, a cost line on
+// the P&L). Only the NAMES change. `prov` is null where there is no provincial
+// sales tax; a screen still shows the line when an invoice carries one anyway
+// (a BC supplier's PST on an Alberta restaurant's bill), named 'PST'.
+const PROVINCE_TAX = {
+  BC: { fed: 'GST', prov: 'PST' }, SK: { fed: 'GST', prov: 'PST' }, MB: { fed: 'GST', prov: 'RST' },
+  AB: { fed: 'GST', prov: null },  YT: { fed: 'GST', prov: null },  NT: { fed: 'GST', prov: null },
+  NU: { fed: 'GST', prov: null },
+  ON: { fed: 'HST', prov: null },  NS: { fed: 'HST', prov: null },  NB: { fed: 'HST', prov: null },
+  NL: { fed: 'HST', prov: null },  PE: { fed: 'HST', prov: null },
+};
+function taxNames(province) {
+  const p = String(province || window.__province || 'BC').toUpperCase();
+  const t = PROVINCE_TAX[p] || PROVINCE_TAX.BC;
+  return { fed: t.fed, prov: t.prov, provOr: t.prov || 'PST' };
+}
+window.taxNames = taxNames;
+

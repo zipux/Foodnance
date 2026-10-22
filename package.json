@@ -48,7 +48,8 @@
     "test:paddle-webhook": "node tests/integration/paddle-webhook.test.mjs",
     "test:card-step": "node tests/integration/billing-card-step.test.mjs",
     "test:fee-template": "node tests/integration/fee-template-per-org.test.mjs",
-    "test:roles": "node tests/integration/team-roles.test.mjs"
+    "test:roles": "node tests/integration/team-roles.test.mjs",
+    "test:province": "node tests/integration/province.test.mjs"
   },
   "dependencies": {
     "hono": "^4.12.7"

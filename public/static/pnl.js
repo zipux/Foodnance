@@ -154,12 +154,15 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('pnlCountPick').addEventListener('change', pnlPickCounts);
   pnlShowDatesBar();
   window.addEventListener('dm:plan-known', pnlShowDatesBar);
+  // The tax names follow the business's province, learnt with the plan.
+  window.addEventListener('dm:plan-known', () => { if (pnlLoaded) render(); });
 
   const start = pnlPresetRange('this-month');
   pnlSetRange(start.from, start.to);   // loads
 });
 
 // ── Load ───────────────────────────────────────────────────────
+let pnlLoaded = false;   // a statement has been drawn, so a repaint is safe
 async function loadPnl() {
   const body = document.getElementById('pnlBody');
   body.innerHTML = `<div style="text-align:center;color:var(--text-muted);padding:2rem 1rem"><i class="fas fa-spinner fa-spin"></i> Loading…</div>`;
@@ -187,6 +190,7 @@ async function loadPnl() {
     // Oldest pay period first — they read as a sequence, not a pile.
     pnlLabor     = (labData.data || [])
       .sort((a, b) => (a.start_date || '') < (b.start_date || '') ? -1 : 1);
+    pnlLoaded = true;
     render();
   } catch (e) {
     body.innerHTML = `<div style="text-align:center;color:#b91c1c;padding:2rem 1rem"><i class="fas fa-exclamation-triangle"></i> Failed to load P&amp;L: ${esc(e.message)}</div>`;
@@ -194,6 +198,13 @@ async function loadPnl() {
 }
 
 // ── Render ─────────────────────────────────────────────────────
+// The taxes sentence under the statement, in the province's own words
+// (taxNames in utils.js): "GST and refundable deposits are left out; PST is
+// counted." in BC, "HST and refundable deposits are left out." in Ontario.
+function pnlTaxNote() {
+  const t = taxNames();
+  return `${t.fed} and refundable deposits are left out${t.prov ? `; ${t.prov} is counted` : ''}.`;
+}
 // ── Waste, and stock missing with no reason ───────────────────
 // Two blocks under the cost lines. They EXPLAIN part of the cost and are never
 // added to it: stock that was lost is already inside true COGS, because the
@@ -729,8 +740,8 @@ function render() {
 
     ${suppliesRow}
     ${fees ? costRow('Delivery &amp; surcharges', 'From invoices', fees) : ''}
-    ${pst ? costRow('Provincial sales tax (PST)', 'From invoices. It is not claimed back, so it is a cost', pst) : ''}
-    ${expenseInv.map(r => costRow(esc(r.category), 'From an uploaded bill, without its GST/HST', parseFloat(r.amount) || 0)).join('')}
+    ${pst ? costRow(`Provincial sales tax (${taxNames().provOr})`, 'From invoices. It is not claimed back, so it is a cost', pst) : ''}
+    ${expenseInv.map(r => costRow(esc(r.category), `From an uploaded bill, without its ${taxNames().fed}`, parseFloat(r.amount) || 0)).join('')}
 
     <div class="pnl-sub" style="margin:.9rem .25rem .1rem;font-weight:600;color:var(--text)">Fixed monthly costs <span style="font-weight:400;color:var(--text-muted)">— every month, unless you say when they start or stop</span></div>
     <div>${fixedRowsHtml || '<div class="pnl-sub" style="padding:.25rem">None set yet — add rent, wages, insurance…</div>'}</div>
@@ -768,8 +779,8 @@ function render() {
     <div class="pnl-note">
       <i class="fas fa-circle-info"></i>
       <span>${useCogs
-        ? `Food &amp; drink costs are your <strong>true cost of goods sold</strong> — purchases adjusted by the change in raw-material stock between your counts. Other running costs are what you paid in ${periodWord}. GST/HST and refundable deposits are left out; PST is counted.`
-        : `Costs are based on what you <strong>purchased</strong> in ${periodWord} (from your invoices), not a stock-take-adjusted cost of goods sold. GST/HST and refundable deposits are left out; PST is counted.`}</span>
+        ? `Food &amp; drink costs are your <strong>true cost of goods sold</strong> — purchases adjusted by the change in raw-material stock between your counts. Other running costs are what you paid in ${periodWord}. ${pnlTaxNote()}`
+        : `Costs are based on what you <strong>purchased</strong> in ${periodWord} (from your invoices), not a stock-take-adjusted cost of goods sold. ${pnlTaxNote()}`}</span>
     </div>
   `;
 }

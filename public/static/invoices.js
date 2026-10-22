@@ -585,6 +585,7 @@ async function openInvDetail(id) {
   // The same GST, shown in the expense-bill box (where the costs section above
   // is hidden) so it can be seen and corrected before it is left out of the P&L.
   { const g = document.getElementById('detailExpenseGst'); if (g) { g.value = taxGst || ''; g.disabled = !isActionRequired; } }
+  applyTaxLabels(taxPst);
   document.getElementById('detailDelivery').value   = delivery  || '';
   document.getElementById('detailDeposit').value    = deposit   || '';
   document.getElementById('detailCredit').value     = credit    || '';
@@ -1574,8 +1575,8 @@ function renderCostSummary({ autoFill = false } = {}) {
   const row = (label, val, cls='') =>
     `<span style="white-space:nowrap">${label}: <strong class="${cls}">$${Math.abs(val).toFixed(2)}</strong></span>`;
   const parts = [`<span style="white-space:nowrap">Items: <strong>$${subtotal.toFixed(2)}</strong></span>`];
-  if (taxPst)   parts.push(row('PST', taxPst));
-  if (taxGst)   parts.push(row('GST/HST', taxGst));
+  if (taxPst)   parts.push(row(taxNames().provOr, taxPst));
+  if (taxGst)   parts.push(row(taxNames().fed, taxGst));
   if (delivery) parts.push(row('Delivery + Fuel Surcharge', delivery));
   if (deposit)  parts.push(row('Deposits', deposit));
   if (credit)   parts.push(`<span style="white-space:nowrap">Credit: <strong style="color:#16a34a">−$${credit.toFixed(2)}</strong></span>`);
@@ -2067,6 +2068,20 @@ function _initInvImgZoom() {
 // applies (find-or-create supplier, find-or-create generic_product,
 // pack_size parsing, cost_per_unit, product mappings, etc.).
 // ══════════════════════════════════════════════════════════════
+// Tax names in this business's province (taxNames in utils.js, migration
+// 0068). A province with no provincial sales tax (Alberta, Ontario, the
+// Atlantic provinces) hides that box, unless this invoice carries one anyway,
+// as when a BC supplier charges PST: an amount is never hidden.
+function applyTaxLabels(pstValue) {
+  const t = taxNames();
+  const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+  set('lblTaxPst', `${t.provOr} ($)`);
+  set('lblTaxGst', `${t.fed} ($)`);
+  set('lblExpenseGst', `${t.fed} on this bill:`);
+  const f = document.getElementById('taxPstField');
+  if (f) f.style.display = (!t.prov && !(Number(pstValue) > 0)) ? 'none' : '';
+}
+
 // Show/hide the goods-only sections (line items, additional costs) when the
 // "expense bill" toggle is flipped, and reveal the expense-category picker.
 function toggleExpenseMode() {
@@ -2093,7 +2108,7 @@ async function confirmExpenseInvoice(id, inv) {
 
   if (!invoiceDate) { showToast('Enter the bill date so it lands in the right month.', 'error'); return; }
   if (total <= 0)   { showToast('Enter the bill total.', 'error'); return; }
-  if (gst < 0 || gst >= total) { showToast('The GST / HST must be less than the bill total.', 'error'); return; }
+  if (gst < 0 || gst >= total) { showToast(`The ${taxNames().fed} must be less than the bill total.`, 'error'); return; }
 
   const btn = document.getElementById('confirmInvSaveBtn');
   btn.disabled = true;
@@ -2111,7 +2126,7 @@ async function confirmExpenseInvoice(id, inv) {
       invoice_kind:     'expense',
       expense_category: category,
     });
-    showToast(`Expense bill saved — ${category} $${(total - gst).toFixed(2)} added to the P&L${gst ? `, without the $${gst.toFixed(2)} GST / HST` : ''}.`, 'success');
+    showToast(`Expense bill saved — ${category} $${(total - gst).toFixed(2)} added to the P&L${gst ? `, without the $${gst.toFixed(2)} ${taxNames().fed}` : ''}.`, 'success');
     _cleanInvImgZoom();
     closeModal('invDetailModal');
     await loadInvoices();

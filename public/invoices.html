@@ -358,7 +358,7 @@
             <span style="font-size:.78rem;color:#92400e">→ counts in the P&amp;L for the invoice date's month</span>
           </div>
           <div id="expenseGstWrap" class="hidden" style="margin-top:.6rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
-            <label for="detailExpenseGst" style="font-size:.82rem;color:#92400e;font-weight:600">GST / HST on this bill:</label>
+            <label for="detailExpenseGst" id="lblExpenseGst" style="font-size:.82rem;color:#92400e;font-weight:600">GST / HST on this bill:</label>
             <input type="number" id="detailExpenseGst" step="0.01" min="0" placeholder="0.00"
                    style="width:110px;padding:.35rem .6rem;border:1px solid var(--border);border-radius:6px;font-size:.85rem;background:#fff" />
             <span style="font-size:.78rem;color:#92400e">→ left out of the P&amp;L, because you claim it back</span>
@@ -404,13 +404,13 @@
             <i class="fas fa-receipt"></i> Additional Costs
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:.6rem .85rem">
-            <div>
-              <label style="font-size:.75rem;color:var(--text-muted);font-weight:600;display:block;margin-bottom:.2rem">Taxes / PST ($)</label>
+            <div id="taxPstField">
+              <label id="lblTaxPst" style="font-size:.75rem;color:var(--text-muted);font-weight:600;display:block;margin-bottom:.2rem">PST ($)</label>
               <input type="number" id="detailTaxPst" step="0.01" min="0" placeholder="0.00"
                 style="width:100%;padding:.35rem .6rem;border:1px solid var(--border);border-radius:6px;font-size:.85rem;background:var(--bg-primary)" />
             </div>
             <div>
-              <label style="font-size:.75rem;color:var(--text-muted);font-weight:600;display:block;margin-bottom:.2rem">Input Tax Credits / GST·HST ($)</label>
+              <label id="lblTaxGst" style="font-size:.75rem;color:var(--text-muted);font-weight:600;display:block;margin-bottom:.2rem">GST ($)</label>
               <input type="number" id="detailTaxGst" step="0.01" min="0" placeholder="0.00"
                 style="width:100%;padding:.35rem .6rem;border:1px solid var(--border);border-radius:6px;font-size:.85rem;background:var(--bg-primary)" />
             </div>
@@ -557,9 +557,9 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="/static/env-banner.js?v=20260807-2"></script>
-  <script src="/static/utils.js?v=20261021-1"></script>
+  <script src="/static/utils.js?v=20261022-1"></script>
   <script src="/static/image-preproc.js?v=20260806-1"></script>
   <script src="/static/inventory.js?v=20261006-2"></script>
-  <script src="/static/invoices.js?v=20261022-2"></script>
+  <script src="/static/invoices.js?v=20261022-3"></script>
 </body>
 </html>
