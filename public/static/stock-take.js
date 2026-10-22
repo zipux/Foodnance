@@ -398,8 +398,9 @@ async function openHistory(id) {
 function closeHistory() {
   stHistoryOpen = null;
   document.getElementById('stHistoryDetail').style.display = 'none';
-  document.getElementById('stStartPanel').style.display = '';
   const asked = new URLSearchParams(location.search).get('history') === '1';
+  // Past Counts on its own (from Inventory) never shows the start panel.
+  document.getElementById('stStartPanel').style.display = asked ? 'none' : '';
   document.querySelector('.st-header-meta').style.visibility = asked ? 'hidden' : '';
   loadHistory(asked);            // a note saved meanwhile shows on its row
 }
@@ -507,11 +508,13 @@ async function beginStockTake() {
 // ?start=1 so that button still goes straight into counting with no extra click.
 async function loadOrStart() {
   // "Past Counts" on the Inventory page. Asked for by name, so it is shown even
-  // while a count is in progress — which the start button below then resumes
-  // (POST /start hands back the open count rather than making a second one).
+  // while a count is in progress, and on its own: the list straight away, no
+  // "Ready to count?" panel above it (the user's request, 2026-10-22). Starting
+  // or resuming a count is Inventory's "Start Stock Take".
   if (new URLSearchParams(location.search).get('history') === '1') {
     document.getElementById('stLoading').style.display = 'none';
-    document.getElementById('stStartPanel').style.display = '';
+    document.getElementById('stStartPanel').style.display = 'none';
+    document.getElementById('stHistoryBack').style.display = 'inline-block';
     document.getElementById('stCancelBtn').style.display = 'none';
     document.querySelector('.st-header-meta').style.visibility = 'hidden';
     await loadHistory(true);

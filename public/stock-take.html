@@ -92,8 +92,10 @@
     </div>
 
     <!-- PAST COUNTS: read only. Listed under the start panel when no count is
-         in progress; one opened count replaces both. -->
+         in progress; one opened count replaces both. Reached from Inventory's
+         "Past Counts" (?history=1) it stands alone: no start panel, its own way back. -->
     <div id="stHistory" class="st-history" style="display:none">
+      <a href="/inventory.html" id="stHistoryBack" class="st-start-back" style="display:none;margin:0 0 .6rem"><i class="fas fa-arrow-left"></i> Back to Inventory</a>
       <h2>Past counts</h2>
       <p class="st-history-sub">Every count you have submitted. They cannot be changed.</p>
       <div id="stHistoryList" class="st-history-scroll"></div>
@@ -170,6 +172,6 @@
 
   <script src="/static/env-banner.js?v=20260807-2"></script>
   <script src="/static/utils.js?v=20261021-1"></script>
-  <script src="/static/stock-take.js?v=20261006-6"></script>
+  <script src="/static/stock-take.js?v=20261022-1"></script>
 </body>
 </html>

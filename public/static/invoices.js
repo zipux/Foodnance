@@ -361,11 +361,15 @@ function renderInvStats() {
   const processing = filteredInvs.filter(i => i.status === 'Processing').length;
   const action     = filteredInvs.filter(i => i.status === 'Action Required').length;
 
+  // Same chips as the Products and Inventory pages (.stat-chip). The two
+  // status chips take a colour only when something is waiting.
+  const muted = 'background:#f1f5f9;color:#64748b';
+  const money = sumTotal.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   document.getElementById('invStats').innerHTML = `
-    <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">Total Invoices</div></div>
-    <div class="stat-card"><div class="stat-value">$${sumTotal.toFixed(2)}</div><div class="stat-label">Total Value</div></div>
-    <div class="stat-card"><div class="stat-value">${processing}</div><div class="stat-label">Processing</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:#b45309">${action}</div><div class="stat-label">Action Required</div></div>
+    <div class="stat-chip"><i class="fas fa-file-invoice"></i> ${total} Invoice${total === 1 ? '' : 's'}</div>
+    <div class="stat-chip"><i class="fas fa-dollar-sign"></i> $${money} Total value</div>
+    <div class="stat-chip" style="${processing ? 'background:#e0f2fe;color:#075985' : muted}"><i class="fas fa-hourglass-half"></i> ${processing} Processing</div>
+    <div class="stat-chip" style="${action ? 'background:#fef3c7;color:#92400e' : muted}"><i class="fas fa-exclamation-circle"></i> ${action} Action required</div>
   `;
 }
 
