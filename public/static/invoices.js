@@ -253,7 +253,7 @@ async function loadInvoices() {
     setInvoices(rows);
   } catch (e) {
     document.getElementById('invBody').innerHTML =
-      `<tr><td colspan="9" class="empty-row"><i class="fas fa-exclamation-triangle"></i> Failed to load invoices.</td></tr>`;
+      `<tr><td colspan="6" class="empty-row"><i class="fas fa-exclamation-triangle"></i> Failed to load invoices.</td></tr>`;
   }
 }
 
@@ -315,7 +315,7 @@ function renderInvoices() {
 
   const tbody = document.getElementById('invBody');
   if (!slice.length) {
-    tbody.innerHTML = `<tr><td colspan="9" class="empty-row"><i class="fas fa-inbox"></i> No invoices found.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="empty-row"><i class="fas fa-inbox"></i> No invoices found.</td></tr>`;
   } else {
     tbody.innerHTML = slice.map(inv => `
       <tr style="cursor:pointer" onclick="openInvDetail('${esc(inv.id)}')">
@@ -325,17 +325,6 @@ function renderInvoices() {
         <td>${fmtDate(inv.invoice_date)}</td>
         <td>${inv.voided_at ? '<span class="status-badge" style="background:#fee2e2;color:#991b1b">Voided</span>' : statusBadge(inv.status)}</td>
         <td style="text-align:right;font-weight:600">${inv.total ? '$' + parseFloat(inv.total).toFixed(2) : '—'}</td>
-        <td>${esc(inv.payment_account || 'A/P')}</td>
-        <td style="text-align:center">
-          ${inv.file_key
-            ? `<span title="${esc(inv.file_name || 'File attached')}" style="color:var(--primary)"><i class="fas fa-paperclip"></i></span>`
-            : `<span style="color:#cbd5e1" title="No file"><i class="fas fa-paperclip"></i></span>`}
-        </td>
-        <td>
-          <button class="btn btn-icon btn-secondary btn-sm" onclick="event.stopPropagation();openInvDetail('${esc(inv.id)}')" title="View / Edit">
-            <i class="fas fa-edit"></i>
-          </button>
-        </td>
       </tr>`).join('');
   }
 
@@ -512,7 +501,6 @@ async function openInvDetail(id) {
   document.getElementById('detailUpload').textContent  = fmtDate(inv.upload_date);
   currentInvTotal = total;
   document.getElementById('detailTotal').textContent   = total ? '$' + total.toFixed(2) : '—';
-  document.getElementById('detailPayment').textContent = inv.payment_account || 'A/P';
 
   // AI parse cost — recorded from the Anthropic API's `usage` field at parse
   // time; invoices parsed before this tracking existed show '—', not '$0.00'.

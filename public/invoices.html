@@ -212,13 +212,10 @@
                 <th style="cursor:pointer" data-sort="invoice_date">Invoice Date <i class="fas fa-sort"></i></th>
                 <th style="cursor:pointer" data-sort="status">Invoice Status <i class="fas fa-sort"></i></th>
                 <th style="cursor:pointer;text-align:right" data-sort="total">Total <i class="fas fa-sort"></i></th>
-                <th>Payment Account</th>
-                <th style="text-align:center" title="File attached"><i class="fas fa-paperclip"></i></th>
-                <th></th>
               </tr>
             </thead>
             <tbody id="invBody">
-              <tr><td colspan="9" class="empty-row"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>
+              <tr><td colspan="6" class="empty-row"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>
             </tbody>
           </table>
         </div>
@@ -315,10 +312,6 @@
             <div class="inv-detail-value" id="detailTotal">—</div>
             <input type="number" id="detailTotalInput" step="0.01" class="hidden"
               style="width:100%;padding:.4rem .55rem;border:1px solid var(--border);border-radius:6px;font-size:.92rem;margin-top:.15rem" />
-          </div>
-          <div>
-            <div class="inv-detail-label">Payment Account</div>
-            <div class="inv-detail-value" id="detailPayment">—</div>
           </div>
           <!-- Operator-only: what Anthropic charged to read this invoice. Hidden
                by default and revealed only for a super-admin (renderInvoiceDetail),
@@ -567,6 +560,6 @@
   <script src="/static/utils.js?v=20261021-1"></script>
   <script src="/static/image-preproc.js?v=20260806-1"></script>
   <script src="/static/inventory.js?v=20261006-2"></script>
-  <script src="/static/invoices.js?v=20261013-2"></script>
+  <script src="/static/invoices.js?v=20261022-1"></script>
 </body>
 </html>

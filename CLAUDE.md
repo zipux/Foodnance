@@ -361,7 +361,10 @@ can't be deleted (void it); `voided_at`/`void_reason` are stripped, so only
 nothing ever advanced; production had none). This is the foundation for the planned
 operator-check **Processing** state: the server can now decide a new invoice's status
 and refuse the customer moving it. Tests that need a Closed invoice must create it and
-then PATCH it to Closed, like Confirm & Save. **Apply `0059` before deploying.**
+then PATCH it to Closed, like Confirm & Save. **Goods or expense bill is fixed once Closed**
+(2026-10-22): `invoice_kind` and `expense_category` can't change on a Closed invoice (409; same value
+resent is fine) — a Closed goods invoice's lines stay in food cost, so flipping it to expense would
+count the money twice. The fix for a wrong one is Void and re-upload. **Apply `0059` before deploying.**
 `npm run test:invoice-status` (needs the sandbox).
 
 ### Operator check — the "Processing" status (added 2026-10-03, migration `0060`)

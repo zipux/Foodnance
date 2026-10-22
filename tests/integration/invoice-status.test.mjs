@@ -8,6 +8,7 @@
 //   · a Closed invoice can't be reopened or deleted (void it instead)
 //   · voided_at / void_reason can't be written by PATCH — void/restore routes only
 //   · Save Changes on a posted invoice (no status sent, or the same one) still works
+//   · goods vs expense bill (and the expense category) is fixed once Closed
 //   · /api/ensure-invoice makes a 'Manual Entry' record (was 'In Processing')
 //   · all of it scoped to the caller's own organization
 import { execFileSync } from 'node:child_process';
@@ -82,6 +83,23 @@ t.check('Save Changes on a Closed invoice (no status) works', edit.status === 20
   && sql(`SELECT notes FROM invoices WHERE id = '${c1.data.id}'`)[0].notes === 'edited');
 const same = await call('PATCH', `/api/tables/invoices/${c1.data.id}`, { status: 'Closed', notes: 'again' }, A.j);
 t.check('sending the status it already has is fine (older cached pages)', same.status === 200);
+
+t.section('goods or expense bill');
+const kindOf = (id) => sql(`SELECT invoice_kind, expense_category FROM invoices WHERE id = '${id}'`)[0];
+const toExpense = await call('PATCH', `/api/tables/invoices/${c1.data.id}`, { invoice_kind: 'expense', expense_category: 'Utilities' }, A.j);
+t.check('a Closed goods invoice cannot become an expense bill', toExpense.status === 409 && kindOf(c1.data.id).invoice_kind !== 'expense');
+const sameKind = await call('PATCH', `/api/tables/invoices/${c1.data.id}`, { invoice_kind: 'goods', notes: 'kind resent' }, A.j);
+t.check('...resending goods is fine', sameKind.status === 200);
+const e1 = await call('POST', '/api/tables/invoices', { vendor: 'Hydro', invoice_number: `E1-${STAMP}` }, A.j);
+const approveExp = await call('PATCH', `/api/tables/invoices/${e1.data.id}`,
+  { status: 'Closed', parsed_data: '', total: 120, invoice_kind: 'expense', expense_category: 'Utilities' }, A.j);
+t.check('approving a draft as an expense bill works', approveExp.status === 200 && kindOf(e1.data.id).invoice_kind === 'expense');
+const backToGoods = await call('PATCH', `/api/tables/invoices/${e1.data.id}`, { invoice_kind: 'goods' }, A.j);
+t.check('a Closed expense bill cannot become goods', backToGoods.status === 409 && kindOf(e1.data.id).invoice_kind === 'expense');
+const otherCat = await call('PATCH', `/api/tables/invoices/${e1.data.id}`, { expense_category: 'Rent' }, A.j);
+t.check('...nor move to another expense category', otherCat.status === 409 && kindOf(e1.data.id).expense_category === 'Utilities');
+const sameCat = await call('PATCH', `/api/tables/invoices/${e1.data.id}`, { invoice_kind: 'expense', expense_category: 'Utilities', notes: 'ok' }, A.j);
+t.check('...resending the same kind and category is fine', sameCat.status === 200);
 
 t.section('voiding');
 const fakeVoid = await call('PATCH', `/api/tables/invoices/${c1.data.id}`, { voided_at: '2026-01-01', void_reason: 'x' }, A.j);

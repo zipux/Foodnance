@@ -4128,8 +4128,10 @@ async function guardInvoiceWrite(
     body!.status = await newInvoiceStatus(c.env.DB, orgOf(c))
     return null
   }
-  const row = await c.env.DB.prepare('SELECT status, voided_at FROM invoices WHERE id = ? AND org_id IS ?')
-    .bind(id, orgOf(c)).first() as { status: string | null; voided_at: string | null } | null
+  const row = await c.env.DB.prepare('SELECT status, voided_at, invoice_kind, expense_category FROM invoices WHERE id = ? AND org_id IS ?')
+    .bind(id, orgOf(c)).first() as {
+      status: string | null; voided_at: string | null; invoice_kind: string | null; expense_category: string | null
+    } | null
   if (!row) return c.json({ error: 'Invoice not found.' }, 404)
   // Team roles (0067). The middleware let in anyone with an invoice switch;
   // here is which one this write needs.
@@ -4157,6 +4159,19 @@ async function guardInvoiceWrite(
     const keys = Object.keys(body).filter(k => k !== 'page_rotations')
     if (keys.length) {
       return c.json({ error: "Our team is still checking this invoice. You'll be able to review and approve it once it's ready." }, 409)
+    }
+  }
+  // Goods or expense bill is decided at approval, never after (2026-10-22). A
+  // Closed goods invoice keeps its lines in food cost, so turning it into an
+  // expense afterwards would count the same money twice in the P&L. The screen
+  // greys the box out; this is the guarantee. Resending the same value is fine.
+  if (body && row.status === 'Closed') {
+    const kindOf = (v: unknown) => (v === 'expense' ? 'expense' : 'goods')
+    const changesKind = 'invoice_kind' in body && kindOf(body.invoice_kind) !== kindOf(row.invoice_kind)
+    const changesCategory = 'expense_category' in body && kindOf(row.invoice_kind) === 'expense'
+      && String(body.expense_category ?? '').trim() !== String(row.expense_category ?? '').trim()
+    if (changesKind || changesCategory) {
+      return c.json({ error: "A saved invoice can't be switched between goods and expense bill, or moved to another expense category. Void it and upload it again." }, 409)
     }
   }
   if (body && 'status' in body && body.status !== row.status) {
